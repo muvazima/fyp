@@ -1,0 +1,512 @@
+@&#MAIN-TITLE@&#Application of smoothed particle hydrodynamics to modeling mechanisms of biological tissue
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We present a novel software package designed for the simulation of biological matter
+
+
+                        
+                        
+                           
+                           The first open source implementation of the PCISPH incompressible fluid dynamics algorithm
+
+
+                        
+                        
+                           
+                           Support for impermeable membranes, elastic matter and contractile matter
+
+
+                        
+                        
+                           
+                           Built on top of OpenCL for high performance and efficient multi-core CPU/GPU usage
+
+
+                        
+                        
+                           
+                           Cross platform support for Linux, Windows and Mac.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Computational fluid dynamics
+
+PCISPH
+
+Biomechanics
+
+Elastic matter
+
+Liquid impermeable elastic membranes
+
+Contractile matter
+
+High-performance parallel computing
+
+Open science
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  A prerequisite for simulating the biophysics of complex biological tissues and whole organisms are computational descriptions of biological matter that are flexible and can interface with materials of different viscosities, such as liquid. The landscape of software that is easily available to do such work is limited and lacks essential features necessary for combining elastic matter with simulations of liquids. Here we present an open source software package called Sibernetic, designed for the physical simulation of biomechanical matter (membranes, elastic matter, contractile matter) and environments (liquids, solids and elastic matter with variable physical properties). At its core, Sibernetic is built as an extension to Predictive–Corrective Incompressible Smoothed Particle Hydrodynamics (PCISPH). Sibernetic is built on top of OpenCL, making it possible to run simulations on CPUs or GPUs, and has 3D visualization support built on top of OpenGL. Several test examples of the software running and reproducing physical experiments, as well as performance benchmarks, are presented and future directions are discussed.
+               
+            
+
+@&#INTRODUCTION@&#
+
+In recent years, investigations of the physical simulation of tissues and whole organisms has increased in interest. Tissues that have been simulated include cardiac muscle [7,18], brain tissue [10], and liver tissue [9]. Methods have been developed for virtual surgery [8,25], including blood flow through deformable tissues [23,24] (Appendix B) and some platforms have been created in the service of simulating artificial embodied autonomous agents, such as AnimatLab [5]. While these efforts have produced important results and publicly available computer code that is available online, there are still significant gaps in the landscape of software implementations of biological tissue simulators that inhibit further research in this space. This is often because the mechanical physics of biological entities is different from the mechanical physics of engineered devices that are built from conventional solid materials, and simulation engines have more often handled the latter case than the former.
+
+Biological entities often have physical features that are not found in standard mechanical devices such as elastic matter for an outer shell (skin or cell membranes) and internal reservoirs of liquids or gels (blood, brain fluid, cytoplasm). Parts responsible for active movement (such as muscles) also require elastic matter that can contract on demand, which we call contractile matter. Biological entities often interact with liquids or gels that are incompressible in an external environment as well, which means that the surfaces of the elastic matter interact with the surfaces of the liquids.
+
+At their core, physical simulations must decompose the mechanical physics of their object of interest into components and implement algorithms that are capable of reproducing them. Because we are interested in simulating the physical dynamics of complex biological tissues, we sought an algorithmic modeling approach that would enable arbitrarily complex tissues to be digitally reproduced as simply as possible. During our investigation for such an approach, we came across smoothed-particle hydrodynamics (SPH).
+
+Initially developed for astrophysical modeling and simulation, smoothed-particle hydrodynamics is a computational method for simulating fluids [19]. It represents fluids as a system of interacting elements (referred to as particles) rather than as meshes. The movement of particles is based on the efficient calculation of the forces and pressures each particle experiences every time step. Each particle has an associated spatial distance h (the smoothing distance) over which the forces that act upon it are estimated by a smoothing kernel function.
+
+Predictive–corrective incompressible SPH (PCISPH) is a recently-developed modification to SPH that enforces incompressibility of particles, keeping volumes of liquid constant despite the movement of their constituent particles, using a prediction correction scheme [22]. This method improves over other leading SPH algorithms such as weakly compressible SPH (WCSPH) [13] and incompressible SPH (ISPH) [21] by providing a balance between computational cost and quality of the solution (See Appendix A for more complete introduction). Work by Fedkiw and colleagues [12,20] used an approach that had equivalent accuracy and speed by coupling a particle level set method with SPH. However, instead of coupling multiple algorithms, PCISPH can be applied as a single, unified algorithm to simulate flexible, deformable and static rigid objects interacting with liquid flows [3] (Appendix B). This unified approach simplifies the computational method.
+
+Wishing to utilize the SPH algorithm, we surveyed the landscape of available SPH implementations. However, we could not find any existing open source software to implement the PCISPH algorithm. Consequently, we created a software implementation of PCISPH and extended it with several enhancements that reproduce key features of biological tissue. We have named this collection of algorithms and computational methods ‘Sibernetic’.
+
+Before implementing Sibernetic, we first turned to other software systems that appeared to do what we needed and evaluated them. Table 1
+                         contains the set of evaluated software with our criteria, including being open source, enabling parallel computation, using a particle based method, implementing incompressibility, implementing membranes, having contractile matter and usability. In this case, by usability, we mean a qualitative assessment of the ease of use of the open source library, where high means it was very easy and well maintained and documented, medium means it was somewhat maintained and partially documented, and low means it was not maintained and not well documented.
+
+We did not find any software that met all criteria we needed. As such, we have implemented Sibernetic in order to provide the set of functionality we needed for biological modeling. In the rest of this manuscript, we describe Sibernetic and present extensions to the PCISPH algorithm.
+
+@&#METHODS@&#
+
+Sibernetic enables the digital reconstruction and simulation of different forms of tissue from lattices of basic particles. In this section, we describe how we implemented different types of simulated matter as well as the software construction of the Sibernetic system.
+
+Four principle types of matter are simulated in the Sibernetic system (Fig. 1
+                        ). This includes liquids with variable viscosity, elastic matter, contractile matter, and liquid-impermeable membranes. Matter is represented as individual particles, or lattices composed of particles, whose edges can either be rigid or flexible. These types of matter can be connected together into larger wholes such as simulated muscle tissue. Multiple kinds of tissue can be constructed from different lattice configurations. An additional configurable property is the handling of static boundaries at the limits of the simulated environment.
+
+All of these types of matter rely on the tracking of the x, y, and z positions of particles, as well as the constraints between them.
+
+Boundary handling methods are implemented according to the approach of [14], which combines the idea of direct-forcing with a frozen-particles method. Thus, instead of implicit repulsing planes, boundaries are explicitly represented by non-moving particles provided with normal vectors, which enables the construction of complex spatial 3D configurations. This has the advantage, as stated by [14] that: “by incorporating density estimates at the boundary into the pressure force, unnatural accelerations resulting from high pressure ratios are avoided”.
+
+Sibernetic’s implementation of liquid matter is its most fundamental material type and it is based on the PCISPH algorithm described by Solenthaler [2]. As stated in that reference, ”incompressibility is enforced by using a prediction–correction scheme to determine the particle pressures. For this, the information about density fluctuations is actively propagated through the fluid and pressure values are updated until the targeted density is satisfied” (See Appendix A, Appendix B for a more detailed introduction to PCISPH).
+
+Some key values for quantities in Sibernetic are configurable. For demonstration purposes, our implementation defines a single class of identical particles with a mass of 3.25
+                           
+                              ·
+                              
+                                 10
+                                 
+                                    −
+                                    14
+                                 
+                              
+                           
+                        
+                        
+                           kg
+                         and a particle radius of 3.38
+                           
+                              ·
+                              
+                                 10
+                                 
+                                    −
+                                    6
+                                 
+                              
+                           
+                        
+                        
+                           
+                              m
+                              ,
+                           
+                         which were each chosen empirically. These values correspond to a resting density of 1000 
+                           
+                              
+                                 kg/m
+                                 3
+                              
+                              ,
+                           
+                         which was chosen because it is the density of water. Liquid viscosity by default is equal to 
+                           
+                              5.0
+                              ·
+                              
+                                 10
+                                 
+                                    −
+                                    5
+                                 
+                              
+                           
+                         
+                        Pa · s and was also chosen empirically. The acceleration of gravity was set to 
+                           −
+                        9.8 
+                           
+                              kg
+                              /
+                              (
+                              m
+                              ·
+                              
+                                 s
+                                 2
+                              
+                           
+                        ).
+
+Elastic matter was implemented as an extension to the PCISPH algorithm using the the “mass-spring method” [6]. Particles were augmented to take into account additional spring tension forces described by Hooke’s law. Any two particles i and j can be specified to be connected by a spring with a given spring stiffness coefficient, k, and a resting distance 
+                           
+                              r
+                              
+                                 i
+                                 j
+                              
+                              0
+                           
+                        . To accomplish this computationally, each particle of elastic matter is allocated a block of memory in a special array called elasticConnectionsData, which stores a list of indices of the other elastic matter particles connected with a spring. When forces like gravity, viscosity, or surface tension are applied to each particle at each time step, the elastic matter particle is also affected by elastic forces from those particles connected by springs to it, as defined by Hooke’s law
+                           1
+                        
+                        
+                           1
+                           We don’t consider Poisson’s ratio (which refers to the effect of having a material compressed in one direction and expanding in the other two directions perpendicular to the direction of compression) in calculations because the existing incompressibility rule already produces the desired expansion of matter into two dimensions other than the direction of compression (Pascal’s law).
+                        .
+
+Since SPH requires a fast and efficient neighbor search algorithm, particles need to be hashed and sorted at every time step. This enables fast access to the particles within a particles neighborhood and a number of adjacent cells. As an extension to PCISPH, we implemented a nearest neighbor search algorithm to retrieve the list of neighbor particles for each particle within a sphere around the particle defined by a smoothing radius, h.
+
+Sorting particles at every time step means there is no tracking of the indices of the particles of the system, making it difficult to refer to specific particles to add additional information to them. In order to keep track of which pairs of particles have elastic connections with each other, two arrays were introduced, particleIndex and particleIndexBack, with lengths equal to the total number of particles. Particles in the particleIndex array are unambiguously related to those in particleIndexBack, which enables the use of each particle’s indices at different stages of the algorithm.
+
+Because the particles that make up liquid matter and those that make up elastic matter are defined in the same manner, no additional extensions of the system were necessary to create an interface between these two material types. This is true of all matter types and therefore enables the entire physical simulation to be run via a single flexible method independent of what type of physical material is being simulated. For more on the subject of interactions between liquid and deformable solid matter simulations, see [16].
+
+Contractile matter was implemented by adding the ability to connect particles together with a special kind of connection we refer to as a “contractile fiber”. A contractile fiber connects two particles and can exert an equal and opposite force on them. A contractile fiber is a special type of elastic interaction, and therefore has a spring stiffness co-efficient associated with it. A regular elastic connection can only contract in response to forces placed on the particles, while a contractile fiber can contract in response to an incoming signal outside of the physics of the system. Therefore the force applied by the contractile fiber, in addition to having a spring component, has a second component that is driven by a time-varying parameter that can be modulated as an input to the simulation. As this parameter changes, a force proportional to its value is applied to the pair. This force acts in the direction of the midpoint of the straight line connecting the ith and jth particles.
+
+With the ability to chain particles together in this manner, we are able to organize contractile fibers into larger lattices of contractile matter. Lattices can also include elastic matter relationships, enabling the construction of simple muscle-like tissue (Fig. 1). Supplemental Video 1 shows the dynamics of the system composed of five independently activated compartments of contractile matter, and is available online
+                           2
+                        
+                        
+                           2
+                           
+                              http://www.youtube.com/watch?v=MFLbAcEq-vw.
+                        .
+
+Above, we introduced the idea of boundary handling as an important method for defining the surfaces that contain all the particles within a simulation. These boundaries are fixed in space for all time. However, in order to define the interfaces between biological entities, we needed to extend the methods for handling boundaries to apply to movable surfaces. In order to create moving boundaries that repel moving particles, an approach similar to that used by [14] was applied. We call these moving boundaries “membranes”.
+
+As shown in Fig. 2
+                        , a membrane is defined by a surface of particles (green) that may be assembled from elastic or contractile connections. Particles that are part of liquid matter (blue) may come into proximity with the surface. In order to correctly repel liquid particles from the surface, we compute additional forces on the liquid particles based on the positions of the particles composing the membrane surface and the distances between them. This provides repulsion not only from the corners where the surface particles are located but from the entire surface of each elementary membranes triangular face.
+                           3
+                        
+                        
+                           3
+                           For now, the opposite effect of the force of liquid particles impacting the particles composing the membrane surface has been left out under the assumption that such forces are small enough to be negligible.
+                         The additional forces are computed first by calculating and storing neighboring particle indices, second by calculating normal vectors of membrane surface triangular faces, and third by using those normals to calculate the aggregate normal vector of the nearby interacting particle.
+
+We first need to know the indices of all particles that neighbor a particle and that belong to a membrane. To enable this, a particleMembranesList was introduced to store a mapping of particles to the indices of a particle’s neighbors that belong to membranes. In Fig. 2, right three green membrane particles are on the list of the i-th liquid particle’s nearest neighbors. This mapping is recalculated at every step of the algorithm.
+
+After having a way to access the indices of neighbor particles belonging to membranes, the next step to calculate the interactions of particles with membranes is to calculate normal vectors. We can calculate the normal vector for each particle that composes a surface composed of membranes by first calculating normal vectors for all triangular faces (Fig 2; small black arrows) that include the current particle as one of their corners (6 triangular faces). The resulting normal vector (Fig 2; violet arrow) is calculated as the average over all adjacent triangular membranes (Fig. 2; over 6 membranes).
+
+Once the normal vectors are calculated for all particles belonging to a membrane inside the i-th particle’s smoothing radius, r, we construct the ith particle’s aggregate normal vector (Fig 2; black arrow amongst red, cyan, and green arrows). To do this we use the method of [14] page 4, formula (9–11), using particles belonging to a membrane in place of boundary particles. Furthermore, we calculate the displacement of the i-th particle as a result of the collision using the same formula ([14], page 4, formula 11) with no changes. The formula takes the impact of each j-th membrane particle’s normal vector with some weight depending on the 
+                           
+                              i
+                              −
+                              j
+                           
+                         distance.
+
+As a result of these calculations, we can apply the appropriate force on the nearby particle to repel it from the surface of the membrane.
+
+All the algorithms and computations described in this manuscript are implemented in the Sibernetic engine, which is a high-performance, open source, cross-platform simulator capable of running standard PCISPH simulations as well as our additional enhancements. The main loop and visualization component of Sibernetic are written in the C++ programming language using OpenGL. The computationally-intensive parts are written in the OpenCL language which allows for parallelization on multi-core central processing units (CPUs) and graphics processing units (GPUs) using the same source code.
+
+Sibernetic’s architecture is divided into three functional modules that interact with each other (Fig. 3
+                        ): OpenCL, fluid dynamics algorithms, and OpenGL rendering. Each block contains logical sub-blocks that describe some part of an algorithm or set of physical methods grouped by their function. The OpenCL module is designed to work with OpenCL entities and contains the definitions of the main data structures and the implementations of the calculation kernels, which are the computational units of OpenCL that provide parallelization. This abstraction allows code associated with parallel computing to be kept separate from the main physical algorithms of simulation. The fluid dynamics algorithms module contains the definition for all physical algorithms. This module defines the program’s main loop function that in turn defines an order of execution of algorithms. The visualization is rendered via code defined in the OpenGL rendering module. This architecture allows for a loose coupling of the code modules, a best practice in software engineering.
+
+The simulation starts with the initialization of an OpenCL context and the main program objects and data structures followed by the copying of initial configuration data (initial positions and velocities) to the calculation device’s memory. Then the simulation calculates the neighbors, the forces
+                           4
+                        
+                        
+                           4
+                           Force calculation is done via a modified Hockney method, considering only 8 cubes instead of 27 by distinguishing the position of an i-th particle between 8 sub-cubes.
+                        , and finally the new velocity and new positions for each particle on every step. All of these actions are run in parallel for all particles. Following the calculations of new position data from the device, the host program receives the positions and the scene is redrawn.
+
+There are two groups of arrays for particles’ velocities, positions etc: current and next. During each time step, arrays corresponding to i-th step in the current array group are kept constant and arrays for the next, (i+1)-th step group are filled with new calculated values. As a result, calculation over voxels can be performed independently. This enables the voxels to be calculated in a time step to be divided among an arbitrary number of available processors (cores) in the system until calculations over all voxels are done.
+
+Simulations that are based on particle systems are suitable for parallelization because on each time step all forces and new particle positions are calculated independently. OpenCL was chosen as the software library for work with parallel calculations as it was designed for development of applications working on heterogeneous computational systems. Because of open standards and support from vendors of hardware and software, code written on OpenCL could be run on different devices (CPU, GPU, FPGA) from different vendors with minimal changes, which is preferable to other libraries such as CUDA, which only run on NVidia GPUs. Sibernetic was tested using both CPUs (Intel Core i7-2700K, AMD Opteron Processor 6272) and GPUs (Tesla C1060, Radeon R290X) processing configurations. Performance results from different devices are found in Appendix C.
+
+Data is transferred between the host program and the calculation device by directly copying data from device memory to the host program's memory. Usually it takes less than ∼1% of all time for one step of the simulation. Out of the multiple data buffers that exist, only those data buffers that are necessary for rendering, such as the position buffer, are copied out.
+
+In Sibernetic, we have employed a domain decomposition strategy as follows. The box containing the simulation is divided into voxels of size 2 · h (cubes). For each particle interaction, a limited number of the nearest particles are considered and computed. A spatial index from voxels to particles and back (2 arrays) is computed at each step of the algorithm. With 2 · h side voxels, each particle in its particular voxel can only interact with 8 neighbour voxels (instead of a full set of 27 adjacent neighbour voxels), which significantly improves the algorithm’s performance.
+
+The choice of an appropriate numerical integration method is a key factor for any simulation. After investigating multiple integration methods, including explicit Euler, implicit Euler, improved Euler, velocity Verlet, 2-nd order Runge–Kutta (not shown) and two symplectic methods (1-st order semi-implicit Euler and 2-nd order LeapFrog), 2-nd order LeapFrog turned out to be the optimal variant (Fig. 4
+                        ). The solution is very close to the analytical one at integration time step Δt, near values of ∼
+                           
+                              1
+                              ·
+                              
+                                 10
+                                 
+                                    −
+                                    5
+                                 
+                              
+                           
+                         
+                        s using parameters: 
+                           
+                              
+                                 r
+                                 0
+                              
+                              =
+                              h
+                              /
+                              2
+                              =
+                              3.38
+                              ·
+                              
+                                 10
+                                 
+                                    −
+                                    6
+                                 
+                              
+                           
+                         
+                        m, particle mass = 
+                           
+                              3.25
+                              ·
+                              
+                                 10
+                                 
+                                    −
+                                    14
+                                 
+                              
+                           
+                        
+                        
+                           
+                              kg
+                              ,
+                           
+                         spring stiffness 
+                           
+                              =
+                              1.0
+                              ·
+                              
+                                 10
+                                 
+                                    −
+                                    7
+                                 
+                              
+                           
+                        
+                        
+                           
+                              kg
+                              ·
+                              
+                                 s
+                                 
+                                    −
+                                    2
+                                 
+                              
+                           
+                        ). In addition, the use of different integrators in some tests (e.g. Fig. 6
+                        ) showed that LeapFrog produced results comparable to other integration methods.
+
+The choice of single (float) or double precision of the floating point data type used to store positions, velocities and other attributes also influences the accuracy of the integration method. In order to choose between these two options, we conducted a spring energy test (See 4.1.2) and determined empirically that it works best with single precision floating point arithmetic. Usage of double-precision requires twice the memory and slows down data processing operations. Fig. 4 shows the dependence of the integration error on integration time step for 1-st order semi-implicit Euler and 2-nd order LeapFrog methods. According to this there is no noticeable difference between the integration error from the use of floats vs. doubles, while computational performance for the case of floats is about two times better than for doubles. An additional argument for our usage of floats is that they are supported on every type of OpenCL compatible GPU.
+
+Visualization is implemented using OpenGL without using any platform dependent libraries. This enables Sibernetic to run on Linux, Windows and Mac platforms.
+
+Every object is visualized within the 3D scene, represented by a set of particles. Particles of different types may be displayed as points with different colors, depending on the configuration of the scene. For example, liquid particles may be displayed as blue points while elastic particles may be displayed as yellow. Elastic particles are connected by elastic and contractile connections, which are displayed as lines that join connected particles. The 3D scene can be rotated and scaled. Additional information can be displayed on the screen as numerical text values about the configuration and state of different internal variables.
+
+We use a simple representation of particles as points rather than spheres, due to the time needed to render scenes with a lot of particles. We have also enabled a mode to run the simulation without the OpenGL rendering to write out the states of all particles over time. This allows a user to run the simulation like a movie without the calculation step.
+
+@&#RESULTS@&#
+
+Sibernetic provides a number of additional enhancements that are not commonly found in existing PCISPH implementations. In order to demonstrate that these new features are capable of producing scientifically meaningful results, below we describe several tests of example simulated physical systems that use the codebase and validate that the physics are accurate.
+
+To verify compliance of the code base with basic physical laws, several tests have been implemented. Here we show results of these tests, including conservation of energy, an oscillating mass on a spring and membrane impermeability. We then report on the performance characteristics of the software. In Figs. 5
+                        , 6, 7
+                         and 8
+                        , we show results from these tests matching well with expected behavior.
+
+A special test was developed to check the accuracy of conservation of energy in Sibernetic (Figs. 5, 6). The test is initialized with a cube of liquid hovering inside a box of boundary particles. At time zero, the particles are allowed to move under the force of gravity and fill the space of the rectangular solid.
+
+During the simulation, the values of kinetic and potential energy for each particle are stored. The value of the total energy takes the form:
+
+                              
+                                 
+                                    
+                                       E
+                                       =
+                                       
+                                          ∑
+                                          
+                                             i
+                                             =
+                                             1
+                                          
+                                          N
+                                       
+                                       
+                                          m
+                                          i
+                                       
+                                       g
+                                       
+                                          h
+                                          i
+                                       
+                                       +
+                                       
+                                          ∑
+                                          
+                                             i
+                                             =
+                                             1
+                                          
+                                          N
+                                       
+                                       
+                                          
+                                             
+                                                m
+                                                i
+                                             
+                                             
+                                                v
+                                                
+                                                   i
+                                                
+                                                2
+                                             
+                                          
+                                          2
+                                       
+                                       ,
+                                    
+                                 
+                              
+                           
+                        
+
+where N is the total number of liquid particles, mi
+                            is the mass of a particle, vi
+                            is the velocity of a particle, hi
+                            is the distance between a particle and the floor boundary of the simulation. The evolution of the total, kinetic, and potential energy is shown in Fig. 6.
+
+Prior to colliding with the floor (Fig. 6; orange dashed vertical line), the total energy stays constant, while potential energy is being exchanged for kinetic energy. At the point of collision, a damped fluctuation appears showing a brief increase in the kinetic energy of the particles, consistent with the influence of the force of the boundary particles. Potential energy is also briefly bumped upwards after t = 0.005 as some particles regain potential energy consistent with regaining height by bouncing back up following their collisions. Once the liquid comes to a steady state when all kinetic energy has left the system, the total energy becomes constant again. The remaining potential energy in the system is consistent with many particles having a resting position above the bottom-most surface as they are stacked on top of each other. Throughout the test, the total energy is either constant or decreasing, consistent with conservation of energy principle.
+
+In order to test Sibernetic in scenarios involving elastic matter, a simple scene was created with a single particle connected via a single elastic connection to a boundary particle above it. The simulation is initialized with a distance of rij
+                            between the two particles. Initially the particle falls until the force of gravity is opposed by an elastic Hookean force consistent with the expansion of the spring. Following this, sinusoidal oscillation occurs. Because there is no friction in the system, the oscillation never slows down or stops, consistent with the principle of inertia.
+
+This scene also tests the precision of the numerical integration of our algorithm. If the integration method were not good enough, we would observe deviations such as a growth or reduction of the amplitude of the oscillation. The dependence of the integration error on spring stiffness, k, for the case of the LeapFrog integrator is shown in Fig. 7.
+
+As a demonstration of the interaction between liquid and elastic matter (Section 2.5), and in order to ensure that particles are not able to leak through the membranes, we created a scene where a droplet of liquid is initialized at a height of ~30 μm. Underneath the liquid droplet is a membrane that it falls towards. Using the visualization system (Section 3.6), we inspect the underside of the membrane to ensure that no liquid particles are able to leak through. When membranes are enabled, liquid particles are prevented from passing through, while when they are disabled they pass through freely (Fig. 8). Additional videos illustrating membranes with
+                              5
+                           
+                           
+                              5
+                              
+                                 http://www.youtube.com/watch?v=xWOPCOxHG70.
+                            and without
+                              6
+                           
+                           
+                              6
+                              
+                                 http://www.youtube.com/watch?v=4NLYur80rtU.
+                            impermeability are available online.
+
+The average amount of time per one simulation step for each module of those shown in Fig. 3 is as follows. The OpenCL and Fluid dynamics Algorithm blocks take about 65–85% of the time, the OpenGL renderer module takes  15–35% of the time.
+
+In our simulations using the engine, we have found that our algorithm is CPU-bound rather than memory bound, as the memory consumption is linearly dependent on the sum of the number of particles and the voxels in 3D space. Doubling the processing speed makes the algorithm run twice as fast.
+
+We have defined a benchmark performance test and compared its performance under different CPU and GPU scenarios. Our benchmark is the conservation of energy test described in 4.1.1, where a cube is initialized with an arbitrary number of liquid particles we want to test within a larger rectangular solid. Each performance scenario was run for a few hundred steps and the average FPS was estimated. The number of milliseconds to calculate sort time, neighbor search, physics calculations and graphics rendering were independently measured. The results, found in Appendix C, demonstrate good performance for the Sibernetic engine.
+
+@&#DISCUSSION@&#
+
+We have described the Sibernetic engine where, on top of implementing PCISPH, we have added enhancements that enables the modeling of basic biological tissue properties (Section 2.1). Liquid matter, deformable solids composed of elastic matter, and their interactions can be implemented without the need to define boundary conditions (Sections 2.3, 2.4, 2.5). Elastic connections can be used to create contractile matter that can act in a muscle-like manner (Section 2.6). This system of elastic matter defined by springs between particles enables the generation of a sophisticated tissue model and avoids complex calculations that are specific to more accurate mathematical models of deformable matter [11]
+                     
+                        7
+                     
+                     
+                        7
+                        Other models calculate elastic forces through the change of the strain energy density, e.g. [15].
+                     . In addition, we have implemented non-stationary three-dimensional boundaries we call membranes that keep liquid outside arbitrarily complex boundaries of elastic matter, adding functionality not present in other comparable packages such as AnimatLab, OpenTissue, or Bullet-FLUID (Section 2.7). We have demonstrated our approach through a liquid drop test that effectively keeps liquid on one side of a membrane while still allowing the membrane itself to move and deform (Section 4.1.3). Lastly, we have demonstrated that the numerical accuracy of Sibernetic in a spring test scenario is quite high (Section 4.1.2).
+
+Smoothed-particle hydrodynamics (SPH) has been applied to several domains of scientific modeling, including some examples of modeling biological tissues (Appendix A, B). However, few open source implementations include the prediction–correction incompressible (PCI) extension [22], and fewer still have a strategy for implementing elastic/contractile constraints, or boundaries in three-dimensions (Table 1). The PCISPH algorithm is challenging to implement from scratch (the initial author did not release any open source code), and good open-source implementations are valuable both as foundations for other research and as a reference implementation. All of our code is hosted on a public GitHub repository
+                        8
+                     
+                     
+                        8
+                        
+                           https://github.com/openworm/sibernetic.
+                     . It is available online with installation instructions for all major operating systems
+                        9
+                     
+                     
+                        9
+                        
+                           http://openworm.github.io/sibernetic.
+                     . The code is part of a larger project known as OpenWorm (http://www.openworm.org) [4], which has led to many contributions and bug fixes by different individuals (See Acknowledgements).
+
+Being built on PCISPH, Sibernetic has a lot of advantages over regular SPH in that it has improved performance, correctness and stability. Moreover, by adding the ability to enforce incompressibility and thereby create more practical solid matter [22], the particle-based PCISPH method becomes as powerful in its ability to model deformable solids as mesh-based methods. This is important for Sibernetic because it enables a unified representation of deformable solids and liquids in the same environments that further simplifies the work to create complex physical simulations.
+
+Our approach is also distinct from others used in virtual surgery simulations. There are two general types of simulations for surgery and biomedicine. The first are surgery simulations [8,25] that use various approaches to elastic matter simulation including some very sophisticated methods to achieve higher realism. The main focus of these methods is on highly realistic biophysics and visualization of cutting various tissues. A major difference between this approach and Sibernetic is that liquid is not simulated. The second type of simulation include blood flow through blood vessels [24], which incorporate elastic matter, fluid dynamics and the interactions between them. Many of these simulations rely on the so-called Womersley solution [23], which is useful to calculate flows of liquid through straight circular cylinders, but are not suitable for general simulations of interactions between elastic and liquid matter.
+
+The SPH Level Set methods are of particular interest in comparison to Sibernetic. As shown in [20], dynamic surfaces between liquid and deformable surfaces can be implemented using this technique. However, this requires merging two different algorithms together in the same 3D space, which increases code complexity and is less flexible for the construction of arbitrarily complex elastic/contractile systems (Appendix B).
+
+PhysBAM, the open source software that implements SPH Level Set methods, initially seemed suitable for our purposes as it fits almost all of our requirements (Table 1). However, its approach to parallelization via MPI and threads means that its target system must be a distributed system, such as a cluster. In contrast, Sibernetic is targeted to run on a desktop PC with a modern GPU (like Radeon R290X or Tesla K20), or at least a single multi-core CPU via OpenCL. Currently PhysBAM works only on Linux systems, while our implementation is built on the foundation of OpenCL, allowing Sibernetic to run on Windows and MacOS as well. Additional performance comparisons between PhysBAM and Sibernetic can be found in Appendix C.
+
+Sibernetic is the result of our best efforts to build a simulation engine for modeling biological tissues that maintained a focus on simplicity, efficiency and computational performance, which are very important for serious problems like whole organism complex tissue simulation.
+
+The advantage of enabling multiple types of particle interactions within the same engine is the ability to create multi-material simulations that combine physical properties together in complex geometries. The foundation that we have created in the Sibernetic engine is well suited to enable us to go beyond simple contractile matter and to begin to model more complex tissue. This will enable us to incorporate muscle-like actuators within a membrane-based skin surface that can “swim” within a liquid-based environment. We will also able to fill the insides of the skin with a liquid that provides hydrostatic pressure outwards.
+
+A real biological muscle length-tension curve [1] can be potentially reproduced in Sibernetic by defining a correspondence table containing length and tension values, which may vary depending on the type of the simulated muscle tissue and on the organism of interest.
+
+A system can then be engineered to record the forces acting on the surface of the body, which can in turn be used as a signal to simulated mechanosensory cells to provide input to a virtual nervous system. Temperature could also be added for each particle, which could further be used for providing input for thermosensors for models of living organisms.
+
+In summary, with Sibernetic, we have the elements necessary for creating a sophisticated physical simulation of a basic whole invertebrate with a relatively simple body plan such as is found in organisms like C. elegans.
+
+@&#ACKNOWLEDGMENTS@&#
+
+B. Solenthaler kindly agreed to answer a number of questions on the details of the PCISPH algorithm. The work of A. Palyanov and S. Khayrulin was supported by Russian Federation President grant MK-5714.2015.9 and Russian Foundation for Basic Research grant 14-07-31039. The authors are grateful to M. Vella for technical assistance with the Sibernetic code base and manuscript. We also thank J. Hokanson, G. Idili and C. Lee for comments and improvements to the manuscript. In addition to the main authorship of Sibernetic by AP and SK, the Sibernetic code base is the product of an open science community of volunteers, including members of the OpenWorm project for comment, and specifically C. Jensen, C. Cooper, N. Daly, C. Perez, J. Holt, and M. Sasinski for code contributions.
+
+Supplementary material associated with this article can be found, in the online version, at 10.1016/j.advengsoft.2016.03.002
+                  
+
+
+                     
+                        
+                           Supplementary Data S1
+                           
+                              Supplementary Raw Research Data. This is open data under the CC BY license http://creativecommons.org/licenses/by/4.0/
+                              
+                           
+                           
+                        
+                     
+                  
+
+@&#REFERENCES@&#
+

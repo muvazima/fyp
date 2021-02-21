@@ -1,0 +1,426 @@
+@&#MAIN-TITLE@&#A distributed-memory parallel technique for two-dimensional mesh generation for arbitrary domains
+
+@&#HIGHLIGHTS@&#
+
+
+               
+                  
+                     
+                        
+                           
+                           We present a parallel technique for generating two-dimensional triangular meshes.
+
+
+                        
+                        
+                           
+                           Generated meshes show the same quality as those generated with serial approaches.
+
+
+                        
+                        
+                           
+                           Our parallel technique presents a fairly good speed-up.
+
+
+                        
+                        
+                           
+                           Our load estimation is very effective and can be used for efficient load balancing.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Parallel mesh generation
+
+Advancing front technique
+
+Parallelism
+
+Triangulation
+
+Recursive decomposition
+
+Quadtree
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  This work describes a technique for generating two-dimensional triangular meshes using distributed memory parallel computers, based on a master/slaves model. This technique uses a coarse quadtree to decompose the domain and a serial advancing front technique to generate the mesh in each subdomain concurrently. In order to advance the front to a neighboring subdomain, each subdomain suffers a shift to a Cartesian direction, and the same advancing front approach is performed on the shifted subdomain. This shift-and-remesh procedure is repeatedly applied until no more mesh can be generated, shifting the subdomains to different directions each turn. A finer quadtree is also employed in this work to help estimate the processing load associated with each subdomain. This load estimation technique produces results that accurately represent the number of elements to be generated in each subdomain, leading to proper runtime prediction and to a well-balanced algorithm. The meshes generated with the parallel technique have the same quality as those generated serially, within acceptable limits. Although the presented approach is two-dimensional, the idea can be easily extended to three dimensions.
+               
+            
+
+@&#INTRODUCTION@&#
+
+This work presents a parallel technique for generating two-dimensional triangular meshes by the advancing front method. The technique was designed to meet four requirements: to respect the input front, discretized in segments, i.e., no boundary refinement can be employed; to produce well-shaped elements, avoiding elements with poor aspect ratios; to provide good transitions among refined and coarse regions of the mesh; and to generate meshes efficiently in terms of time. The algorithm is based on a serial 2D and 3D advancing front strategy developed by the authors [3,9,10].
+
+The first requirement is very important in many problems, such as those encountered in simulations in which the domain contains regions with different materials and/or holes. In these problems, it is often desirable that the mesh conform to an existing boundary discretization of those regions. This requirement can be also very important in problems where remeshing can be used, such as in crack growth simulations, since it allows remeshing to occur locally in a region near the crack tip. Our parallel approach can also be extended to crack growth problems.
+
+Regarding the second requirement, although the proposed technique does not guarantee bounds on element aspect ratios, care is taken at each step to generate elements with the best possible shapes. In Section 4, it is shown that the technique is successful in meeting this requirement.
+
+Concerning the third requirement, in many applications, the size difference between elements in a refined region and those in a coarse region is larger than two orders of magnitude. Thus, to provide good transition capabilities is an important requirement in practical problems.
+
+To achieve the fourth requirement, the proposed technique uses a distributed-memory computer architecture with a very high load-balancing capability. This kind of architecture has been widely available nowadays with the cheapening of cluster computers. The parallel technique presented in this work uses the master/slave parallelism paradigm and is easily expandable to three dimensions.
+
+The remainder of this work is divided into four sections. The following section describes the related work. Section 3 describes the parallel technique developed, where a hypothetical two-dimensional model (a disk) is used to illustrate the process. Some examples are shown in Section 4, where the important measures of load estimation, speed-up and mesh quality are assessed. Finally, some conclusions are drawn in Section 5.
+
+@&#RELATED WORK@&#
+
+Parallel mesh generation techniques can be classified according to their domain decomposition approach. Chrisochoides [6] for instance, classifies them in discrete domain decomposition (DDD) and in continuous domain decomposition (CDD). The techniques in the first approach start by serially generating a coarse mesh for an input boundary. Then, that coarse mesh is partitioned using a mesh or graph partitioning technique [14,15,27]. The external boundary and the internal interfaces are refined, and each partition can be meshed independently from the others. Some works of the literature are based on a DDD approach [7,11,12,16,20,24,26,28,30]. Although some of these works are in three dimensions, they are mentioned here because the same ideas can be employed in two-dimensional techniques.
+
+In the CDD approach, except for partitioning a coarse mesh, any method can be used to decompose the domain. Thus, methods such as quadtree/octree [4,8,21], axis/planes [13,18,19,31], blocks [5,22,29], spatial sorting [1] or data structures partitioning [17] are among the possible choices.
+
+The algorithm described in this work uses the CDD approach and generates interface meshes between subdomains in an a posteriori fashion, for the following reasons. First, it is not desirable to create a coarser mesh as a compulsory preceding step to a finer mesh generation, since a boundary refinement is not allowed due to the first requirement presented in Section 1; second, it is desirable to partition the geometry present in the input, and a graph or mesh partitioning technique is not usually designed for this kind of task; third, as observed in Ref. [6], an a priori generation of interface mesh between two subdomains could lead to artifacts, such as poorly-shaped elements or rough transitions between regions with small elements and regions with large elements, invalidating the second and third requirements.
+
+In Refs. [1,5,4,17,22], a 2D Delaunay mesh is generated at the outset, or it is given as input, and refined in parallel. The refinement is performed by parallel insertion of new points in different locations of the mesh, ensuring that they do not conflict, i.e., the elements refined by the insertion of a new point will not be affected by the simultaneous insertion of other points. To ensure this, Chernikov and Chrisochoides [5] partition the given mesh using equally sized boxes and, in Ref. [4], the same authors propose a partition by quadtree. Okusanya and Peraire [22] also employ block partitioning, but use inter-processes communication to avoid invalid parallel insertions. Kohout et al. [17] use data-structures partitioning and Batista et al. [1] use a spatial sorting algorithm to distribute insertion points among concurrently working threads. Both works employ shared-memory mechanisms to avoid invalid concurrent generation of new triangles. Wu et al. [29] perform a parallelization of a divide-and-conquer 2D Delaunay triangulation to account for huge data sets.
+
+Lämmer and Burghardt [18] split the domain, given as a 2D boundary description, with a line drawn along the region’s principal axis (maximum moment of inertia). This procedure is repeated recursively until the number of subdomains equals the number of processors. Then, boundary curves and interior lines are refined in segments for meshing purposes. Finally, subdomain triangular Delaunay or quadrangular meshes are generated in parallel. In Refs. [13,19,31], a plane that splits the input 3D boundary is defined. Larwood et al. [19] and Ivanov et al. [13] split the domain with an inner surface mesh on that plane. Zagaris et al. [31], however, instead of generating faces on the plane, apply an advancing front technique (AFT) only to the boundary faces that are intersected by the plane, generating a layer of tetrahedral elements that decouples the domain. In the three works, the same procedure is performed recursively, generating disconnected fronts, which are advanced in parallel in different processors.
+
+In Refs. [8] and [21], the input domain is decomposed by an octree, and an advancing front technique is used in the subdomains. De Cougny and Shephard [8] generate the inner mesh through template meshing in a fine octree. An AFT creates the elements connecting the input boundary and the template-generated mesh, as long as they do not intercept the planes defined by the octree cells. These two tetrahedral meshing steps are performed in parallel. A three-pass inter-process communication step is used to construct a mesh connecting the generated meshes: first, between two adjacent cells (separated by a plane); then, among the cells sharing the same edge (defined by two intersecting planes), and finally, among the cells sharing the same vertex (defined by more than two intersecting planes).
+
+In Ref. [21], an AFT is the only technique used to mesh the entire domain. After building a coarse octree, the cells on the input boundary are meshed concurrently, as long as the tetrahedra do not cross the cell. The cells suffer an empirically defined diagonal shift to reduce the front size, eliminating almost all the faces between two adjacent cells. Then, an even coarser octree is generated, and the same procedure is performed, until no more mesh can be generated.
+
+Although there are some similarities, the work of Löhner [21] and the present work are different in several aspects. First, every subdomain in his work suffers the same fixed diagonal shift while, in the present work, a Cartesian shift is applied and varies according to the size of the subdomain. Second, the shift proposed in Löhner’s work has the purpose of diminishing the number of faces in the front, and the factor that enables AFT to continue is the creation of a coarser octree. In the present work, the subdomain shift has a greater importance in the AFT procedure, since it is responsible for advancing the front to a neighboring subdomain. Third, after performing the shifts, the work of Löhner builds a new coarser octree to decompose the current domain, while the present work uses only one such tree throughout the procedure.
+
+The main difference between both works lies in the load estimation technique. In Löhner’s work, the load is estimated by a regular partitioning of a subdomain. Since this load estimation represents a uniform mesh, the accuracy is not guaranteed because it does not account for non-uniformity of the generated mesh and, therefore, could lead to imbalances. The present work solves this problem using a fine quadtree for load estimation, because it can represent regions with coarse and fine mesh adequately. Furthermore, in the present work, load estimation guides the generation of the subdomains, instead of estimating the load after the subdomain generation.
+
+The present technique receives as input a list of segments defining the boundary (which is the initial advancing front) of one or more objects, which may have holes. This boundary defines a domain that is decomposed by a quadtree, which is built taking into account the amount of work necessary for generating a mesh in the leaf-cells. The subdomains corresponding to the leaves of the quadtree are distributed among the slave processors, which are responsible for generating subdomain meshes.
+
+After generating meshes in the initial subdomains, the front is updated and the decomposition quadtree cells are shifted to a Cartesian direction. The shifted subdomains are again distributed among the slave processors, which continue the meshing process, updating the front. This procedure is repeated, shifting the decomposition quadtree cells to other directions, until it is no longer possible to advance the front. The idea of shifting was used before in Ref. [21], but it is used differently here, as pointed out previously.
+
+After the distributed mesh generation is performed by the slave processors, the master processor finalizes the mesh, generating a mesh in the remaining unmeshed regions and improving the quality of the mesh in regions between subdomains. Fig. 1
+                      shows an overview of the parallel technique.
+
+In high performance computing (HPC), load is a measure of the amount of work to be performed by a processor or by a group of processors. In mesh generation problems, the load is related to the number of elements that will be generated in each subdomain. Therefore, in the present work, the following issues should be taken into account in load estimation (Figs. 2 and 3
+                        
+                        ):
+                           
+                              •
+                              Load estimation depends on the discretization level of the mesh, which is usually specified by the user or by another software, through input parameters. Load is greater in subdomains with higher discretization levels (Fig. 2).
+
+In regions with the same discretization level, load estimation depends on the subdomain size. Load is greater in larger subdomains (Fig. 3, left).
+
+In subdomains of equal sizes with varying discretization levels (element size transition), load estimation depends on the number of generated elements in each subdomain (Fig. 3, right).
+
+The mesh on the right of Fig. 2 implies a greater load than the mesh on the left of the same figure. The same discretization of the boundary was used in both cases. In Fig. 3, the load associated with the regions surrounded by solid lines is greater than the load associated with the regions surrounded by dashed lines.
+
+In this work, in order to obtain good load estimation, an auxiliary quadtree is carefully constructed in such a way that it reflects the element size distribution within the object’s domain. This implies that an overall idea about the element size distribution of the desired mesh has to be known at the outset. Fortunately, this information can be inferred from two important characteristics of the present meshing algorithm in relation to the element size distribution [3,9,10].
+
+The first characteristic is that the largest elements in the interior and on the boundary of the mesh should have the same order of magnitude. This means that the maximum size for mesh elements is given using an interpolation of the boundary mesh size, which possibly is not the preferred case in some applications, but is not uncommon in practical problems, such as the ones studied by the authors. The second characteristic is that the meshing algorithm enforces good transitions between coarse and refined regions of the mesh.
+
+Since these characteristics are related to the element sizes, they must be represented in the load-estimation quadtree. After the initial load-estimation quadtree is built, it undergoes two refinements: the first one to prevent an internal cell from being larger than the largest boundary cell, and the second one to enforce a maximum tree level difference of one between adjacent cells (this is known in the literature as 2:1 refinement). More details on how this quadtree is built can be found in Ref. [9] (the building of its 3D counterpart, an octree, can be found in Refs. [3,10]). After a load-estimation quadtree is built for the model, the total load is computed as the number of leaf-cells that are inside or on the boundary of the model domain.
+
+A simplification of the load-estimation quadtree may be adopted: although the characteristic of having maximum cell size for an internal cell is necessary, the number of leaf-cells of a completely internal cell C can be computed without having to refine the quadtree. This number is calculated as 4
+                           d−d(C), where d is the desired depth of the tree and d(C) is the depth of C. This simplification can save significant runtime and memory, especially when the problem involves the generation of very large meshes. The 2:1 refinement has to be fully applied, since it can change the number of leaf-cells of C.
+
+In Fig. 4
+                        , a load-estimation quadtree with 2:1 refinement is illustrated. The cells considered for load estimation are the ones inside the domain (darker cells) and the ones on the boundary (filled cells). A load-estimation quadtree is constructed at the beginning of the meshing procedure, and only the associated load estimation has to be performed after every shift of the decomposition quadtree (see Section 3.5).
+
+The domain decomposition for distribution of the mesh generation work among the processes also uses a quadtree data structure, which is guided by the load-estimation quadtree described in Section 3.1. This data structure is referred to in this work as the decomposition quadtree and is built in such a way that the load associated with each of its leaves is smaller than a predefined maximum load. This load threshold is a function of the total load and the number of available slave processes.
+
+To determine this function, the worst case from the point of view of the load-estimation quadtree is considered. This case is the one that leads to the heaviest possible load-estimation quadtree and, thus, observes the following issues:
+                           
+                              •
+                              All its leaf-cells are classified as either inside or on the boundary of the domain, because leaf-cells outside the domain are not counted to estimate the load.
+
+The quadtree is full, because a quadtree with leaf-cells of different depths has fewer leaf-cells than a quadtree leveled by its largest depth.
+
+This load-estimation quadtree is the one that represents a square-shaped domain, upon which a uniform mesh would be generated.
+
+If L represents the total load, ideally N subdomains would have a load L/N each. This would lead to a regular subdivision of the decomposition quadtree into a 
+                           
+                              
+                                 
+                                    N
+                                 
+                              
+                              ×
+                              
+                                 
+                                    N
+                                 
+                              
+                           
+                         grid. It is desirable that the number of subdomains covering the input boundary be, at least, equal to the number of slave processes P. This number of subdomains is, in the square-shaped case, 
+                           
+                              4
+                              
+                                 
+                                    
+                                       
+                                          
+                                             N
+                                          
+                                       
+                                       -
+                                       1
+                                    
+                                 
+                              
+                           
+                        , calculated as the number of subdomains per side (4 sides) and removing the subdomains counted twice (4 corners). Setting 
+                           
+                              P
+                              =
+                              4
+                              
+                                 
+                                    
+                                       
+                                          
+                                             N
+                                          
+                                       
+                                       -
+                                       1
+                                    
+                                 
+                              
+                           
+                         leads to a load per subdomain of, at most, L/(P/4+1)2.
+
+The decomposition quadtree starts by setting its root to the bounding square of the domain, and by setting its load to the total estimated load. If this cell’s load is greater than the load threshold, the cell is subdivided into four equal-sized cells. The procedure is repeated recursively for the cell’s children until the load of a cell does not exceed the established load threshold (Fig. 5
+                        ). Each leaf of the decomposition quadtree that intersects the model’s boundary or that is inside the model is considered a subdomain.
+
+The load associated with a given cell of the decomposition quadtree is estimated as the number of leaf-cells of the load-estimation quadtree, which are not outside the domain and are inside that cell of the decomposition quadtree.
+
+The segments of the input front are distributed among the existing subdomains. Thus, if the two vertices of a segment are inside a subdomain, the segment is said to belong exclusively to that subdomain. However, if the segment crosses two or more subdomains, or touches the boundaries of some subdomains, that segment is said to belong to all of the crossed and touched subdomains.
+
+The use of a quadtree for domain decomposition and of a different quadtree for load estimation is important for the following reasons. First, these quadtrees are completely independent, i.e., it is possible to use any load-estimation method together with a domain decomposition quadtree, or to use a load-estimation quadtree in combination with any domain decomposition technique. In spite of this independence, in Section 4, it is shown that using both quadtrees together leads to a domain decomposition in which the loads for meshing the subdomains are well estimated. Second, since the load-estimation quadtree is usually very refined, it would not be a good decomposition quadtree. If it were used to decompose the domain, the load associated with each subdomain would be too low, and very small speed-up would be observed, if any. Third, in the shifting procedure (Section 3.5), the load in each subdomain must be re-estimated and, therefore, the load- estimation quadtree must be modified; however, this modification does not make sense in the context of domain decomposition. Thus, the decomposition quadtree is kept topologically the same throughout the present work.
+
+In this work, the subdomains are sent to the slave processes on demand. Initially the master process retains all subdomains. A slave process requests a subdomain from the master process, and, as soon as its request is granted, the slave process starts its mesh generation work, while the master process awaits another request. When a slave process finishes working on a subdomain, it sends the master another request. Once all the subdomains are sent to the slave processes, the master awaits the results.
+
+It is important to mention that only subdomains that have front segments are sent to slave processes. Remaining subdomains are kept in the master process, to avoid unnecessary communication, and will be considered when the front reaches them during the shifting procedure (Section 3.5).
+
+Each slave process is responsible for mesh generation in a subdomain, which is defined by a part of the advancing front and by a bounding box. The local meshes (submeshes) in these subdomains can be generated independently from one another, using, in each process, the serial AFT developed in Refs. [3,9,10] by some of the coauthors of this work. Geometric tree data structures are used to speed up the search of candidate vertices for generating a new triangle and the search of possible intercepting edges, ensuring a fast execution of the mesh generation procedure.
+
+In order to ensure that no triangle is generated outside the limits of a subdomain, the following conditions were added to the serial AFT:
+                           
+                              1.
+                              A segment crossing the bounding box of the subdomain is not used to advance the front (Fig. 6
+                                 , left).
+
+A segment that is strictly inside the bounding box of the subdomain is not used to advance the front if any valid well-shaped triangle formed with it crosses the bounding box. In other words, consider the search region for the placement of a new vertex that together with the given segment forms a valid triangle. If that search region, a circle in the present work, crosses the bounding box, then the segment is not used to advance the front (Fig. 6, right).
+
+Each slave process tries to advance the front as much as possible. For example, Fig. 7
+                         shows the received front (left) of a slave processor and the updated front (right). In this process, a submesh is generated (Fig. 8
+                        , left), upon which a mesh improvement is applied (Fig. 8, right). This improvement is a combination of a Laplacian smoothing and a backtracking mesh optimization procedure, and more details can be found in Refs. [2,3,9,10]. Notice that the updated front cannot change when smoothing or any other optimization technique is performed, because there is not enough adjacency information for its segments or vertices. Only the internal vertices of the submesh can be optimized.
+
+The received front, except for the segments that did not advance, together with the updated front form one or several polygons (Fig. 7, right). These polygons are used by the slave process in order to reclassify the cells of the load-estimation quadtree according to the updated domain, which is the region still not meshed. Thus, the cells that are strictly inside the polygons are considered to be outside the updated domain; and the cells that cross the received front are also considered to be outside the updated domain. The cells crossing the updated front are determined, and the remaining cells retain their classification. In Fig. 9
+                        , the darker cells are the ones inside the updated domain, the filled cells lie on the updated front, and the lighter cells lie outside the updated domain.
+
+This classification will be used by the master process in the next step of the proposed distributed meshing algorithm, along with the updated front. The master process stores the updated front information and manages the overall classification of cells of the load-estimation quadtree. However, the mesh generated by each slave process is maintained in its own memory.
+
+Once the master process receives the reclassification of the load-estimation quadtree and the updated front for all subdomains, it updates the overall front information, inserting newly appearing segments and removing the segments that were advanced. In addition, the load-estimation quadtree is refined to conform to the updated front. The part of the quadtree representing the region strictly outside the updated front may be pruned (Fig. 10
+                        ).
+
+After that, every leaf-cell of the decomposition quadtree is shifted by half its size to a Cartesian direction, for example, the positive X direction (+X).
+
+This shifting procedure makes it possible to advance the front and to generate mesh in regions that were not possible considering the non-shifted decomposition quadtree. The shift of a subdomain is performed in such a way that its new location is not too distant from its original position, and yet it will significantly advance the front and generate mesh in unmeshed regions.
+
+Notice that two shifted decomposition cells must not overlap, otherwise intercepting elements would be generated in different subdomains. Therefore, if a cell has two or more neighboring cells in a shifting direction, this cell is distorted to a rectangular shape so that this non-overlapping restriction is satisfied (dark-filled cells in Fig. 11
+                        ). The edge of the subdomain shared by these neighboring cells suffers the same shift as the smallest neighboring cell, i.e., the one with greatest depth in the decomposition quadtree structure.
+
+As can be seen in Fig. 11, there may be gaps between subdomains, due to the cell shift, that do not interfere with the execution of the procedure. There would be a small gain if some subdomains adjacent to a gap were also largely distorted to fill it, and this procedure can be expensive in some situations. Moreover, the primary intention of the present work is to avoid changes in the shape of the decomposition quadtree cells as much as possible. Therefore, the distortion is applied only to avoid overlapping of subdomains.
+
+After shifting the decomposition quadtree cells, the master process divides the front segments among them, recalculates their load based on the updated load-estimation quadtree, and sends this information to the slave processes in order to advance the front and generate additional mesh (Sections 3.2, 3.3 and 3.4).
+
+The shifting is performed sequentially in the following Cartesian directions: to the right (+X), upwards (+Y), to the left (−X), and downwards (−Y). After that, the decomposition quadtree returns to its original position, and the cycle is restarted if there is at least one cell still unmeshed. Therefore, when every cell has been meshed in every possible direction, the shifting procedure is finished.
+
+Notice that, if a decomposition cell is shifted to a direction where it has no neighboring cell, it will not generate any mesh. Moreover, if a decomposition cell shifted to a direction (+Y, for example) generates mesh, its neighboring cells in that direction do not need to shift to the opposite direction in the future (−Y, for example), because the regions between these cells have already been meshed. This is not always true, since, when a small cell is shifted towards a larger cell, the shift of the larger cell in the reverse direction may still generate mesh. These basic checks can save computation as well as communication time.
+
+After some shifting cycles, as the front advances towards the interior of the domain, the number of subdomains might get smaller than the number of slave processes. However, if the decomposition quadtree were modified to keep up with the number of slave processes, at some point, the subdomains would be too small, so that the overhead for the inter-process communication would be too much for too little work performed by the slave processes. From this moment on, the use of parallel processing would not be beneficial. Thus, at this point, the modified decomposition quadtree would need to have fewer subdomains than the number of processes, which is equivalent to not modifying the decomposition quadtree, as pointed out in Section 3.2. This might leave some regions not meshed, which are treated in the mesh finalizing phase.
+
+After the shifting cycle, the parallel part of the mesh generation finishes. However, cavities without mesh may still exist in the interior of the domain (Fig. 12
+                        , left). When that is the case, the master process finalizes the mesh generation procedure, applying a standard AFT in order to fill the cavities with triangles.
+
+Next, the master process improves the parts of the mesh that were not improved by the slave processes, using the same smoothing/backtracking optimization procedures. Those parts consist of front segments passed by the master process along with certain layers of elements adjacent to these segments.
+
+Layer 0 consists of the front segments themselves, and layer N comprises the elements present in layer N
+                        −1 plus their adjacent elements. These layers are stored in the memory of the slave processes, and should be gathered by the master process. It was verified [12] that two layers of elements are enough for a good mesh. After this step, the mesh is completely generated (Fig. 12, right), distributed in slave and master memories. Thus, if one wishes, the master process can join the mesh pieces properly.
+
+The technique described in this work was implemented in C++, using MPI for interprocess communication. The computer used to run the tests was a cluster computer where 10 nodes were available for use by the authors. Each node had two six-core Intel® Xeon™ processors (2.66GHz) and 24GB RAM. To avoid memory contention, only one process per node was used in the test runs.
+
+
+                        Fig. 13
+                         shows the input boundaries used for the parallel mesh generation procedure. Each segment of the boundaries was refined to make necessary the use of high performance computing. Mesh generation subdomains used with 8 processes are shown in Fig. 14
+                        . Each color indicates a different process, and the black color is reserved for the master process (see Fig. 16 for a highlight of a region of the mesh generated by the master process).
+
+Skinny colored regions located between two subdomains, as seen in Fig. 14, are due to the shifting procedure. After two neighboring subdomains are processed in the slave processes, a narrow unmeshed region lies between them. Mesh in that region is generated during the shifting cycle. If the task of generating mesh for the shifted domain is assigned to one of the processes that generated mesh in the neighboring subdomains, the colors of the newly generated elements are the same as those of the subdomain meshed by the assigned process. Otherwise, the elements receive a different color.
+
+
+                        Figs. 15 and 16
+                        
+                         highlight some interesting areas of the Key model, in order to show how the meshes generated in parallel fit together neatly. Fig. 15 highlights a region between two subdomains. As can be seen, the shape and size functions in generated triangles were respected, even if they were generated by different processes in different subdomains. Fig. 16 shows the same features in a region generated by the master process, in the finalizing step. The sizes of the generated meshes were approximately 390, 320 and 490 thousands of elements, respectively.
+
+In order to show that the load estimation described in Section 3.1 is accurate, the runtime taken to generate mesh in each subdomain was evaluated and compared to the estimated load for that subdomain. Fig. 17
+                         compares the runtime of each step in the mesh generation procedure and the estimated runtime for some subdomains. Representing all subdomains would not fit the chart and it is not necessary for this comparison. A subdomain may appear repeated, but, each time, it corresponds to a different shifted position.
+
+In Fig. 17, the steps search tree building, advancing front procedure and mesh improvement belong to the employed serial mesh generation procedure [3,9,10], and the tree classification step was described in Section 3.4. The overhead accounts for the extra time wasted doing unproductive work.
+
+The polylines in Fig. 17 represent the estimated runtime, which was calculated as the load scaled down by the factor 
+                           
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    ¯
+                                 
+                              
+                              /
+                              
+                                 
+                                    l
+                                 
+                                 
+                                    ¯
+                                 
+                              
+                           
+                        , where 
+                           
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    ¯
+                                 
+                              
+                           
+                         is the average runtime, and 
+                           
+                              
+                                 
+                                    l
+                                 
+                                 
+                                    ¯
+                                 
+                              
+                           
+                         is the average load estimated for the subdomains. Since only the proportion among the loads is necessary for load balancing, this fixed scaling factor can be applied for evaluation purposes. Fig. 18
+                         shows the same comparisons, but considering the number of elements and the number of vertices instead of runtime. As can be seen, the estimation is accurate.
+
+
+                        Fig. 19
+                         shows the error between the estimated runtime and the actual runtime for each subdomain, in percentage. A positive error means that the actual runtime was less than the estimated runtime. A negative error means that the actual runtime was greater than the estimated runtime. An absolute error, therefore, means how different the estimated runtime is from the actual runtime. The maximum absolute error shows the worst runtime estimation. The figure also shows the average and the standard deviation for the absolute error.
+
+
+                        Table 1
+                         shows the average and standard deviation values for the difference between actual and estimated runtime (
+                           
+                              
+                                 
+                                    R
+                                 
+                                 
+                                    ¯
+                                 
+                              
+                           
+                         and σ(R)). This same analysis was performed for the number of vertices (
+                           
+                              
+                                 
+                                    V
+                                 
+                                 
+                                    ¯
+                                 
+                              
+                           
+                         and σ(V)) and the number of elements (
+                           
+                              
+                                 
+                                    R
+                                 
+                                 
+                                    ¯
+                                 
+                              
+                           
+                         and σ(E)) generated in a subdomain. These values show that the runtime error is usually around 10.0%. For number of vertices the error is usually less than 6.0% and, for elements, the error is less than 5.5%. All these data show that the employed method, based on a quadtree, is a good prediction for the load of a subdomain.
+
+The charts in Fig. 20
+                         show the runtime along with the speed-up reached by the implementation of the proposed technique. The speed-up is a metric that tells how a parallel implementation is faster than its serial counterpart, and it is calculated as T
+                        
+                           s
+                        /T
+                        
+                           n
+                        , where T
+                        
+                           s
+                         is the time taken for the serial implementation to finish and T
+                        
+                           n
+                         is the time taken for the parallel implementation running with n processors to finish. Ideally, a parallel implementation would have a linear speed-up, meaning that n processors make it n times faster. In practice, this is difficult to achieve, due to inevitable serial portions present in a parallel algorithm.
+
+As seen in Fig. 20, the implementation presented a reasonably good speed-up. Figs. 21 and 22
+                        
+                         depict the absolute and relative runtime of each phase described in Section 3. During the mesh generation by slave processes phase, the master process remains idle, awaiting for requests or results from the slave processes. All the other phases happen serially in the master process.
+
+In Fig. 21, note that the runtime for the load-estimation quadtree phase remains constant regardless of the number of slave processes. However, the runtimes of the synchronization phases (domain decomposition, load balancing and shifting procedure) as well as the runtime of the mesh finalizing phase grow with the number of subdomains, which increases with the number of processes. Thus, those phases may have relatively long runtimes (Fig. 22) for a larger number of processes.
+
+If one considers only the runtime for the meshing related phases (mesh generation by slave processes and mesh finalizing), without taking into account the synchronization phases, the slave processes, as expected, are the ones that perform most of the job. That can be observed in the plots of absolute and percentage runtimes, for the meshing phases only, shown in Figs. 23 and 24
+                        
+                        . Those plots also show that the meshing phases, which are the most important ones, achieve reasonably good runtimes.
+
+Notice that the percentage of the runtime of the mesh generation by slave processes phase in the Cylinder model is larger than in the other models. That happens due to the wider space inside the model available for the mesh generation. In the other narrower models, the load-estimation quadtree might take more time (Fig. 22), since it is performed serially in the master process in the current implementation. Moreover, in the mesh finalizing phase, the improvement of the element layers is the part that spends most of the time, because it is performed serially in the master process as well. Therefore, these phases are candidates for optimization and parallelization efforts in the future. Nonetheless, notice in Fig. 20 that the runtimes have a fairly good decay, which is an advantage in practical situations.
+
+To demonstrate that the meshes generated by the described technique have good quality, the metric used was α
+                        =2R
+                        
+                           i
+                        /R
+                        
+                           c
+                        , where R
+                        
+                           i
+                         and R
+                        
+                           c
+                         are the radii of the inscribed and circumscribed circles, respectively. This metric α has value 1.0 for an equilateral triangle. The worse the quality of an element is, the closer the value of α gets to 0.0. Elements with α
+                        ⩽0.1 are considered to have very poor quality, while elements with α
+                        ⩾0.7 have good quality.
+
+The charts in Fig. 25
+                         show the quality of the meshes generated by several executions of the algorithm. Due to the inherent non-determinism of parallel algorithms, different executions of a given program with the same input and the same parameters may generate different outputs. Therefore, it is necessary to analyze the quality of all the meshes generated.
+
+As can be seen in Fig. 25, in all cases, the generated meshes present very good quality. Only a small percentage of the elements has poor quality. Fig. 26
+                         indicates how much the meshes generated in parallel deviate from the mesh generated serially. For the Key, at most 0.10% of the elements had different α values, compared to the serial mesh. The meshes of the Cylinder and of the Plate presented differences of 0.32% and 0.10%, respectively.
+
+This shows that the parallel technique described in this work generates a mesh of quality approximately equal to the mesh serially generated, which is a very good characteristic, considering the quality improvements performed serially [3,9,10]. Also notice that a greater number of subdomains usually leads to a greater difference, even though this difference was just around 0.3% of the elements of the mesh.
+
+@&#CONCLUSIONS@&#
+
+This work presented an Advancing Front Technique (AFT) for generating meshes in parallel using a master/slaves model. The estimation of the load for distribution of the meshing work is performed by a quadtree that is built for the given input boundary, which is defined by a sequence of mesh refinement segments. The domain is decomposed in several squared subdomains also based on a quadtree, which takes into consideration the load and the number of slaves processes in the parallel system. These subdomains are sent to the slaves, which will generate mesh employing a serial mesh generation algorithm for each subdomain.
+
+After that, the resulting front is sent back to the master process, which will shift the decomposition quadtree cells to a Cartesian direction, repartition the updated front, and send the newly placed subdomains back to the slave processes, which, once again, will generate mesh serially. This shift-and-remesh procedure continues until no more mesh can be generated, shifting the decomposition quadtree cells to different directions each turn.
+
+The present implementation presented a fairly good speed-up, balanced by the accurate load estimation, used for efficient load balancing, and maintains the quality of the generated mesh with respect to the serially generated mesh.
+
+Some points are still of interest to this research. The amount of serial work performed by the finalizing step could be reduced by employing shifts in other directions, to get rid of cavities such as those shown in the left of the Fig. 12; and by applying the improvement of the layers of elements in parallel, taking more advantage of the Cartesian shifts.
+
+It is also possible to remove the global synchronization present in the shifting of the decomposition quadtree. To shift a cell to a direction, it is necessary for a subdomain to know only its neighbors in that direction, along with their front segments. Therefore, a local shift can be employed only among the involved subdomains.
+
+The idea presented in this work can also be naturally extended to three-dimensional mesh generation, and the authors are currently working on a 3D version of this technique.
+
+@&#ACKNOWLEDGEMENTS@&#
+
+The first author would like to thank the Brazilian agency CAPES (Coordenação de Aperfeiçoamento de Pessoal de Nível Superior) for the fellowship granted to him (Process 2823-12-8). The third author acknowledges the support from the Brazilian agencies CNPq (Conselho Nacional de Desenvolvimento Científico e Tecnológico) through the Research Productivity Grant 305596/2010-1 and CAPES through the grant BEX 6881/12-2. All the authors would like to thank CENAPAD-UFC (Centro Nacional de Computação de Alto Desempenho - UFC) for granting access to its computational resources.
+
+@&#REFERENCES@&#
+

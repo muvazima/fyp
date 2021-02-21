@@ -1,0 +1,457 @@
+@&#MAIN-TITLE@&#Direct repair of self-intersecting meshes
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           An extremely fast mesh repairing algorithm with guaranteed topology is described.
+
+
+                        
+                        
+                           
+                           Repairing meshes with attributes becomes a trivial operation thanks to the direct approach employed.
+
+
+                        
+                        
+                           
+                           Exact constructions are used only when necessary and together with fixed precision arithmetics.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Outer hull
+
+Mesh repairing
+
+Self-intersection
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  A fast and exact algorithm to eliminate intersections from arbitrary triangle meshes is presented, without any strict requirement on the input. Differently from most recent approaches, our method does not rely on any intermediate representation of the solid. Conversely, we directly cut and stitch mesh parts along the intersections, which allows to easily inherit possible surface attributes such as colors and textures. We rely on standard floating point arithmetics whenever possible, while switching to exact arithmetics only when the available fixed precision is insufficient to guarantee the topological correctness of the result. Our experiments show that the number of these switches is extremely low in practice, and this makes our algorithm outperform all the state-of-the-art methods that provide a guarantee of success. We show how our method can be exploited to quickly extract the so-called outer hull even if the resulting model is non manifold by design and the single parts have boundaries, as long as the outer hull itself is unambiguously definable.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Modern 3D modeling paradigms enable extremely flexible tools to design original shapes by composition and deformation of existing models [17,4]. Unfortunately, most of the times the designer has not a deep knowledge of the underlying mathematics and simply produces an original shape by cutting, bending and moving parts of 3D objects in space (e.g. Fig. 1
+                     (left)). The designer’s work terminates when the object looks as expected, but in most cases the so-constructed model has a number of self-intersections that make it unusable in important applications such as, e.g., 3D printing [13,37]. Furthermore, besides self-intersections, such compound models often contain other flaws such as open boundaries, degenerate elements and singularities that complicate the necessary repairing task. As observed in [3], each repairing algorithm has its own requirements on the input, and these requirements are not always met in practice. In particular, current solutions to convert self-intersecting meshes to valid polyhedra are either too slow and memory-intensive, or too restrictive in terms of both supported input and potential output (see Section 5.1.6 in [3]). As an example of supported input restriction, one may consider that many algorithms assume that the input has a manifold connectivity and has no surface holes. In most cases, these same algorithms can only produce manifold results, which means that a nonmanifold union of two manifold solids cannot be constructed. Tools to fill holes and convert a generic input to a combinatorial manifold exist [19], but in some cases performing such a preprocessing may become quite complicated, while in some other cases (e.g. when non-manifold configurations are designed on purpose [1]) such a conversion cannot be realized at all without corrupting the original design intent.
+
+Herewith we present a fast and exact algorithm to eliminate intersections from arbitrary triangle meshes, without any strict requirement on the input. Also, we show how our method can be exploited to extract the so-called outer hull even if the resulting model is non manifold by design and the single parts have boundaries. We argue that when a designer says that “the object looks as expected” he/she does not care of non-visible parts. Thus, our outer hull extraction can be considered as an effective repairing that does not introduce any visible shape distortion. Though some state-of-the-art methods could be exploited to resolve this problem, our algorithm represents the currently fastest solution thanks to a novel mixed use of finite precision and exact arithmetics.
+
+A mesh repairing algorithm can be based on either a local or a global approach [24,3]: in the former case, local operations are performed around each defect to correct it, whereas the remaining intact parts of the mesh are kept unaltered. Conversely, in the latter case the mesh is completely rebuilt starting from an intermediate representation. Thus, highly-detailed, feature-rich meshes with mainly isolated flaws should be fixed using local approaches to preserve as many details as possible, while highly corrupted or inconsistent meshes with multiple types of defects (e.g. polygon soups) would better be fixed through a global approach, especially if one needs a guarantee that the repair process succeeds. Global approaches typically are highly robust whereas local approaches are less invasive. A few approaches exist that try to couple guarantee of success and minimal invasiveness [28,29], but they cannot treat self-intersecting meshes. On the other hand, local algorithms that fix self-intersecting meshes exist, but they cannot treat a generically flawed input. The state of the art in self-intersection repairing can be subdivided in fragile, approximate and robust methods.
+
+Earliest approaches to calculate and remove mesh intersections were designed to compute boolean operations [25], and the fact that robustness issues may easily arise was already known [21]. Instead of handling all the possible particular cases, in [33] BSP trees are used as an intermediate representation, and an improved version of this approach has been proposed by [27]. However, instead of solving the robustness problem, algorithms of this kind can just detect too difficult situations and report a generic failure. Surprisingly, such a “fragile” approach is quite diffused in current commercial systems (e.g. Autodesk Maya [6] and 3ds Max [5]), and when the algorithm fails the user is simply allowed to undo the operation and tweak the model before retrying.
+
+Instead of trying to compute an exact solution using a fragile approach, another class of methods achieves robustness at the cost of providing an approximated solution. As observed in [9], tessellated CAD models produced by designers are typically made of many surface patches that should perfectly adhere along their boundaries. Due to diverse sources of approximation, however, these adjacency lines are often replaced by gaps or self-intersections. The solution proposed in [9,35] is to rebuild the mesh in a neighborhood of these defects through a local reconstruction. Clearly, this approach is less invasive than a global remeshing such as in [23], but the result provided is an approximation in any case. Furthermore, in [9] each single patch in the input is required to be free of self-intersections. A more general method is presented in [10], where an octree is used to completely resample the input, so that the result is guaranteed to be the boundary of a solid object which stays within a user-prescribed distance from the original mesh. When the input is a high resolution raw digitized mesh, self-intersections can be removed using [2] even if the mesh has degenerate facets, surface holes and singularities. Though being extremely robust and editing the mesh only locally, this method and all the others discussed in this subsection cannot produce exact solutions (i.e. exact outer hulls).
+
+The easiest way to implement algorithms which are both robust and exact is to rely on exact arithmetics or similar techniques. Exact geometric predicates may be used by algorithms to take decisions based on input floating point coordinates only, without the need to exactly represent any new point (e.g. computing planar Delaunay triangulations). Conversely, some algorithms take decisions based on points which are computed during the execution and are not part of the input. Robustness in this latter case can be achieved through exact constructions that allow to exactly represent such intermediate points. In most cases floating point arithmetics is sufficient to exactly evaluate a geometric predicate, while in few situations exact arithmetics is necessary. By identifying the conditions that make floating point arithmetics not reliable, Shewchuk [31] switches to exact arithmetics only when necessary, so that predicates can be evaluated without errors with just a little overhead when compared to their non-robust counterparts.
+
+Based on GNU Multi Precision arithmetic library (GMP), exact constructions are used to compute boolean operations of a pair of polyhedra in [30], whereas exact predicates only are necessary in [38] for the same task. GMP is also used for exact constructions in CGAL, where a conversion of the input into so-called Nef polyhedra enables robust boolean operations even if the input and/or the output are non regular sets [20]. Since the use of exact constructions makes these algorithms too slow, in [8] the BSP tree formalism introduced in [33] was made robust through fixed-precision techniques [16]. This algorithm was first improved in [12], where conversion to BSP trees occurs only around the intersections, and then in [36], where clever clipping operations allow to quickly convert the BSP to a mesh.
+
+The Cork open-source library (https://github.com/gilbo/cork) includes functions to compute boolean operations using fixed precision arithmetics and allows to effectively cut the mesh at its intersections. Unfortunately, this library does not provide any function to extract the outer hull and its design is not described in any publication [7].
+
+To summarize, when arbitrary meshes need to be considered and robustness is required, CGAL [20] still represents the state of the art, and the need to pass from an intermediate representation coupled with the use of exact constructions has an inevitable impact on the overall performances.
+
+In contrast, our approach is direct (i.e. it works directly on the mesh without intermediate representations) and relies on floating point arithmetics whenever possible, while switching to exact constructions only when ambiguities occur. This makes our algorithm extremely fast while guaranteeing a correct topology of the result. Furthermore, possible information attached to the original mesh can be easily maintained and inherited in the result (e.g. colors, textures, material information, etc.), while such an information transfer would be significantly more complicated for methods that switch between representations.
+
+The core of our algorithm is a module that converts a generic input mesh into a nonmanifold simplicial complex without intersections. After this first step, the outer hull extraction consists in selecting a subset of the triangles from the nonmanifold complex.
+
+Hereafter we make use of the formal terminology for simplicial complexes given in [18]. Thus, our input is a triangle mesh defined by (1) a pure two-dimensional abstract simplicial complex (with possibly nonmanifold connectivity) and (2) a set of vertex positions that uniquely identify its geometric realization. If such a mesh has no degenerate triangles and no self-intersections, then it is a valid Euclidean simplicial complex [15] (i.e. the intersection of any two non-disjoint triangles is either an edge or a vertex). Our first objective is to minimally edit the mesh to guarantee this latter characteristic without modifying the geometric realization.
+
+Note that the input is allowed to be made of several connected components, to have boundaries, to have intersections among multiple components and within each single component. In such a model the intersection can be defined as another complex made of zero-, one- and two-dimensional cells. Note that this complex is not necessarily pure and its top dimension is not necessarily two. In the remainder any simplex of such a complex will be called an “intersection element”. Thus, an intersection element can be a single isolated vertex (e.g. a pyramid tip touching a plane), a straight segment bounded by two endpoints (an edge), a convex polygon defined as the intersection of two coplanar triangles (a cell). Convex polygons can be unambiguously defined through their bounding segments, thus are not explicitly encoded in our method.
+
+@&#OVERVIEW@&#
+
+Our procedure to compute the nonmanifold complex can be logically split into two successive phases of preprocessing and intersection removal. A third optional phase that we call topological filtering allows to extract the outer hull out of the nonmanifold complex. We have chosen to let this latter phase optional because for some open surfaces one may need to remove the intersections whereas no solid can be logically defined (e.g. the surface of a car door).
+
+During preprocessing, the input is first encoded within a data structure for non-manifold meshes [14], and successively processed to remove all the degenerate triangles [11]. Note that a non-manifold structure is necessary even if the input is a combinatorial manifold; this same structure, indeed, needs to host the eventual modified mesh which is not necessarily a combinatorial manifold. Also, a triangle is considered to be degenerate only if its three vertices are exactly aligned or at least two of them coincide. Note that removing these triangles has no impact on the geometric realization.
+
+During the intersection removal phase, we first compute all the intersection elements (i.e. segments and isolated points), and then subdivide each triangle that generated these elements by cutting along the elements themselves. When all the triangles are split, geometrically coincident edges and vertices are unified into singular elements, thus leading to a non-manifold configuration without self-intersections.
+
+Finally, if the outer hull needs to be computed, the topological filtering phase consists of first tracking the most external triangles based on relative orientations around non-manifold elements, and then of deleting the remaining internal patches.
+
+
+                        Algorithm 1 summarizes this high-level pipeline.
+                           Algorithm 1
+                           The overall direct repair algorithm 
+                                 
+                                    
+                                       
+                                       
+                                          
+                                             
+                                                Require: A pure 2D abstract simplicial complex M embedded in 
+                                                   
+                                                      
+                                                         
+                                                            R
+                                                         
+                                                         
+                                                            3
+                                                         
+                                                      
+                                                   
+                                                .
+                                          
+                                          
+                                             
+                                                Ensure: The outer hull H of 
+                                                   
+                                                      ∣
+                                                      M
+                                                      ∣
+                                                   
+                                                .
+                                          
+                                          
+                                             
+                                                1: Encode M into a nonmanifold structure H
+                                             
+                                          
+                                          
+                                             
+                                                2: Remove degenerate triangles from H
+                                             
+                                          
+                                          
+                                             
+                                                3: Compute H’s intersection segments and points
+                                          
+                                          
+                                             
+                                                4: Subdivide each triangle in H along its intersection elements (if any)
+                                          
+                                          
+                                             
+                                                5: Unify coincident edges and vertices into nonmanifold elements
+                                          
+                                          
+                                             
+                                                6: Mark triangles in H belonging to the most external surface
+                                          
+                                          
+                                             
+                                                7: Remove the unmarked triangles
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+We assume that in a typical input mesh non-manifold elements are sparse, thus we have implemented an optimized spatial subdivision that exploits this assumption to significantly speed up the detection of intersecting triangles. The main building block is an axis-aligned BSP tree where non-leaf cells are split along their longest axis in two equal subcells. The split takes place only if the number of triangles having a non-empty intersection with the cell is larger than a specified threshold (50 in our prototype). Based on this standard approach, a brute force all-with-all intersection test is then performed among triangles within each leaf cell. Our optimization has the objective of reducing both the number of splits (and thus of cells) and the number of intersection tests, while still guaranteeing a complete and correct calculation of the intersection elements. Based on the work of Volino and colleagues [34], we observe that a cell is free of intersections if all the following conditions hold:
+                           
+                              •
+                              the union of all the triangles in T forms a single combinatorial disk D;
+
+the dot-product of all the normals of triangles in T with one reference vector N is positive;
+
+the projection of D on a plane whose directional vector is N has a non self-intersecting boundary;
+
+Note that similar conditions that ensure a patch to be free of self-intersections were previously introduced and proved in [34] for the analysis of self-collisions.
+
+The existence of each intersection element is exactly assessed through fast adaptive-arithmetic geometric predicates [31]. This guarantees the topological correctness of the abstract simplicial complex representing the intersection, while requiring only a minimal overhead. We consider the input mesh(es) M as the union of its open simplexes; thus M is a collection of vertices, open edges (without endpoints), and open triangles (without bounding edges and vertices). Also, we consider the intersection as the union of 0 and 1-dimensional open simplexes (i.e. vertices and segments), and we do not represent 2-simplexes explicitly because they are not used in the successive steps. Note that the intersection can contain multiple components and isolated vertices. Each intersection segment is defined by its two endpoints. In turn, each intersection point is symbolically represented by all the open simplexes that share it. Any intersection point p belongs to one of the following three categories, depending on the dimension 
+                           
+                              L
+                              (
+                              p
+                              )
+                           
+                         of the lowest-dimensional open simplex p belongs to:
+                           
+                              1.
+                              
+                                 p corresponds to a vertex position (
+                                    
+                                       L
+                                       (
+                                       p
+                                       )
+                                       =
+                                       0
+                                    
+                                 )
+                                    
+                                       (a)
+                                       The interior of either an input edge or an input triangle touches an input vertex (e.g. a pyramid’s tip tangent to a triangle in a nonmanifold manner);
+
+
+                                 p belongs to an open edge (
+                                    
+                                       L
+                                       (
+                                       p
+                                       )
+                                       =
+                                       1
+                                    
+                                 )
+                                    
+                                       (a)
+                                       An edge–edge pair – two exactly coplanar edges in the input meet at a point which is not an endpoint of any edge (e.g. Fig. 4(left));
+
+An edge–triangle pair – an edge and a triangle share a point which is not on the boundary of the triangle and is not an edge endpoint (most common situation shown in Fig. 2
+                                          );
+
+
+                                 p belongs to an open triangle (
+                                    
+                                       L
+                                       (
+                                       p
+                                       )
+                                       =
+                                       2
+                                    
+                                 )
+                                    
+                                       (a)
+                                       A triangle triplet – three non-coplanar open triangles share a point which is not on the boundary of any of the triangles (e.g. Fig. 11(b)).
+
+In the first case p is exactly represented by the coordinates of the original vertex. No other information is necessary. In the second case all the open edges and the open triangles that share p are stored (referenced) in its symbolic representation. In the third case all the open triangles that share the point are stored. For the second and third cases the spatial position of the intersection point is precomputed using finite precision floating point coordinates. Note that an intersection segment may be bounded by points belonging to any of the three afore-mentioned classes, and the two endpoints may or may not belong to the same class.
+
+In this step, each triangle producing intersections (i.e. a “generator”) is duplicated, and its copy subdivided by inserting all the corresponding intersection elements. Herewith we consider a triangle t as the union of the open triangle and its bounding edges, and an intersection point must be inserted in t if its symbolic representation contains either t or one of its bounding edges. Similarly, a segment must be inserted if both its endpoints representations contain either t or one of its bounding edges. The subdivided triangle is a manifold mesh with boundary that will eventually replace its generator.
+
+This is the crucial step of our algorithm, where most of the problems arise and where different approaches can be experimented. A naive approach is to simply transform the points and segments to 2D by projecting them on the triangle’s plane, and then exploit state-of-the-art 2D constrained Delaunay triangulation (CDT) algorithms to reconstruct an appropriate connectivity to be used for the corresponding 3D points and segments. This solution would be perfectly suitable when the intersections are represented exactly (e.g. as done in [22]), but in our setting we strive to avoid exact arithmetics as long as possible. Two problems arise when intersection point coordinates (that are necessary to compute the correct CDT’s connectivity) are represented using finite precision floats: (1) intersection points that are supposed to be aligned are not due to roundoff, and this causes wrong mesh boundaries that may spoil the matching in the successive step (Section 3.5); (2) a pair of segments that are supposed to be disjoint may mutually intersect due to roundoff, and here the dramatic consequence is a failure of the triangulation algorithm because we cannot add Steiner points.
+
+Since this latter issue is extremely rare in practice, it is worth switching to an exact computation model when it occurs. Specifically, right after the projection, the algorithm first checks all the segments for mutual intersection using fast adaptive geometric predicates: if mutual intersections actually occur the intersection points are recomputed based on their symbolic representations using exact constructions, and the constrained triangulation is derived based on such an exact model.
+
+On the other hand, misalignment at boundaries is quite commonplace as it occurs for nearly all the edge–triangle intersection pairs. Thus, if there are no mutual segment intersections, the CDT is built on the available finite precision coordinates and, if necessary, the correctness of the boundary is re-established in a second step. If one of t’s edges is intersected by another triangle, for example, a corresponding intersection point would have been produced in a previous step. This point is inserted along with the others in the CDT and, unless roundoffs take place, it is part of the boundary. Due to finite precision, however, misalignment may make this point become internal (Fig. 2(e)), the boundary edge is not split as expected, and the eventual matching in the subsequent step (Section 3.5) may fail. Once again, however, the symbolic representation informs the algorithm that the point must split the edge thus, if it does not, that edge is eroded 
+                        [26] in order to expose the vertex as expected and guarantee a correct eventual matching. This situation is illustrated in Fig. 2. In practice, we consider the mismatching edge e and the internal vertex v to be exposed. There are three cases: (1) v is internal and can be exposed by removing e’s incident triangle as in Fig. 2; (2) the removal of e’s incident triangle exposes another vertex instead of v; (3) v is already on the boundary but splits the wrong edge of t. In the first case the solution is immediate, whereas in the other two cases we switch to exact constructions. If a plurality of vertices 
+                           
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    1
+                                 
+                              
+                              ,
+                              …
+                              ,
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    n
+                                 
+                              
+                           
+                         must be exposed for the same edge 
+                           
+                              e
+                              ,
+                              
+                              e
+                           
+                        ’s incident triangle is removed, we check that the exposed vertex w is one of the 
+                           
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                        s and, if so, we proceed iteratively on the two boundary edges incident at w.
+
+At the end of this step, all the generators are replaced by their subdivided copies. Note that for each generator the corresponding CDT is entirely computed using one single computational model, i.e., either finite precision or exact constructions, but not a mixture of the two. However, after subdivision, the intersection elements shared by two formerly intersecting triangles must coincide exactly, even if two different computational models were used for the two triangles. Thus, just after subdivision, each newly-created vertex is reassigned the pre-computed floating point coordinates of the corresponding intersection point, regardless the computational model used to compute the CDT’s connectivity. This guarantees exact geometric match in the successive step even if two intersecting triangles are split using different computational models (i.e. one based on exact constructions and the other based on finite precision).
+
+At this point the mesh has the same topology as the input, though it has more simplexes due to the subdivisions and a number of elements are geometrically duplicated when the abstract simplicial complex is realized. Notice that if the input was a combinatorial manifold, this processed mesh version is still a combinatorial manifold. In this phase we use the geometry (i.e. vertex positions) to update the simplicial complex connectivity with the objective of removing the intersections, so that each point in the realized complex belongs exactly to one and only one open simplex. To do that, we first identify and unify corresponding vertices (i.e. having the same coordinates), and then unify corresponding edges (i.e. having the same endpoints). If the input has coplanar overlapping triangles, this operation may easily lead to corresponding triangles that need to be unified as well. The result of this operation leads to a non-manifold simplicial complex without intersections.
+
+The treatment of possible corresponding triangles that may be created when coplanar triangles overlap in the input is worth a further discussion. From a purely mathematical perspective, these triangles must be unified because an abstract simplicial complex cannot have two different simplexes having the same vertices. In practice, however, a specific application might call for more elaborate solutions. For example, for the computation of mesh booleans it is convenient to define that two triangles are corresponding only if they have both the same vertices and the same orientation: using such a modified predicate the resulting complex is allowed to contain two instances of the same triangle in its two possible orientations, which is useful to represent possible non-regular results of boolean intersections or differences. In other cases, for example when a triangle carries additional surface information that a user may want to keep (e.g. textures, material information, etc.), it might be useful to encode all of the copies along with their attached information and let the subsequent application choose what to do with them.
+
+Roughly speaking, the outer hull of a solid object is the set of its surface points that can be reached from infinity without crossing any other part of the solid. The same definition trivially extends to the union of (possibly intersecting) solids [12], where the outer hull extraction can be considered as an effective repairing [36].
+
+To compute the outer hull, our algorithm tracks the most external surface by exploiting adjacencies. Specifically, we select a starting extreme vertex 
+                           
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    0
+                                 
+                              
+                           
+                         as the one having the maximum x coordinate and for which at least one of the incident triangle normals has a positive x component. From such a 
+                           
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    0
+                                 
+                              
+                           
+                        , we select its incident triangle 
+                           
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    0
+                                 
+                              
+                           
+                         whose normal vector has the maximum x component and start a manifold region growing. If 
+                           
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    0
+                                 
+                              
+                           
+                         is manifold, any of the incident triangles can be used to start. At each step the fronteer is made of a set of edges, and the growing proceeds across them as long as they are manifold. When a nonmanifold edge is encountered, we sort all its incident triangles radially around it, and disconnect all of them but two: 
+                           
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    1
+                                 
+                              
+                           
+                        , which is the triangle belonging to the previously grown patch, and 
+                           
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    2
+                                 
+                              
+                           
+                        , which is the first triangle after 
+                           
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    1
+                                 
+                              
+                           
+                         in the sorted list having a consistent orientation with it. Then, we start again from 
+                           
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    2
+                                 
+                              
+                           
+                         and continue with the region growing as above. The process terminates when all the edges of the grown region have exactly two incident triangles. Note that each combinatorial component of the input complex may generate at most one outer hull, which means that to reconstruct an outer hull made of several components we simply repeat the aforementioned process on the remaining unprocessed combinatorial components of the input. Fig. 3
+                         shows an example of a singular edge with its incident triangles; to robustly sort these triangles, the necessary 3D orientation tests must be based on original input coordinates only, which means that each subtriangle must maintain a reference to its generator, and only vertices belonging to the latter must be used to perform the sorting.
+
+Due to the characteristics of our non-manifold input complex, this process can effectively reconstruct the outer hull even if the initial solids have overlapping surfaces (Fig. 4
+                        (left, middle)). Furthermore, non-manifold outer hulls can be reconstructed as well (Fig. 4(right)). When the algorithm disconnects inner triangles, indeed, it actually constructs a copy of the singular edge and attaches 
+                           
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    1
+                                 
+                              
+                           
+                         and 
+                           
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    2
+                                 
+                              
+                           
+                         to this new copy, while leaving the other triangles of the fan attached to the original edge. Since such a construction creates duplicated edges to represent singularities of the hull, these must be unified in a final step.
+
+It is worth noticing that in our context the concept of being reachable from infinity is strongly influenced by the surface orientation. The outer hull of a regularly-oriented sphere (i.e. surface normals point outwards) is the sphere itself; conversely, if the sphere orientation is inverted its outer hull is empty. This behavior is particularly intuitive when modeling in environments where surface orientation and visibility are related, which is a quite standard approach for backface culling. Furthermore, it allows the repair of typical flaws produced by triangulation failures (Fig. 11(d)) and enables interesting modeling paradigms where a plain deformation can be used to change the object topology in an extremely simple and intuitive way (see Fig. 5
+                        ).
+
+In principle this outer hull extraction can be performed using the approach described in [22]; through this method, a constrained Delaunay tetrahedrization of our non-manifold complex can be computed, and the outer hull can be identified using the notion of generalized winding number. The main disadvantage of such an approach is the need of computing the tetrahedrization, which is a costly operation that requires significant amounts of memory. Also, the tetgen software [32] used by Jacobson and colleagues tends to fail when the boundary mesh has very skinny triangles, and unfortunately these triangles are rather likely to be produced while cutting intersections (e.g. Fig. 6
+                        ). Nonetheless, the advantage is the possibility to successfully reconstruct outer hulls even if small surface holes prevent their unambiguous definition. In conclusion, our approach is preferable when the outer hull is unambiguously defined, otherwise the slower method presented in [22] is necessary to resolve the possible ambiguities. Note that the outer hull is unambiguously defined if the aforementioned region growing does not encounter any boundary edge, which means that holes may be present in the input as long as they do not touch the outer hull.
+
+@&#RESULTS AND DISCUSSION@&#
+
+A prototype of the repairing algorithm described so far has been implemented in C++ within a Windows 7 environment. All the experiments reported in this paper were run on a standard 2.67GHz Intel Core i7 PC with 6Gb RAM. Standard double precision floating point numbers were used to represent the coordinates, while GNU Multiprecision Arithmetics Library was employed to handle exact coordinates. A first noticeable observation deals with the number of switches to exact constructions that were necessary to disambiguate difficult situations; this number, indeed, is extremely small in all our experiments. Thus, we may reasonably state that using an exact model for the whole process is a waste of computational resources in most cases. Not surprisingly, most of the total time (̃80% on average) is spent by the conversion of the degeneracy-free input to a non-intersecting non-manifold complex: this time is mostly dedicated to the intersection element detection (Section 3.3), whereas the triangle subdivision (Section 3.4) requires a negligible part of it and hence has not been reported here. An interesting result regards the gain (̃40.3% on average for the experiments reported in Table 1) that we could obtain thanks to the BSP optimization introduced in Section 3.3: to quantify such a gain we have rerun all the experiments with the optimization disabled (column tu in Table 1, speed gain computed as 
+                        
+                           (
+                           tu
+                           -
+                           tot
+                           )
+                           /
+                           tot
+                        
+                     ). The only example where our optimization failed to give an advantage is the warship model (Fig. 6), where most triangles are extremely elongated and span the whole mesh extent while intersecting with each other; we argue that this situation represents only a minority of the models that one may encounter in practice. Table 1 summarizes our results.
+
+To experiment in extreme cases we have perturbed our models with strong noise (Fig. 7
+                     ), have synthetically created singular situations (Fig. 4), and have made the largest model in our database intersect with a rotated copy of itself (Fig. 9). In all the cases our algorithm was able to correctly compute a valid outer hull with noticeably low time and memory requirements.
+
+Currently, the fastest algorithm with guarantees seems to be [12], which is even faster than the more recent [36] that uses local tetrahedrizations and proved to be orders of magnitude faster than methods based on exact constructions such as CGAL. When compared with [12], our method appears to be definitely faster for small models with sparse intersections (e.g. the Cow and Women models in Fig. 8
+                      were processed in 1200 and 1900ms respectively in [12]), while it is only slightly faster or comparable for larger models (e.g. 8900ms for the 90 degree 200K Iphigenie in [12] and 7849ms for our similar 200K Two Neptunes in Fig. 9
+                     ). This behavior is not surprising because in larger meshes the triangles to be subdivided represent a smaller percentage of the total triangle count, and their treatment is therefore less influent on the total time.
+
+On the commercial side, we compared against 3ds Max [5] which provides the so-called Proboolean tool to perform boolean operations on mesh pairs. Since it cannot treat self-intersecting meshes, we have selected four test models where each single connected component is free of self-intersections. Then, for each model we have created one separate object for each connected component and, finally, we have created their union using the Proboolean tool. In two cases (Tommy Gun and Buggy Body) 3ds Max succeeded at the first attempt. In one case (Chair) only a partial union could be created at the first attempt, and a complete union could be obtained only after having saved and re-opened the partial union. In one case (Warship) we could not find any tweak to succeed with such a fragile approach. Also, all the three “successful” unions produced by Proboolean still contain self-intersections and open boundaries, even if all the input components were closed meshes. Regarding performances, Proboolean’s speed is comparable to our method while being less flexible and less robust.
+
+In any case, our algorithm is more flexible when surface attributes need to be dealt with. When a triangle has an associated color, for example, this color can be simply inherited by all its subtriangles after subdivision (e.g. Fig. 1). Also, appropriate texture coordinates can be produced by interpolation for all the corners of the subtriangles as shown in the example in Fig. 10
+                     
+                     
+                     .
+
+@&#CONCLUSIONS@&#
+
+This paper has shown that arbitrarily intersecting meshes can be fixed using a very fast approach that mostly relies on floating point arithmetics, while switching to exact arithmetics only when major ambiguities occur. Our experiments have shown that these switches are extremely rare in practice, so that their influence in negligible on the overall computation time. Thus, our algorithm is orders of magnitude faster than existing methods based on exact constructions, but it is also slightly faster than other methods that use fixed precision while providing guarantees of success. Furthermore, besides the efficiency, the direct approach employed is particularly cheap in terms of memory consumption and makes it easy to inherit surface attributes on the resulting fixed model.
+
+We believe that there is still room for improvement in the triangle subdivision and geometric match steps. Instead of relying on these two successive phases, we think that a clever algorithm design may allow to compute the connectivity of the subdivided triangle based on the original coordinates only, without the need to use the pre-computed intersection points and to perform any projection. Succeeding in this would make the algorithm completely free of any exact computation model.
+
+@&#ACKNOWLEDGMENTS@&#
+
+This work was partly supported by the EU project Visionair (Grant agreement N. 262044) and by the international joint Project on “Mesh Repairing for 3D Printing Applications” funded by Software Architects Inc. (WA, USA).
+
+Supplementary data associated with this article can be found, in the online version, at http://dx.doi.org/10.1016/j.gmod.2014.09.002.
+
+
+                     
+                        
+                           
+                        
+                     
+                  
+
+@&#REFERENCES@&#
+

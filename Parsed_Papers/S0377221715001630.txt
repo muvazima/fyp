@@ -1,0 +1,3417 @@
+@&#MAIN-TITLE@&#A branch-price-and-cut algorithm for multi-mode resource leveling
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We present a new model and algorithm for a RCPSP with availability constraints.
+
+
+                        
+                        
+                           
+                           We propose a non-trivial, non-obvious Dantzig–Wolfe reformulation.
+
+
+                        
+                        
+                           
+                           We translate standard precedence inequalities into our new formulation.
+
+
+                        
+                        
+                           
+                           Our model gives significantly tighter lower bounds
+
+
+                        
+                        
+                           
+                           We increase the size of instances that can be solved to optimality to 50 jobs.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Project scheduling
+
+Resource leveling
+
+Dantzig–Wolfe decomposition
+
+Integer programming
+
+Branch-price-and-cut
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  We propose a new mixed integer programming formulation and solution algorithm for a multi-mode resource-constrained project scheduling problem with availability constraints (calendars) and the objective to minimize the resource availability cost. Our model exploits the problem structure and has an exponential number of variables, which necessitates a column generation approach. The linear programming relaxation is strengthened by adding valid inequalities that need to be carefully separated in order to show the desired effect. Integer optimal solutions are obtained by an exact state-of-the-art branch-price-and-cut algorithm.
+                  Classical time-indexed mixed integer programming formulations for similar problems quite often fail already on instances with only 30 jobs, depending on the network complexity and the total freedom of arranging jobs. A reason is the typically very weak linear programming relaxation. Our model can be interpreted as a non-trivial Dantzig–Wolfe reformulation of a time-indexed formulation. In particular, for larger instances our reformulation gives significantly tighter dual bounds, enabling us to optimally solve instances with 50 multi-mode jobs. This outperforms the classical formulation by far.
+               
+            
+
+@&#INTRODUCTION@&#
+
+We consider a complex project scheduling problem that is motivated by an industrial application from chemical engineering. It was recently introduced in Megow, Möhring, and Schulz (2011) as turnaround scheduling: For the inspection and renewal of parts in chemical plants, these are shut down and disassembled, work is done, and plants are finally rebuilt. This induces a partial ordering of jobs to be done. Jobs are multi-mode, that is, they can be sped-up to a certain extent by investing in more workers. The time horizon and the number of workers hired for each job determine production downtime and working cost. We thus face a time-cost tradeoff, and a solution approach to turnaround scheduling is to binary search over the time horizon. For a fixed time horizon—which is assumed throughout this paper—the problem turns into a resource leveling problem, i.e., we need to decide how many workers are hired—this number is then fixed for the entire time horizon.
+
+Workers, or more generally renewable resources, are of different specialization or type. Each resource type is associated with availability periods that can be thought of as working shifts. We assume that each job needs (possibly several units of) exactly one resource type for the following reason. The processing time of a job decreases with an increased resource usage. A model with multiple resource types per job must encode how the processing time of a job is shortened depending on which resource types are increased. Planners would need to encode all possible combinations of resource assignments to a job, and even worse, estimate the resulting processing times, possibly respecting synergy or interference between resources. It is unrealistic to assume valid data about this in a practical setting on one hand, and hardly doable, if at all, with standard software like MS Project™ on the other hand. Reliable data are difficult to obtain even for one resource type (the actual work increases with increased resource usage due to, e.g., communication overhead). Nonetheless, the need of multiple resources was studied by other authors, e.g.,  Santos and Tereso (2011) and can be modeled via generalized precedence constraints. These blend easily with our approach, if absolutely needed.
+
+We want to level the resources, i.e., we minimize the maximum capacity requirement of each resource type, at a minimum total resource cost. Balancing the resource usage, i.e., to flatten the variability of the resource usage over time, is not an issue at our higher-level planning stage.
+
+From a methodological point of view, when it comes to optimally solving larger instances of such scheduling problems, mixed integer programming (MIP) has not fared very well. This is mainly due to the weak dual bounds obtained from linear programming (LP) relaxations of classical models. We therefore propose a model which can be interpreted as a non-trivial Dantzig–Wolfe reformulation of a time-indexed formulation and thus provides much stronger bounds. Variables represent entire sub-schedules, thus are exponential in number, and necessitate a dynamic generation of variables to solve the LP relaxation. Yet, the relation to classical models via Dantzig–Wolfe reformulation enables us to exploit the literature on valid inequalities for scheduling problems, and we demonstrate how to use them to strengthen the formulation. Constraint programming (CP) is usually considered a promising approach for solving scheduling problems, due its expressiveness of logical constraints, and we hybridize some CP elements in our otherwise MIP based approach.
+
+We propose a new model for a multi-mode project scheduling problem with availability constraints (working shifts) and the objective to minimize the resource availability cost. Our model is generic in the way resource calendars are respected. For its solution we design a full-fledged branch-price-and-cut algorithm. This does not only produce very strong dual bounds, as did a few previous studies in project scheduling before, but it is also able to provide optimal primal solutions. With this it is the first approach in this area of complex project scheduling that “works on both ends.” Our model builds on a non-trivial Dantzig–Wolfe reformulation of a classical time-indexed model, and we exploit the relationship between these two in designing branching rules and deriving cutting planes. We finally conduct an experimental study which shows how the methodological state-of-the-art in branch-and-price should be instantiated in a complex scheduling context. Our implementation is able to optimally solve instances with 50 multi-mode jobs, thus outperforming a state-of-the-art MIP solver by far that is only able to solve 25 percent of the instances we solve.
+
+We assume familiarity with resource-constrained project scheduling (RCPSP) in general; for a recent survey refer to Hartmann and Briskorn (2010). We are given a set 
+                        J
+                      of non-preemptable jobs and a set 
+                        R
+                      of renewable resources. Precedence constraints are given as an acyclic digraph 
+                        
+                           G
+                           =
+                           (
+                           J
+                           ,
+                           E
+                           )
+                        
+                      with (i, j) ∈ E if and only if job i has to be completed before job j starts. Each job j may be run in exactly one out of a discrete set 
+                        
+                           M
+                           j
+                        
+                      of modes. Processing job j in mode 
+                        
+                           m
+                           ∈
+                           
+                              M
+                              j
+                           
+                        
+                      takes pjm
+                      time units and requires rjmk
+                      units of resource 
+                        
+                           k
+                           ∈
+                           R
+                        
+                     . Each job needs exactly one resource for execution, so we write rjm
+                      if the resource is clear from the context.
+
+All jobs have to be completed before the end of the time horizon T. Each resource 
+                        
+                           k
+                           ∈
+                           R
+                        
+                      has a set 
+                        
+                           
+                              I
+                              k
+                           
+                           :
+                           =
+                           
+                              {
+                              
+                                 [
+                                 
+                                    a
+                                    1
+                                 
+                                 ,
+                                 
+                                    b
+                                    1
+                                 
+                                 ]
+                              
+                              ,
+                              …
+                              ,
+                              
+                                 [
+                                 
+                                    a
+                                    
+                                       i
+                                       k
+                                    
+                                 
+                                 ,
+                                 
+                                    b
+                                    
+                                       i
+                                       k
+                                    
+                                 
+                                 ]
+                              
+                              }
+                           
+                        
+                      of ik
+                      availability periods, also called shifts, where 
+                        
+                           
+                              a
+                              1
+                           
+                           <
+                           
+                              b
+                              1
+                           
+                           <
+                           ⋯
+                           <
+                           
+                              a
+                              
+                                 i
+                                 k
+                              
+                           
+                           <
+                           
+                              b
+                              
+                                 i
+                                 k
+                              
+                           
+                        
+                     . A job requiring resource k can only be executed during a time interval 
+                        
+                           I
+                           ∈
+                           
+                              I
+                              k
+                           
+                        
+                     . Fig. 1 schematically presents a schedule with two resources and three availability periods each that are indicated by the bold lines. Jobs are represented by boxes, the length of which represents processing time and the height corresponds to resource usage (for simplicity all identical in this example). The arrows indicate precedence constraints. We use a parameter δkt
+                      which is one if resource k is available at time t, i.e., t ∈ I for some 
+                        
+                           I
+                           ∈
+                           
+                              I
+                              k
+                           
+                           ,
+                        
+                      and zero otherwise. Each resource 
+                        
+                           k
+                           ∈
+                           R
+                        
+                      is associated with a per unit cost ck
+                     . For each resource k, the available capacity, which is a variable, is denoted by Rk
+                     .
+
+To represent a solution, we denote by S = (S
+                     1, …, Sn
+                     ) the vector of start times of jobs, and by M = (m
+                     1, …, mn
+                     ) the vector of modes in which jobs are executed. For a given schedule (S, M), denote by 
+                        
+                           A
+                           
+                              (
+                              S
+                              ,
+                              M
+                              ,
+                              t
+                              )
+                           
+                           :
+                           =
+                           
+                              {
+                              j
+                              ∈
+                              J
+                              :
+                              
+                                 S
+                                 j
+                              
+                              ≤
+                              t
+                              <
+                              
+                                 S
+                                 j
+                              
+                              +
+                              
+                                 p
+                                 
+                                    j
+                                    
+                                       m
+                                       j
+                                    
+                                 
+                              
+                              }
+                           
+                        
+                      the set of jobs active at time t. The amount 
+                        
+                           
+                              r
+                              k
+                           
+                           
+                              (
+                              S
+                              ,
+                              M
+                              ,
+                              t
+                              )
+                           
+                           :
+                           =
+                           
+                              ∑
+                              
+                                 j
+                                 ∈
+                                 A
+                                 (
+                                 S
+                                 ,
+                                 M
+                                 ,
+                                 t
+                                 )
+                              
+                           
+                           
+                              r
+                              
+                                 j
+                                 
+                                    m
+                                    j
+                                 
+                                 k
+                              
+                           
+                        
+                      of resource k used at time t must never exceed the provided capacity Rk
+                     . Thus, we obtain resource constraints with calendars: 
+                        
+                           
+                              r
+                              k
+                           
+                           
+                              (
+                              S
+                              ,
+                              M
+                              ,
+                              t
+                              )
+                           
+                           ≤
+                           
+                              R
+                              k
+                           
+                           ·
+                           
+                              δ
+                              
+                                 k
+                                 t
+                              
+                           
+                           ,
+                           
+                           ∀
+                           k
+                           ∈
+                           R
+                           ,
+                           
+                           ∀
+                           t
+                        
+                     . In addition to this resource feasibility a feasible schedule must obey precedence feasibility, i.e., 
+                        
+                           
+                              S
+                              i
+                           
+                           +
+                           
+                              p
+                              
+                                 i
+                                 
+                                    m
+                                    i
+                                 
+                              
+                           
+                           ≤
+                           
+                              S
+                              j
+                           
+                        
+                      for all (i, j) ∈ E.
+
+To conclude, we study a multi-mode project scheduling with m renewable resources of unbounded capacity with precedence constraints and working shifts and the objective to minimize the total resource availability cost, i.e., minimizing 
+                        
+                           
+                              ∑
+                              
+                                 k
+                                 ∈
+                                 R
+                              
+                           
+                           
+                              c
+                              k
+                           
+                           ·
+                           
+                              R
+                              k
+                           
+                        
+                     .
+
+@&#RELATED WORK@&#
+
+Turnaround scheduling comprises project scheduling with calendars, multi-mode scheduling, and resource leveling; see again Megow et al. (2011) for an industrial application. The zoo of project scheduling problems is large, and we mention only the most related problems. Makespan minimization is a classical scheduling goal. Lower bounding schemes for this objective are presented in Brucker and Knust (2000), where column generation is employed to solve a relaxed problem, allowing preemption and precedence constraints formulated as disjunctions. A variable represents a set of jobs selected to run at a certain point in time. For the case of generalized precedence constraints, lower bounds are derived in Bianco and Caramia (2011) by relaxing resource constraints for jobs which are not precedence related. This allows a dynamic programming approach on a modified activity-on-nodes network. In contrast to minimizing the makespan, other objective functions that measure the variation of resource utilization, e.g., f(rk
+                        (S, t)) are of interest in the pre-planning phase; see e.g., Neumann, Schwindt, and Zimmermann (2003).
+
+The resource leveling problem with single-modes per job, which is denoted by 
+                           
+                              
+                                 P
+                                 S
+                                 |
+                                 t
+                                 e
+                                 m
+                                 p
+                                 |
+                                 ∑
+                              
+                              
+                                 c
+                                 k
+                              
+                              max
+                              
+                                 r
+                                 k
+                              
+                              
+                                 (
+                                 S
+                                 ,
+                                 t
+                                 )
+                              
+                           
+                         with generalized precedence constraints has been considered earlier under the name resource investment problem. The special case without generalized precedence constraints 
+                           
+                              
+                                 P
+                                 S
+                                 |
+                                 p
+                                 r
+                                 e
+                                 c
+                                 |
+                                 ∑
+                              
+                              
+                                 c
+                                 k
+                              
+                              max
+                              
+                                 r
+                                 k
+                              
+                              
+                                 (
+                                 S
+                                 ,
+                                 t
+                                 )
+                              
+                           
+                         has been considered e.g., in Demeulemeester (1995) and Möhring (1984). These papers competed on the same instance set which contained about 16 jobs and four resources, with a time horizon between 47 and 70 time units. Further computational studies were done containing 15 to 20 jobs and four resources. In the same setting, lower bound computations are proposed in Drexl and Kimms (2001), one based on Lagrangian relaxation, and one based on column generation, where variables represent schedules as in our approach. Twenty jobs with small processing times of about 10 time units can be handled; for 30 jobs the Lagrangian relaxation wins against the column generation approach.
+
+Multi-mode jobs are a key feature of turnaround scheduling. Such problems of the form 
+                           
+                              
+                                 M
+                                 P
+                                 S
+                                 |
+                                 p
+                                 r
+                                 e
+                                 c
+                                 |
+                              
+                              
+                                 C
+                                 max
+                              
+                           
+                         have been investigated with renewable and non-renewable resources, with limited capacity, and makespan minimization, known as multi-mode RCPSP, see e.g., Demeulemeester and Herroelen (2002) and Hartmann (2001). The notation 
+                           
+                              
+                                 M
+                                 P
+                                 S
+                                 m
+                                 ,
+                                 ∞
+                                 |
+                                 p
+                                 r
+                                 e
+                                 c
+                                 ,
+                                 s
+                                 h
+                                 i
+                                 f
+                                 t
+                                 s
+                                 |
+                                 ∑
+                              
+                              
+                                 c
+                                 k
+                              
+                              ·
+                              max
+                              
+                                 r
+                                 k
+                              
+                              
+                                 (
+                                 S
+                                 ,
+                                 M
+                                 ,
+                                 t
+                                 )
+                              
+                           
+                         comes close to our model, but in the literature in an MPS problem, a job requires different types of resources.
+
+Calendars have been taken into account in previous algorithms as well. Scheduling problems with fixed processing times and calendars, but without resource capacities, are considered in Zhan (1992). The author provides an exact pseudo-polynomial time algorithm (turned into a polynomial one in Franck, Neumann, and Schwindt (2001)) for computing earliest and latest start times for preemptable as well as non-preemptable jobs.
+
+For a computational benchmarking of project scheduling problems, different problem sets are available in the PSPLib (Kolisch & Sprecher, 1996), where several variants of the RCPSP and of resource investment problems can be found. For the RCPSP single-mode case, test sets containing 60 jobs could not be solved in total by a vast number of researchers. In the multi-mode case, instances with 30 jobs are not solved yet. For the resource investment problem, test sets containing 10, 20, or 30 jobs are available, but they do not contain working shifts, are in single-mode or include generalized precedence constraints. On the other hand a job may need more than one resource type. Even though none of these problem variants is immediately suited for a direct comparison, they are similar to ours, and the mentioned instances inspired us when generating the test set used in this study (see Coughlan et al., 2010 and Section 5).
+
+For solving large-scale scheduling problems, mixed integer programming is not considered as primary choice because of typically weak LP relaxations. Moreover, huge numbers of variables (in particular for time-indexed formulations) and constraints may result in high computation times and memory failures when solving even only the LP relaxation. The approach we propose demonstrates that more sophisticated algorithmic techniques can be a partial remedy for these issues. In the following, we assume the reader to be familiar with solving MIPs by branch-and-bound, see e.g.,  Achterberg (2009), and the basics of column generation and branch-and-price, see e.g.,  Desrosiers and Lübbecke (2005).
+
+One of the most prominent models for the RCPSP is based on a time discretization and was introduced in Pritsker, Watters, and Wolfe (1969). Their formulation adapted to our resource leveling problem reads as follows:
+
+                           
+                              (1)
+                              
+                                 
+                                    min
+                                    
+                                       ∑
+                                       k
+                                    
+                                    
+                                       c
+                                       k
+                                    
+                                    ·
+                                    
+                                       R
+                                       k
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (2)
+                              
+                                 
+                                    
+                                       s
+                                       .
+                                       t
+                                       .
+                                    
+                                    
+                                    
+                                       ∑
+                                       t
+                                    
+                                    
+                                       ∑
+                                       
+                                          m
+                                          ∈
+                                          
+                                             M
+                                             j
+                                          
+                                       
+                                    
+                                    
+                                       x
+                                       
+                                          j
+                                          m
+                                          t
+                                       
+                                    
+                                    =
+                                    1
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (3)
+                              
+                                 
+                                    
+                                       ∑
+                                       t
+                                    
+                                    
+                                       ∑
+                                       
+                                          m
+                                          ∈
+                                          
+                                             M
+                                             j
+                                          
+                                       
+                                    
+                                    t
+                                    ·
+                                    
+                                       x
+                                       
+                                          j
+                                          m
+                                          t
+                                       
+                                    
+                                    =
+                                    
+                                       S
+                                       j
+                                    
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (4)
+                              
+                                 
+                                    
+                                       ∑
+                                       t
+                                    
+                                    
+                                       ∑
+                                       
+                                          m
+                                          ∈
+                                          
+                                             M
+                                             i
+                                          
+                                       
+                                    
+                                    
+                                       (
+                                       t
+                                       +
+                                       
+                                          p
+                                          
+                                             i
+                                             m
+                                          
+                                       
+                                       )
+                                    
+                                    
+                                       x
+                                       
+                                          i
+                                          m
+                                          t
+                                       
+                                    
+                                    ≤
+                                    
+                                       ∑
+                                       t
+                                    
+                                    
+                                       ∑
+                                       
+                                          m
+                                          ∈
+                                          
+                                             M
+                                             j
+                                          
+                                       
+                                    
+                                    t
+                                    
+                                       x
+                                       
+                                          j
+                                          m
+                                          t
+                                       
+                                    
+                                    
+                                    ∀
+                                    
+                                    
+                                       (
+                                       i
+                                       ,
+                                       j
+                                       )
+                                    
+                                    ∈
+                                    E
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (5)
+                              
+                                 
+                                    
+                                       
+                                          ∑
+                                          
+                                             j
+                                             ∈
+                                             J
+                                          
+                                       
+                                       
+                                          ∑
+                                          
+                                             m
+                                             ∈
+                                             
+                                                M
+                                                j
+                                             
+                                          
+                                       
+                                       
+                                          ∑
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         τ
+                                                         =
+                                                         t
+                                                         −
+                                                         
+                                                            p
+                                                            
+                                                               j
+                                                               m
+                                                            
+                                                         
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         τ
+                                                         ≥
+                                                         0
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          t
+                                       
+                                    
+                                    
+                                       r
+                                       
+                                          j
+                                          m
+                                          k
+                                       
+                                    
+                                    ·
+                                    
+                                       x
+                                       
+                                          j
+                                          m
+                                          τ
+                                       
+                                    
+                                    ≤
+                                    
+                                       R
+                                       k
+                                    
+                                    
+                                    ∀
+                                    
+                                    k
+                                    ,
+                                    t
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (6)
+                              
+                                 
+                                    
+                                       S
+                                       j
+                                    
+                                    ≥
+                                    0
+                                    ,
+                                    
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                    
+                                    
+                                       R
+                                       k
+                                    
+                                    ≥
+                                    0
+                                    ,
+                                    
+                                    ∀
+                                    k
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (7)
+                              
+                                 
+                                    
+                                       x
+                                       
+                                          j
+                                          m
+                                          t
+                                       
+                                    
+                                    ∈
+                                    
+                                       {
+                                       0
+                                       ,
+                                       1
+                                       }
+                                    
+                                    
+                                    ∀
+                                    
+                                    t
+                                    ,
+                                    j
+                                    ,
+                                    m
+                                    ∈
+                                    
+                                       M
+                                       j
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+Binary (“start-time”) variables xjmt
+                         model whether job j starts at time t in mode m or not. Each job j must start exactly once, and in exactly one mode (2). The start time Sj
+                         of job 
+                           
+                              j
+                              ∈
+                              J
+                           
+                         is linked to the binary variables xjmt
+                         in Equation (3) and is therefore implicitly integral. This linking is redundant, but we keep it for instructional purposes. Also precedence constraints (4), and resource capacity constraints (5) can be expressed as linear inequalities. In this model we decide about the resource capacities Rk
+                         ≥ 0 for each resource k, such that the total resource availability cost is minimized via the objective function (1). For notational convenience we do not restrict the (j, m, t) indices of xjmt
+                         variables to their feasible combinations. In fact, certain start times and certain modes would violate the calendar boundaries. However, this can be efficiently taken care of in a preprocessing step, yielding a huge reduction in the number of variables.
+
+Depending on several factors, such as network complexity (the density of G) or the time discretization considered, this formulation may give very weak lower bounds. Very often, we experience that in an optimal solution to the LP relaxation only few binary variables are fractional, but the points in time used in the convex combination (3) to yield the actual start time Sj
+                         of a job are far apart from one another. A simple example is 
+                           
+                              
+                                 x
+                                 
+                                    j
+                                    m
+                                    
+                                       t
+                                       1
+                                    
+                                 
+                              
+                              =
+                              
+                                 x
+                                 
+                                    j
+                                    m
+                                    
+                                       t
+                                       2
+                                    
+                                 
+                              
+                              =
+                              0.5
+                           
+                         which results in Sj
+                         = (t
+                        1 + t
+                        2)/2. When t
+                        1 and t
+                        2 lie in different shifts it may happen that Sj
+                         is outside any shift, resulting in an infeasible start time. Fractions of jobs may violate precedence constraints even though the aggregated constraint (4) is fulfilled for the fractional solution. This holds similarly for the resource constraint (5). Things get more involved in our setting as different modes can be fractionally used for each job, thus all job durations between smallest and largest may appear. We informally call this a “smearing” of start time variables. This smearing gives us irrelevant information about the schedule and we lose most if not all structure in the model. This happens often in MIP models, however, it hits us particularly hard for scheduling problems.
+
+Finally, branching a binary variable xjmt
+                         to zero is a very weak decision if the corresponding job can be scheduled one time unit earlier or later. That is, the decision essentially has no effect. Not so the upward branch, which fixes a start time and mode and thus imposes significant structure to the overall solution. It is therefore to be expected that branching on xjmt
+                         variables gives an unbalanced search tree, which is not desired.
+
+In order to reduce the effects of “losing the timing information” caused by the smearing of variables, we propose a model which exploits the problem structure by decomposing the time horizon into the availability periods of resources. Based on the calendar for each resource type, every working shift represents a smaller subproblem for which sub-schedules, or configurations, are stated for one resource type only. These configurations are linked by global constraints ensuring that exactly one configuration is chosen for each working shift, and that precedence constraints are respected.
+
+                           Definition 1
+                           A configuration ξ for an interval 
+                                 
+                                    I
+                                    ∈
+                                    
+                                       I
+                                       k
+                                    
+                                 
+                               of resource type k is a schedule for a subset 
+                                 
+                                    J
+                                    ⊆
+                                    J
+                                 
+                               of jobs that all require resource type k. Each job j ∈ J is specified by its start time Sjξ
+                               and its completion time Cjξ
+                               (this uniquely determines its mode). The maximum simultaneous usage of resource type k by these jobs is denoted by 
+                                 
+                                    
+                                       r
+                                       ¯
+                                    
+                                    ξ
+                                 
+                              .
+
+For each configuration ξ for a particular shift 
+                           
+                              I
+                              ∈
+                              
+                                 I
+                                 k
+                              
+                           
+                         we introduce a binary variable xξ
+                         which indicates whether configuration ξ is chosen or not. We use the short hand notation j ∈ ξ to express that job j is executed in the shift corresponding to configuration ξ. Note that the mode of each job is determined by the respective start and completion times. The so-called master problem reads:
+
+                           
+                              (8)
+                              
+                                 
+                                    min
+                                    
+                                       ∑
+                                       k
+                                    
+                                    
+                                       c
+                                       k
+                                    
+                                    ·
+                                    
+                                       R
+                                       k
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (9)
+                              
+                                 
+                                    
+                                       s
+                                       .
+                                       t
+                                       .
+                                    
+                                    
+                                    
+                                       C
+                                       i
+                                    
+                                    ≤
+                                    
+                                       S
+                                       j
+                                    
+                                    
+                                    ∀
+                                    
+                                    
+                                       (
+                                       i
+                                       ,
+                                       j
+                                       )
+                                    
+                                    ∈
+                                    E
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (10)
+                              
+                                 
+                                    
+                                       S
+                                       j
+                                    
+                                    =
+                                    
+                                       ∑
+                                       
+                                          ξ
+                                          :
+                                          j
+                                          ∈
+                                          ξ
+                                       
+                                    
+                                    
+                                       S
+                                       
+                                          j
+                                          ξ
+                                       
+                                    
+                                    ·
+                                    
+                                       x
+                                       ξ
+                                    
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (11)
+                              
+                                 
+                                    
+                                       C
+                                       j
+                                    
+                                    =
+                                    
+                                       ∑
+                                       
+                                          ξ
+                                          :
+                                          j
+                                          ∈
+                                          ξ
+                                       
+                                    
+                                    
+                                       C
+                                       
+                                          j
+                                          ξ
+                                       
+                                    
+                                    ·
+                                    
+                                       x
+                                       ξ
+                                    
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (12)
+                              
+                                 
+                                    
+                                       ∑
+                                       
+                                          ξ
+                                          :
+                                          ξ
+                                          ∈
+                                          I
+                                       
+                                    
+                                    
+                                       
+                                          r
+                                          ¯
+                                       
+                                       ξ
+                                    
+                                    ·
+                                    
+                                       x
+                                       ξ
+                                    
+                                    ≤
+                                    
+                                       R
+                                       k
+                                    
+                                    
+                                    ∀
+                                    
+                                    k
+                                    
+                                    
+                                    ∀
+                                    
+                                    I
+                                    ∈
+                                    
+                                       I
+                                       k
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (13)
+                              
+                                 
+                                    
+                                       ∑
+                                       
+                                          ξ
+                                          :
+                                          j
+                                          ∈
+                                          ξ
+                                       
+                                    
+                                    
+                                       x
+                                       ξ
+                                    
+                                    =
+                                    1
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (14)
+                              
+                                 
+                                    
+                                       R
+                                       k
+                                    
+                                    ,
+                                    
+                                       S
+                                       j
+                                    
+                                    ,
+                                    
+                                       C
+                                       j
+                                    
+                                    ≥
+                                    0
+                                    
+                                    ∀
+                                    
+                                    k
+                                    ,
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (15)
+                              
+                                 
+                                    
+                                       x
+                                       ξ
+                                    
+                                    ∈
+                                    
+                                       {
+                                       0
+                                       ,
+                                       1
+                                       }
+                                    
+                                    
+                                    ∀
+                                    
+                                    ξ
+                                 
+                              
+                           
+                        
+                     
+
+Each job is executed exactly once by Equation (13). This constraint also ensures, that for each job exactly one mode (from exactly one configuration) can be chosen. The start and completion times for each job are computed from the chosen configurations via the linking constraints (10) and (11). Constraints (9) model the precedence relations between jobs. These could be directly expressed by substituting Sj
+                         and Cj
+                         from the linking constraints, but (10) and (11) are helpful in the pricing problem (Section 3.3) where they help penalizing or encouraging certain start or completion times of jobs. Constraints (12) link resource consumptions to the capacities and ensure that the total resource capacity available over the planning horizon is at least the maximum resource usage needed in each shift.
+
+Since the number of feasible configurations is exponential in the number of jobs, we solve the LP relaxation of (8)–(15) by column generation. That is, we start with a very small (e.g., heuristically generated) subset of configuration variables, and dynamically add more variables to the model until it can be proven that no more promising variables exist. This optimality proof is provided—as in the standard simplex method—via non-negativity of reduced costs of all configuration variables. It is checked with the help of an auxiliary optimization problem, the pricing subproblem, which determines a negative reduced cost configuration variable, or proves that none exist.
+
+We must solve a pricing problem for every shift 
+                           
+                              I
+                              ∈
+                              
+                                 I
+                                 k
+                              
+                           
+                         of each resource type k. For reduced cost computations, we need the dual variables of constraints (10)–(13) which are denoted by sj, cj, ρkI
+                        , and πj
+                        , respectively. For a fixed shift I only the subset 
+                           
+                              J
+                              ⊆
+                              J
+                           
+                         of jobs needs to be considered that can be scheduled in I. This subset is restricted to jobs using the proper resource type, but also—as we see later—e.g., branching and other decisions may render certain start times of certain jobs infeasible. The objective function (16) reflects minimizing the reduced cost.
+
+                           
+                              (16)
+                              
+                                 
+                                    max
+                                    
+                                    
+                                       ∑
+                                       j
+                                    
+                                    
+                                       π
+                                       j
+                                    
+                                    ·
+                                    
+                                       X
+                                       j
+                                    
+                                    −
+                                    
+                                       ∑
+                                       j
+                                    
+                                    
+                                       c
+                                       j
+                                    
+                                    ·
+                                    
+                                       C
+                                       j
+                                    
+                                    −
+                                    
+                                       ∑
+                                       j
+                                    
+                                    
+                                       s
+                                       j
+                                    
+                                    ·
+                                    
+                                       S
+                                       j
+                                    
+                                    −
+                                    
+                                       ρ
+                                       
+                                          k
+                                          I
+                                       
+                                    
+                                    ·
+                                    
+                                       
+                                          r
+                                          ¯
+                                       
+                                       k
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (17)
+                              
+                                 
+                                    
+                                       s
+                                       .
+                                       t
+                                       .
+                                    
+                                    
+                                    
+                                       ∑
+                                       
+                                          t
+                                          ∈
+                                          I
+                                       
+                                    
+                                    
+                                       ∑
+                                       
+                                          m
+                                          ∈
+                                          
+                                             M
+                                             j
+                                          
+                                       
+                                    
+                                    
+                                       x
+                                       
+                                          j
+                                          m
+                                          t
+                                       
+                                    
+                                    =
+                                    
+                                       X
+                                       j
+                                    
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (18)
+                              
+                                 
+                                    
+                                       ∑
+                                       
+                                          t
+                                          ∈
+                                          I
+                                       
+                                    
+                                    
+                                       ∑
+                                       
+                                          m
+                                          ∈
+                                          
+                                             M
+                                             j
+                                          
+                                       
+                                    
+                                    t
+                                    ·
+                                    
+                                       x
+                                       
+                                          j
+                                          m
+                                          t
+                                       
+                                    
+                                    =
+                                    
+                                       S
+                                       j
+                                    
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (19)
+                              
+                                 
+                                    
+                                       ∑
+                                       
+                                          t
+                                          ∈
+                                          I
+                                       
+                                    
+                                    
+                                       ∑
+                                       
+                                          m
+                                          ∈
+                                          
+                                             M
+                                             j
+                                          
+                                       
+                                    
+                                    
+                                       (
+                                       t
+                                       +
+                                       
+                                          p
+                                          
+                                             j
+                                             m
+                                          
+                                       
+                                       )
+                                    
+                                    ·
+                                    
+                                       x
+                                       
+                                          j
+                                          m
+                                          t
+                                       
+                                    
+                                    =
+                                    
+                                       C
+                                       j
+                                    
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (20)
+                              
+                                 
+                                    
+                                       
+                                          ∑
+                                          
+                                             j
+                                             ∈
+                                             J
+                                          
+                                       
+                                       
+                                          ∑
+                                          
+                                             m
+                                             ∈
+                                             
+                                                M
+                                                j
+                                             
+                                          
+                                       
+                                       
+                                          ∑
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         τ
+                                                         =
+                                                         t
+                                                         −
+                                                         
+                                                            p
+                                                            
+                                                               j
+                                                               m
+                                                            
+                                                         
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         τ
+                                                         ∈
+                                                         I
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          t
+                                       
+                                    
+                                    
+                                       r
+                                       
+                                          j
+                                          m
+                                          k
+                                       
+                                    
+                                    ·
+                                    
+                                       x
+                                       
+                                          j
+                                          m
+                                          τ
+                                       
+                                    
+                                    ≤
+                                    
+                                       
+                                          r
+                                          ¯
+                                       
+                                       k
+                                    
+                                    
+                                    ∀
+                                    
+                                    t
+                                    ∈
+                                    I
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (21)
+                              
+                                 
+                                    
+                                       
+                                          r
+                                          ¯
+                                       
+                                       k
+                                    
+                                    ≥
+                                    0
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (22)
+                              
+                                 
+                                    
+                                       S
+                                       j
+                                    
+                                    ,
+                                    
+                                    
+                                       C
+                                       j
+                                    
+                                    ≥
+                                    0
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (23)
+                              
+                                 
+                                    
+                                       x
+                                       
+                                          j
+                                          m
+                                          t
+                                       
+                                    
+                                    ∈
+                                    
+                                       {
+                                       0
+                                       ,
+                                       1
+                                       }
+                                    
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                    ,
+                                    
+                                    m
+                                    ∈
+                                    
+                                       M
+                                       j
+                                    
+                                    ,
+                                    
+                                    t
+                                    ∈
+                                    I
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (24)
+                              
+                                 
+                                    
+                                       X
+                                       j
+                                    
+                                    ∈
+                                    
+                                       {
+                                       0
+                                       ,
+                                       1
+                                       }
+                                    
+                                    
+                                    ∀
+                                    
+                                    j
+                                    ∈
+                                    J
+                                 
+                              
+                           
+                        
+                     
+
+The Xj, Sj
+                        , and Cj
+                         variables are “reporting” variables, and again present for instructional purposes only (as they could be substituted). Binary variable Xj
+                         decides whether job j ∈ J is processed, and if so, at what start time St
+                         and completion time Cj
+                        . Note once more, that this uniquely determines the job’s mode. All three variables for each job j ∈ J characterize a configuration ξ for the specific shift 
+                           
+                              I
+                              ∈
+                              
+                                 I
+                                 k
+                              
+                           
+                         of resource type k. This pricing problem is again a scheduling problem with a non-regular objective function. By its mechanism, this is again a time-indexed formulation, with binary start-time variables xjmt
+                        , as is MIP (1)–(7). However, it has a much smaller time horizon (only one shift), and it is not required that each possible job j ∈ J is actually executed. Constraints (17) model the selection of job j and its mode; Constraints (18) and (19) encode the start and completion times of jobs according to the chosen mode assignment. Resource capacity constraints (20) have to be satisfied as before and the resource usage in this shift is again a decision variable, denoted by 
+                           
+                              
+                                 r
+                                 ¯
+                              
+                              k
+                           
+                        . The objective function value is rewarded by πj
+                         if job j is selected into the configuration and by multiples of sj
+                         and cj
+                         according to the start and completion times. A unit increase of resource usage penalizes the objective value by ρkI
+                        .
+
+The pricing problem (16)–(24) is NP-hard as it contains a resource leveling problem as special case. This can be seen as follows: Set all πj
+                         to a value large enough to ensure that each job must be scheduled, and let sj
+                         and cj
+                         be zero for all j. Then, we need to schedule all jobs during I at a minimum resource cost 
+                           
+                              
+                                 ρ
+                                 
+                                    k
+                                    I
+                                 
+                              
+                              ·
+                              
+                                 
+                                    r
+                                    ¯
+                                 
+                                 k
+                              
+                           
+                        . As we are not aware of other exact approaches to this kind of hard scheduling problem, we solve the pricing problem as a mixed integer program itself.
+
+The master problem (8)–(15) and the pricing problem (16)–(24) are solved alternately, exchanging dual variable values in one, and configuration variables in the other direction, until optimality of the master problem is proven. Note that an optimal solution to the master problem can be fractional, and integrality of configuration variables xξ
+                         still needs to be ensured. This leads us to a branch-and-price algorithm, in which the LP relaxation in each node of the branch-and-bound tree is solved by column generation as above.
+
+In a Dantzig–Wolfe reformulation of a MIP 
+                           
+                              min
+                              {
+                              
+                                 c
+                                 T
+                              
+                              x
+                              ∣
+                              A
+                              x
+                              ≥
+                              b
+                              ,
+                              
+                              D
+                              x
+                              ≥
+                              d
+                              ,
+                              
+                              x
+                              ∈
+                              
+                                 Q
+                                 
+                                    n
+                                    1
+                                 
+                              
+                              ×
+                              
+                                 Z
+                                 
+                                    n
+                                    2
+                                 
+                              
+                              }
+                              ,
+                           
+                         which is called the original formulation in this context, we change the polyhedral representation for a subset of constraints, say Dx ≥ d. The convex hull of all the integer points (resp. mixed integer sets) that are feasible for Dx ≥ d is expressed as convex combination x = ∑
+                           q
+                        
+                        λqxq
+                        , ∑
+                           q
+                        
+                        λq
+                         = 1, λq
+                         ≥ 0 of its finitely many extreme points xq
+                         (assuming that Dx ≥ d is bounded). This convex combination is substituted in the remaining constraints Ax ≥ b, yielding the master problem. The extreme points are given implicitly as solutions to an optimization problem, the pricing problem. The reformulation, which results in a best possible strengthening of constraints Dx ≥ d, is applied in order to obtain stronger bounds from the relaxation. In many practical examples, Dx ≥ d can be separated into K blocks of disjoint sets of variables and constraints, Dκxκ
+                         ≥ dκ, κ = 1, …, K, where the dimensions of vectors and matrices are compatible, and each block gives rise to a reformulation. We refer to Desrosiers and Lübbecke (2005, 2011) for details.
+
+Considering the original time-indexed formulation (1)–(7), a Dantzig–Wolfe reformulation is not obvious. Note, however, that variables can be grouped “into blocks” according to shifts for all resource types. That is, variables xjmt
+                         form a group for each fixed resource type k and shift 
+                           
+                              I
+                              ∈
+                              
+                                 I
+                                 k
+                              
+                              ,
+                           
+                         containing all jobs j executable during I in all modes m. For each such group of variables, only those linking constraints (3) and resource constraints (5) for k and all t ∈ I are relevant. These 
+                           
+                              κ
+                              =
+                              
+                                 ∑
+                                 
+                                    k
+                                    =
+                                    1
+                                 
+                                 
+                                    |
+                                    R
+                                    |
+                                 
+                              
+                              
+                                 |
+                                 
+                                    I
+                                    k
+                                 
+                                 |
+                              
+                           
+                         groups of variables and constraints form independent subproblems Dκxκ
+                         ≥ dκ
+                         which are reformulated as sketched above. All other constraints (2) and (4) are global and kept in the role of master constraints Ax ≥ b. Given k and I, the solution vectors (“extreme points”) of the resulting pricing problem (16)–(24), consisting of (Xj, Sj, Cj
+                        )
+                           j ∈ J
+                         and 
+                           
+                              
+                                 
+                                    r
+                                    ¯
+                                 
+                                 k
+                              
+                              ,
+                           
+                         characterize a configuration ξ. This information, except the resource usage, entirely encodes a feasible setting of the original xjmt
+                         variables; or in other words, the original variable vector can be expressed as selecting exactly one solution vector (Xj, Sj, Cj
+                        )
+                           j ∈ J
+                         and 
+                           
+                              
+                                 r
+                                 ¯
+                              
+                              k
+                           
+                        . Fractionally, this is a convex combination with multipliers xξ
+                        , and the convexity constraint is stated in (13).
+
+It is not necessary to understand the model (8)–(15) as a Dantzig–Wolfe reformulation of (1)–(7), as our model has a self-supported interpretation. However, this interpretation motivates the branching rules we propose as well as the way we make use of cutting planes.
+
+A solution to the original problem (1)–(7) is given by the resource capacities Rk
+                        , and an assignment of start times Sj
+                         and completion times Cj
+                         for each job j. The mode is given by the unique mode mj
+                        , such that 
+                           
+                              
+                                 p
+                                 
+                                    j
+                                    
+                                       m
+                                       j
+                                    
+                                 
+                              
+                              =
+                              
+                                 C
+                                 j
+                              
+                              −
+                              
+                                 S
+                                 j
+                              
+                           
+                        . In a modern branch-and-price context one tries to branch on these original variables which are expressible, via the Dantzig–Wolfe reformulation, as a sum of master variables, compare (10)–(12), instead of on single master variables (Desrosiers & Lübbecke, 2005). A main reason is that branching decisions on single master variables are hard to respect in the pricing problems, e.g., a configuration ξ, forbidden via xξ
+                         = 0, must not be re-generated. Branching decisions on (combinations of) master variables represent additional constraints that give rise to additional dual variables that need to be respected in the pricing problem. This usually implies new variables and new constraints in the pricing problem. However, when branching constraints are formulated on the original variables, these dual variables only affect a subproblem’s objective function, not its constraints, see e.g., Desrosiers and Lübbecke (2011).
+
+We impose a priority on branching decisions according to the effect we observed in preliminary experiments (Coughlan et al., 2010). The order is Rk
+                        ,  Sj
+                        , and then Cj
+                        , from highest to lowest priority. Only when all higher priority variables assume integral values, we branch on variables of the next class. Let a superscript star indicate the variable’s value in the current master LP solution. Branching on resource capacity values has the largest impact as these have non-zero objective coefficients. We first evaluate the down-branch 
+                           
+                              
+                                 R
+                                 k
+                              
+                              ≤
+                              
+                                 ⌊
+                                 
+                                    R
+                                    k
+                                    ☆
+                                 
+                                 ⌋
+                              
+                              ,
+                           
+                         and then the up-branch 
+                           
+                              
+                                 R
+                                 k
+                              
+                              ≥
+                              
+                                 ⌊
+                                 
+                                    R
+                                    k
+                                    ☆
+                                 
+                                 ⌋
+                              
+                              +
+                              1
+                           
+                        . Branching on Rk
+                         changes the feasible space of the pricing problems, so we branch on these variables first even if 
+                           
+                              R
+                              k
+                              ☆
+                           
+                         is not fractional. When there is choice between multiple resource variables, we select a most fractional one and use the objective function coefficient as a tie-breaker (prefer larger values). Start and completion time variables are considered as branching candidates only if any corresponding binary configuration variable in (10) is fractional. An unfixed start time variable Sj
+                         is selected where the points in time corresponding to positive xξ
+                         variables differ most, counteracting the smearing of variables. The node is split into two child nodes with 
+                           
+                              
+                                 S
+                                 j
+                              
+                              ≤
+                              
+                                 ⌊
+                                 
+                                    S
+                                    j
+                                    ☆
+                                 
+                                 ⌋
+                              
+                              ,
+                           
+                         and 
+                           
+                              
+                                 S
+                                 j
+                              
+                              ≥
+                              
+                                 ⌊
+                                 
+                                    S
+                                    j
+                                    ☆
+                                 
+                                 ⌋
+                              
+                              +
+                              1
+                              ,
+                           
+                         respectively. Completion times are handled accordingly. This scheme is used in conjunction with propagation rules (described next) and aims at creating a more balanced search tree.
+
+It is a fundamental principle of constraint programming to tighten variable domains due to logical implications given by the constraints, and/or already fixed variables. For example, the precedence and resource constraints bear the logical structure of the problem and can be used to detect infeasible start times of variables which can therefore be eliminated from the domains. This is called propagation. In branch-and-price, domain propagation can also be used to establish consistency of the LP relaxation after branching, i.e., already generated master variables which represent configurations that contradict any previous branching decision taken on the path that led to the current node need to be locally fixed to zero (variables cannot simply be eliminated as they are essential in other parts of the search tree). We mentioned earlier that we only use xjmt
+                         variables in a pricing problem that correspond to feasible combinations of (j, m, t) indices. These combinations are restricted after branching and propagation, and maybe after cutting. The preprocessing to eliminate infeasible combinations is also done in propagation.
+
+In the area of scheduling problems, a large variety of propagation algorithms is known to detect infeasible start times and perform variable bound adjustments. Edge-finding is a constraint programming technique concerned with deriving better bounds for earliest start and latest completion times of jobs using energy arguments. We adapt the algorithm proposed in Mercier and Van Hentenryck (2008) to the multi-mode case by using the minimum energy used by any mode for each job, which naturally seems to give weaker bounds. This is balanced by the fact that jobs are not preemptive, may not cross shift-bounds and obey precedence constraints which enables further propagation of start and completion times.
+
+We use this algorithm in every node of the branch-and-price tree, prior to calling the pricing problem and cutting plane separation.
+
+State-of-the-art MIP solvers heavily rely on additional valid inequalities (“cutting planes”) in order to improve the dual bound and by that prune unpromising nodes of the branch-and-bound tree. In branch-and-price, formulating cutting planes in the master problem variables is possible, but raises again (as with branching constraints) the issue of how to respect the additional dual variables in the pricing problem. It is technically easier to formulate valid inequalities on the original variables and add their Dantzig–Wolfe reformulation, i.e., in our case their translation to configuration variables, to the master problem. Again, this only changes the objective function of the pricing problem, see again Desrosiers and Lübbecke (2011) for details. Incidentally, this is a good situation for us as the literature knows several cutting planes for various scheduling problems, all of them formulated on variables with a meaning as in the standard MIP (1)–(7). Here, we generalize the precedence inequalities as introduced in Christofides, Alvarez-Valdes, and Tamarit (1987) where jobs have a fixed processing time:
+
+                           
+                              (25)
+                              
+                                 
+                                    ∀
+                                    
+                                    
+                                       (
+                                       i
+                                       ,
+                                       j
+                                       )
+                                    
+                                    ∈
+                                    E
+                                    ,
+                                    τ
+                                    :
+                                    
+                                    
+                                       ∑
+                                       
+                                          t
+                                          ≥
+                                          τ
+                                       
+                                    
+                                    
+                                       x
+                                       
+                                          i
+                                          t
+                                       
+                                    
+                                    +
+                                    
+                                       ∑
+                                       
+                                          t
+                                          <
+                                          τ
+                                          +
+                                          
+                                             p
+                                             i
+                                          
+                                       
+                                    
+                                    
+                                       x
+                                       
+                                          j
+                                          t
+                                       
+                                    
+                                    ≤
+                                    1
+                                    .
+                                 
+                              
+                           
+                        
+                     
+
+These cuts read as follows: For any point in time τ, in an end-to-start precedence relation between jobs i and j, either job i starts the latest in τ or job j starts before τ + pi
+                        . As multiple modes are present we compute the minimum processing time p
+                        
+                           i, min  a job i may have locally, i.e., the minimum over all of its modes. Building on these cuts, we obtain the following cuts in our master problem:
+
+                           
+                              (26)
+                              
+                                 
+                                    ∀
+                                    
+                                    
+                                       (
+                                       i
+                                       ,
+                                       j
+                                       )
+                                    
+                                    ∈
+                                    E
+                                    ,
+                                    τ
+                                    :
+                                    
+                                    
+                                       ∑
+                                       
+                                          ξ
+                                          :
+                                          
+                                             S
+                                             
+                                                i
+                                                ξ
+                                             
+                                          
+                                          ≥
+                                          τ
+                                       
+                                    
+                                    
+                                       x
+                                       ξ
+                                    
+                                    +
+                                    
+                                       ∑
+                                       
+                                          ξ
+                                          :
+                                          
+                                             S
+                                             
+                                                j
+                                                ξ
+                                             
+                                          
+                                          ≤
+                                          τ
+                                          +
+                                          
+                                             p
+                                             
+                                                i
+                                                ,
+                                                min
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       x
+                                       ξ
+                                    
+                                    ≤
+                                    1
+                                    .
+                                 
+                              
+                           
+                        
+                     
+
+By construction, this does not entail any structural changes to the pricing problem, but only the coefficients of the objective function need to be updated. For each constraint (26) that is added to the relaxation, we introduce the dual variable μτij
+                         which integrates in the reduced cost objective function of the pricing problem. If Si
+                         ≥ τ or Sj
+                         < τ + p
+                        
+                           i, min , the cost coefficient of variable ximt
+                         becomes
+
+                           
+                              (27)
+                              
+                                 
+                                    
+                                       ∑
+                                       
+                                          (
+                                          i
+                                          ,
+                                          j
+                                          )
+                                          ∈
+                                          E
+                                       
+                                    
+                                    
+                                       ∑
+                                       
+                                          τ
+                                          ≥
+                                          t
+                                       
+                                    
+                                    
+                                       μ
+                                       
+                                          τ
+                                          i
+                                          j
+                                       
+                                    
+                                    +
+                                    
+                                       ∑
+                                       
+                                          (
+                                          k
+                                          ,
+                                          i
+                                          )
+                                          ∈
+                                          E
+                                       
+                                    
+                                    
+                                       ∑
+                                       
+                                          τ
+                                          <
+                                          t
+                                          +
+                                          
+                                             p
+                                             
+                                                i
+                                                m
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       μ
+                                       
+                                          τ
+                                          k
+                                          i
+                                       
+                                    
+                                    .
+                                 
+                              
+                           
+                        
+                     
+
+The cutting planes are added to the master problem after new configuration variables have been generated and each configuration variable is introduced into the corresponding constraints. Overall, this gives a branch-price-and-cut algorithm. In Appendix A, we present these cuts in the context of generalized precedence constraints.
+
+For the master problem, rounding heuristics for fractional solutions are not promising, since values of binary variables may be smeared over the time horizon and precedence constraints are likely to be violated in a rounded solution. To improve our upper bounds we extend a leveling heuristic from Megow et al. (2011) that produces initial solutions prior to search. We implement a generic list scheduling algorithm (a serial schedule generation scheme) and a ready scheduling heuristic (a parallel schedule generation scheme, see Coughlan et al., 2010) which are used as standalone heuristics during the branching process as well as in the initial leveling procedure.
+
+The two heuristics are called in each node of the search tree. To this end, we set the capacity of each resource to the fractional variable value rounded up, and fix the earliest and latest start and completion times for each job to the local bounds of the corresponding variables. We perform list scheduling using the (fractional) LP solution with jobs sorted by earliest completion times, where each job’s mode is chosen according to the largest processing time of at most Cj
+                         − Sj
+                        . If no feasible solution is obtained we try ready scheduling. Both of these heuristics produce solutions that are not necessarily feasible w.r.t. the current primal bound, since resource capacities are rounded up. Regardless of this, if a feasible schedule is found new columns representing that schedule are added to the master problem, in order to reduce the total number of pricing iterations.
+
+In this section we compare the outcome of our branch-price-and-cut algorithm against a preprocessed time-indexed formulation (1)–(7) solved by the MIP solver CPLEX. In particular, we are interested in the dual bounds that are obtained in the root node by either algorithm since these bounds indicate the strength of the polyhedral description. Furthermore, we give experimental evidence that the branching strategy and on some instances a careful use of precedence inequalities play an important role to efficiently solve a large number of the benchmark problems.
+
+There is no publicly available test set of benchmark instances reflecting the setup of our problem. The existing instances in the PSPLib (Kolisch & Sprecher, 1996) guided the design of our test set compilation. We use the same generation scheme as before in Coughlan et al. (2010), now for larger instances. Our set is composed of two sets of job scenarios, with 50 instances each. Each job can run in three different modes, using one to three units of its resource, with durations ranging from 5 to 12. The first set, denoted by N50E70, contains 50 jobs and 70 precedence constraints, whereas the second set N50E100 contains 50 jobs and 100 precedence constraints. The maximal width W of the precedence graph is six, which is achieved by constructing W chains of length 
+                           
+                              |
+                              J
+                              |
+                              /
+                              W
+                              ,
+                           
+                         and randomly choosing the remaining edges.
+
+There are two different resources which run in five calendar configurations, called C1–C5. These calendars are described schematically in Fig. 2. In the top row, calendars C1–C3 are shown. In each of these, the length of the shifts is 60. In C1 and C3 shift breaks are 60 units long, in C2 only 20 units long. Both resources are available at the same time in C1, while in C3 availability periods are complementary. In C2 the second resource is offset at 40 units. Calendars C4 and C5 show shifts with length 20 and breaks having length five. In C5 one of the resources is offset by 10. All scenarios are tested with each of the five different calendars. Time horizons were chosen by computing a minimal and maximal makespan heuristically using an earliest start list scheduling policy, and averaging these. The two makespans are computed by either scheduling all jobs at their highest resource usage (fastest mode) or by assigning the fewest possible resource usage to each job (slowest mode).
+
+All experiments were done on Intel Core™ i7-870 PCs (2.93 gigahertz, 8 megabytes cache, 8gigabytes memory) running Linux 2.6.34 (single thread). Each test run had a time limit of 1800 seconds. Our C++ implementation is based on SCIP 2.0.1 (SCIP, 2011) to perform the branch-price-and-cut process, with custom plug-ins for our heuristics, propagation, branching rules, cutting plane separation, and column generation. For the standard MIP (1)–(7) we used CPLEX 12.2 on the same machine, with default parameter settings, again single thread. Up to two threads were run in parallel on not entirely idle machines, so run time differences of 5 percent are regarded as “noise.”
+
+Previous results showed that it is important for CPLEX and our branch-price-and-cut framework to have a good initial solution, whereas the execution time of the heuristic throughout search is negligible, see Coughlan et al. (2010).
+
+There are m · T, i.e., a pseudo-polynomial number of precedence cuts (26); these are too many to explicitly add them all to the master problem, as this would have a negative impact on LP solving times. For the identification of violated cutting planes, which is called separation, we pursue two approaches. In our first approach we only check for a precedence pair (i, j) at point in time τ
+                           greedy = ⌈(Ci
+                            + Si
+                           )/2⌉ whether Equation (26) holds or is violated by more than a threshold ε. In the second approach, we find an optimum point τ
+                           best such that the left-hand side of Equation (26) is maximally violated. This can be done by sorting the summands of Equation (26) for each point in time τ such that for each value τ the left-hand side can be computed in linear time (after sorting). This procedure is pseudo-polynomial in the number of points in time.
+
+We compare the outcome of a CPLEX run on the standard MIP model (1)–(7) to different settings of our tailored branch-price-and-cut approach. In a first experiment, we do not separate cuts, denoted by “nocuts.” Then, we evaluate different separation strategies. First, we separate cuts already in the root node, and secondly, after resource capacity variables are fixed (by branching or propagation). Checking for violation only at a promising guess as point in time is denoted by “τ
+                           greedy, ” searching for the largest violation cuts is denoted by “τ
+                           best.” Furthermore, these cuts are only separated if a certain threshold “tol.” is exceeded, i.e., if in Equations (26) the sum of the variables exceeds 1 + tol. We use thresholds 10−4, 0.1, 0.3, 0.5 and 0.8, which range from a very small violation (gives more cuts) to a very high violation (gives less cuts).
+
+@&#RESULTS@&#
+
+We confirm that a Dantzig–Wolfe reformulation can considerably improve the dual bound as compared to the standard LP relaxation. As an even stronger statement, we also obtain a dual bound improvement over a state-of-the-art branch-and-cut algorithm. In Fig. 3
+                         we see that the average improvement per calendar of our configuration based formulation (8)–(15) over the LP relaxation of (1)–(7) lies between 20 percent and 65 percent throughout all instances. The displayed average deviations and the minimum and maximum values of that improvement show the strength of our relaxation.
+
+To evaluate the strength of generic cutting planes added in the root node of the commercial MIP solver, we compare the root dual bounds in Fig. 4
+                         after all standard cutting planes have been added by CPLEX versus the root node dual bound in our approach. Our improvement is no longer that dominating as in Fig. 3 but still for several of the hard instances in calendar setting C1, there is a 28 percent improvement on the average of the root dual bound compared to CPLEX.
+
+Next, we compare our branch-price-and-cut framework to a standard MIP approach in terms of absolute number of solved instances and afterward, we discuss the effect of precedence cuts in our model by evaluating the number of branch-and-bound nodes and the running time. In Fig. 5 and 6
+                        
+                         for each calendar, the first bar (black)
+                        
+                         gives the number of solved instances obtained by CPLEX, the second (white) bar represents this number for our branch-and-price approach without precedence cuts. The first five grey bars symbolize the results for setting “τ
+                        greedy” in increasing order of tolerances and the last five bars stand for settings “τ
+                        best” in increasing order of tolerances.
+
+
+Fig. 5
+shows for the instance set N50E70 that the pure branch-and-price algorithm without precedence cuts outperforms CPLEX, and adding precedence cuts seems to be a bad idea. Comparing Fig. 5 and 6, the set N50E70 with fewer precedence constraints than N50E100 is the harder one, as expected. In some cases the pure MIP approach is even better than the branch-price-and-cut approach with additional precedence cuts. The reason is that the time spent for separating new cuts, pricing new variables, and the additional LP iterations lead to too many timeouts and is therefore not competitive. Hence, not using any precedence cuts at all is, at first sight, a good decision.
+
+Nevertheless, it is possible to increase the root dual bound on several instances by using precedence cuts (26). During root solving most jobs are able to slide in their time window and the precedence cuts result in more binary configuration variables that are smeared over the time horizon. Hence, these cuts should not be used in the root node but still might be beneficial to prune certain nodes of the branch-and-bound tree. Recall that our branching scheme first branches on the resource capacities Rk
+                         and afterwardon the start and completion time variables. Fixed resource capacities in a node already decide on a lot of structure for the scheduling problem, since several modes of a job may no longer be valid. Thus, this seems to be a good point to separate precedence cuts (26). Figs. 7 and 8 show that more instances than before can be solved using the precedence cuts. In several cases a tolerance of 10−4 belongs to the best choices for the separation procedure. Especially, for the harder instances N50E70 some more instances of each calendar test set can be solved in the time limit to proven optimality in contrast to CPLEX or a setting without additional precedence cuts.
+
+Next, we elaborate on the solution time and on the number of nodes needed to find an optimal solution and prove its optimality. The results on the total number of solved instances showed that it is beneficial to separate precedence cuts after resource variables are fixed. Therefore, we will only present the numbers for that case.
+
+
+                        Tables 1 and 2
+                         reveal that using additional precedence cuts enables us to decrease the number of tree nodes by 10 percent to 20 percent on average. For several hard instances, e.g., in calendar C5 in test set N50E70 a decrease by even 50 percent is possible. Best results in terms of nodes are obtained when τ
+                        best is used for the separation of cuts. Nevertheless, this does not carry over to a reduced running time. For C1 the running times increase (τ
+                        best vs. τ
+                        greedy), whereas for C5 it decreases and the running time is about 10 percent faster than if no precedence cuts are separated. That is, there is the usual trade-off between quality and time, and cutting planes may be most interesting in memory critical applications.
+
+A tolerance between 0.1 and 0.3 gives the overall best results as higher and lower tolerances usually increase the running times.
+
+
+                        Tables 1 and 2 only show a slight improvement considering the average running time and the number of nodes needed (in the shifted geometric mean) if precedence inequalities are separated after resource capacities are fixed. The performance profiles (Dolan & Moré, 2002) in Fig. 9
+                         give a more detailed comparison by comparing the ratios of the number of nodes (running time) needed per instance versus the best running time by any of the settings listed in the tables. We see that, e.g., for calendar C5 on more than 50 percent of the instances the precedence inequalities remarkably reduce the number of nodes needed. On several instances, the setting without precedence inequalities needs between 10 and 100 times more nodes than the best setting with precedence inequalities. But we also see that the reduction in terms of running times is much smaller as separating these cuts and computing the new objective coefficients in the pricing problems is costly, too. Similarly, for calendar C4 we observe a decrease in the number of nodes needed, whereas the reduction in terms of running time is rather modest and can only be seen on less than 20 instances. We do not elaborate on the results for calendars C1–C3 here. On calendars C1 and C2, results are similar to C5, whereas on C3 not much changes, as on these instances the dual bounds have not been a bottleneck.
+
+
+                        Table 3 indicates the computational efforts spent in the pricing problems. For each set, N50E70 and N50E100, and per calendar C1–C5, we list the average running time (avtime) and number of nodes (avnodes) per instance. Column “ptime/time” shows that solving the pricing problem (setting up, solving the MIP, and generating new columns) takes from 58 percent up to 99 percent of the total solving time. Hence, the pricing routine determines the overall execution time. Recall that in each pricing round, a MIP for each shift needs to be solved. Column “# calls per node” shows how often the pricer is called on average per node, while the number of variables generated per call is indicated in the last column. The number of shifts per instance (which is equal to the number of MIPs to be solved with each call of the pricing problem) and the number of pricing rounds when solving a node influence this number.
+
+
+                        Table 4
+                        
+                         shows for each set and per calendar how often per instance that was not solved to optimality (“nsubopt”) CPLEX hit the best known primal (“nbestprimal”) and dual (“nbestdual”) bounds. The succeeding columns show the average gap of the best primal (dual) solution versus the best known solution (dual bound) from all our branch-price-and-cut variants, denoted by “avpgap” (“avdgap”). The last column presents the average gap that CPLEX was able to arrive at. From that table we can see that for set N50E70, the primal gap is the hardest for CPLEX, 13 to 23 percent. In contrast, for set N50E100 the average dual gap is much bigger than the average primal gap. Here, the average dual gap compared to all settings using branch-price-and-cut ranges from 13 percent to 37 percent, while the primal gap falls between 13 and 17 percent.
+
+We studied a practically motivated, complex multi-mode project scheduling problem with the objective to minimize the resource availability cost. Our aim was to demonstrate how far one can get when insisting on optimal solutions. The literature on related problems and in particular the PSPLib with up-to-date benchmark results suggest that even today instances with only 30 jobs are hard to solve to optimality when a “standard” model is used; in our case we compare against an adapted classical MIP formulation (Pritsker et al., 1969). Our study demonstrates that it helps to decompose the problem resource-wise per availability period. Technically, this means applying a Dantzig–Wolfe reformulation to the standard formulation (in a non-obvious way), even though this is not necessary to understand our approach. The resulting model is based on variables that represent entire schedules for each resource and shift, of which there are exponentially many. This necessitates a solution approach via a column generation and branch-and-price algorithm. A usually complicating feature in project scheduling, the resource availability periods (or shift calendars), can even be turned into an advantage in this context, as this reduces the size of the variable-generating subproblems in column generation.
+
+In our computational study we showed that the LP relaxations of the reformulated model are much stronger than that of the standard approach. The dual bound can even be strengthened by applying additional valid inequalities which are known for the standard formulation, and which we translate to our model. We believe that this is prototypical, and that more inequalities known from the scheduling literature could be integrated in our approach. The resulting branch-price-and-cut algorithm enables us to solve a large amount of instances with 50 jobs to proven optimality, where state-of-the-art MIP solvers suffer from the size and weak relaxation of the standard model.
+
+Our algorithm is generic and components like the pricing problem may also be solved via constraint programming algorithms or partially with a heuristic. We believe that the general approach is well-suited for similar problems, in particular, when the objective function is “complicated.” We finally remark that we believe that our ability to provide solution algorithms to complex models as ours changes our way we model with integer variables. While classical IP modeling used variables with “little meaning” our study supports the advise to impose more structure on a single variable’s meaning.
+
+We generalize the precedence inequalities as introduced in Christofides et al. (1987) where jobs have a fixed processing time to our master problem also for the case of generalized precedence relations. This is interesting for modeling multi-resource jobs, among others. The cuts of Christofides et al. are given as follows:
+
+                        
+                           (A.1)
+                           
+                              
+                                 ∀
+                                 
+                                 
+                                    (
+                                    i
+                                    ,
+                                    j
+                                    )
+                                 
+                                 ∈
+                                 E
+                                 ,
+                                 τ
+                                 :
+                                 
+                                 
+                                    ∑
+                                    
+                                       t
+                                       ≥
+                                       τ
+                                    
+                                 
+                                 
+                                    x
+                                    
+                                       i
+                                       t
+                                    
+                                 
+                                 +
+                                 
+                                    ∑
+                                    
+                                       t
+                                       <
+                                       τ
+                                       +
+                                       
+                                          p
+                                          i
+                                       
+                                    
+                                 
+                                 
+                                    x
+                                    
+                                       j
+                                       t
+                                    
+                                 
+                                 ≤
+                                 1
+                                 .
+                              
+                           
+                        
+                     
+                  
+
+These cuts read as follows: For any point in time τ, in an end-to-start precedence relation between jobs i and j, either job i starts the latest in τ or job j starts before τ + pi
+                     . Building on these cuts, we study generalized precedence constraints that are of the form start-to-start (
+                        
+                           GP
+                           1
+                        
+                     ), end-to-start (
+                        
+                           GP
+                           2
+                        
+                     ), start-to-end (
+                        
+                           GP
+                           3
+                        
+                     ) and end-to-end (
+                        
+                           GP
+                           4
+                        
+                     ). Let 
+                        
+                           
+                              δ
+                              
+                                 i
+                                 j
+                              
+                           
+                           ∈
+                           Z
+                           ,
+                        
+                      then we can include these generalized precedence relations in our master problem by adding the following inequalities based on start and completion time variables (Sj, Cj
+                     ), and also separate strengthened inequalities, similar to (A.1), based on the configuration variables (xξ
+                     ).
+
+                        
+                           
+                              
+                                 
+                                    
+                                       (
+                                       i
+                                       ,
+                                       j
+                                       )
+                                    
+                                    ∈
+                                    
+                                       GP
+                                       1
+                                    
+                                    ⇔
+                                    
+                                       S
+                                       i
+                                    
+                                    +
+                                    
+                                       δ
+                                       
+                                          i
+                                          j
+                                       
+                                    
+                                    ≤
+                                    
+                                       S
+                                       j
+                                    
+                                 
+                               or:
+
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                      
+                                                         ξ
+                                                         :
+                                                         
+                                                            S
+                                                            
+                                                               i
+                                                               ξ
+                                                            
+                                                         
+                                                         ≥
+                                                         τ
+                                                      
+                                                   
+                                                   
+                                                      x
+                                                      ξ
+                                                   
+                                                   +
+                                                   
+                                                      ∑
+                                                      
+                                                         ξ
+                                                         :
+                                                         
+                                                            S
+                                                            
+                                                               j
+                                                               ξ
+                                                            
+                                                         
+                                                         <
+                                                         τ
+                                                         +
+                                                         
+                                                            δ
+                                                            
+                                                               i
+                                                               j
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      x
+                                                      ξ
+                                                   
+                                                   ≤
+                                                   1
+                                                   
+                                                   ∀
+                                                   
+                                                   τ
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+
+                              
+                                 
+                                    
+                                       (
+                                       i
+                                       ,
+                                       j
+                                       )
+                                    
+                                    ∈
+                                    
+                                       GP
+                                       2
+                                    
+                                    ⇔
+                                    
+                                       C
+                                       i
+                                    
+                                    +
+                                    
+                                       δ
+                                       
+                                          i
+                                          j
+                                       
+                                    
+                                    ≤
+                                    
+                                       S
+                                       j
+                                    
+                                 
+                               or:
+
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                      
+                                                         ξ
+                                                         :
+                                                         
+                                                            C
+                                                            
+                                                               i
+                                                               ξ
+                                                            
+                                                         
+                                                         ≥
+                                                         τ
+                                                      
+                                                   
+                                                   
+                                                      x
+                                                      ξ
+                                                   
+                                                   +
+                                                   
+                                                      ∑
+                                                      
+                                                         ξ
+                                                         :
+                                                         
+                                                            S
+                                                            
+                                                               j
+                                                               ξ
+                                                            
+                                                         
+                                                         <
+                                                         τ
+                                                         +
+                                                         
+                                                            δ
+                                                            
+                                                               i
+                                                               j
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      x
+                                                      ξ
+                                                   
+                                                   ≤
+                                                   1
+                                                   
+                                                   ∀
+                                                   
+                                                   τ
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+
+                              
+                                 
+                                    
+                                       (
+                                       i
+                                       ,
+                                       j
+                                       )
+                                    
+                                    ∈
+                                    
+                                       GP
+                                       3
+                                    
+                                    ⇔
+                                    
+                                       S
+                                       i
+                                    
+                                    +
+                                    
+                                       δ
+                                       
+                                          i
+                                          j
+                                       
+                                    
+                                    ≤
+                                    
+                                       C
+                                       j
+                                    
+                                 
+                               or:
+
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                      
+                                                         ξ
+                                                         :
+                                                         
+                                                            S
+                                                            
+                                                               i
+                                                               ξ
+                                                            
+                                                         
+                                                         ≥
+                                                         τ
+                                                      
+                                                   
+                                                   
+                                                      x
+                                                      ξ
+                                                   
+                                                   +
+                                                   
+                                                      ∑
+                                                      
+                                                         ξ
+                                                         :
+                                                         
+                                                            C
+                                                            
+                                                               j
+                                                               ξ
+                                                            
+                                                         
+                                                         <
+                                                         τ
+                                                         +
+                                                         
+                                                            δ
+                                                            
+                                                               i
+                                                               j
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      x
+                                                      ξ
+                                                   
+                                                   ≤
+                                                   1
+                                                   
+                                                   ∀
+                                                   
+                                                   τ
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+
+                              
+                                 
+                                    
+                                       (
+                                       i
+                                       ,
+                                       j
+                                       )
+                                    
+                                    ∈
+                                    
+                                       GP
+                                       4
+                                    
+                                    ⇔
+                                    
+                                       C
+                                       i
+                                    
+                                    +
+                                    
+                                       δ
+                                       
+                                          i
+                                          j
+                                       
+                                    
+                                    ≤
+                                    
+                                       C
+                                       j
+                                    
+                                 
+                               or:
+
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                      
+                                                         ξ
+                                                         :
+                                                         
+                                                            C
+                                                            
+                                                               i
+                                                               ξ
+                                                            
+                                                         
+                                                         ≥
+                                                         τ
+                                                      
+                                                   
+                                                   
+                                                      x
+                                                      ξ
+                                                   
+                                                   +
+                                                   
+                                                      ∑
+                                                      
+                                                         ξ
+                                                         :
+                                                         
+                                                            C
+                                                            
+                                                               j
+                                                               ξ
+                                                            
+                                                         
+                                                         <
+                                                         τ
+                                                         +
+                                                         
+                                                            δ
+                                                            
+                                                               i
+                                                               j
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      x
+                                                      ξ
+                                                   
+                                                   ≤
+                                                   1
+                                                   
+                                                   ∀
+                                                   
+                                                   τ
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+Using these cuts in our master problem, the nature of the pricing problem (i.e., its constraints) does not change, only the coefficients of the objective function need to be updated. For each cut encoded by 
+                        
+                           
+                              (
+                              τ
+                              ,
+                              
+                                 (
+                                 i
+                                 ,
+                                 j
+                                 )
+                              
+                              )
+                           
+                           ∈
+                           
+                              GP
+                              ℓ
+                           
+                        
+                      we need to add the value of the dual variable 
+                        
+                           μ
+                           
+                              τ
+                              i
+                              j
+                           
+                           ℓ
+                        
+                      to the objective function, for all types of generalized precedence relations 
+                        
+                           
+                              GP
+                              ℓ
+                           
+                           ,
+                        
+                      ℓ = 1, …, 4 according to the following rules. The cost coefficient of variable ximt
+                      in the pricing problem is increased by:
+
+                        
+                           
+                              
+                                 
+                                    GP
+                                    1
+                                 
+                              :
+
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                      
+                                                         
+                                                            (
+                                                            i
+                                                            ,
+                                                            j
+                                                            )
+                                                         
+                                                         ∈
+                                                         
+                                                            GP
+                                                            1
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ∑
+                                                      
+                                                         τ
+                                                         :
+                                                         t
+                                                         ≥
+                                                         τ
+                                                      
+                                                   
+                                                   
+                                                      μ
+                                                      
+                                                         τ
+                                                         i
+                                                         j
+                                                      
+                                                      1
+                                                   
+                                                   +
+                                                   
+                                                      ∑
+                                                      
+                                                         
+                                                            (
+                                                            k
+                                                            ,
+                                                            i
+                                                            )
+                                                         
+                                                         ∈
+                                                         
+                                                            GP
+                                                            1
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ∑
+                                                      
+                                                         τ
+                                                         :
+                                                         t
+                                                         <
+                                                         τ
+                                                         +
+                                                         
+                                                            δ
+                                                            
+                                                               k
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      μ
+                                                      
+                                                         τ
+                                                         k
+                                                         i
+                                                      
+                                                      1
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+
+                              
+                                 
+                                    GP
+                                    2
+                                 
+                              :
+
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                      
+                                                         
+                                                            (
+                                                            i
+                                                            ,
+                                                            j
+                                                            )
+                                                         
+                                                         ∈
+                                                         
+                                                            GP
+                                                            2
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ∑
+                                                      
+                                                         τ
+                                                         :
+                                                         t
+                                                         +
+                                                         
+                                                            p
+                                                            
+                                                               i
+                                                               m
+                                                            
+                                                         
+                                                         ≥
+                                                         τ
+                                                      
+                                                   
+                                                   
+                                                      μ
+                                                      
+                                                         τ
+                                                         i
+                                                         j
+                                                      
+                                                      2
+                                                   
+                                                   +
+                                                   
+                                                      ∑
+                                                      
+                                                         
+                                                            (
+                                                            k
+                                                            ,
+                                                            i
+                                                            )
+                                                         
+                                                         ∈
+                                                         
+                                                            GP
+                                                            2
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ∑
+                                                      
+                                                         τ
+                                                         :
+                                                         t
+                                                         <
+                                                         τ
+                                                         +
+                                                         
+                                                            δ
+                                                            
+                                                               k
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      μ
+                                                      
+                                                         τ
+                                                         k
+                                                         i
+                                                      
+                                                      2
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+
+                              
+                                 
+                                    GP
+                                    3
+                                 
+                              :
+
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                      
+                                                         
+                                                            (
+                                                            i
+                                                            ,
+                                                            j
+                                                            )
+                                                         
+                                                         ∈
+                                                         
+                                                            GP
+                                                            3
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ∑
+                                                      
+                                                         τ
+                                                         :
+                                                         t
+                                                         ≥
+                                                         τ
+                                                      
+                                                   
+                                                   
+                                                      μ
+                                                      
+                                                         τ
+                                                         i
+                                                         j
+                                                      
+                                                      3
+                                                   
+                                                   +
+                                                   
+                                                      ∑
+                                                      
+                                                         
+                                                            (
+                                                            k
+                                                            ,
+                                                            i
+                                                            )
+                                                         
+                                                         ∈
+                                                         
+                                                            GP
+                                                            3
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ∑
+                                                      
+                                                         τ
+                                                         :
+                                                         t
+                                                         +
+                                                         
+                                                            p
+                                                            
+                                                               i
+                                                               m
+                                                            
+                                                         
+                                                         <
+                                                         τ
+                                                         +
+                                                         
+                                                            δ
+                                                            
+                                                               k
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      μ
+                                                      
+                                                         τ
+                                                         k
+                                                         i
+                                                      
+                                                      3
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+
+                              
+                                 
+                                    GP
+                                    4
+                                 
+                              :
+
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                      
+                                                         
+                                                            (
+                                                            i
+                                                            ,
+                                                            j
+                                                            )
+                                                         
+                                                         ∈
+                                                         
+                                                            GP
+                                                            4
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ∑
+                                                      
+                                                         τ
+                                                         :
+                                                         t
+                                                         +
+                                                         
+                                                            p
+                                                            
+                                                               i
+                                                               m
+                                                            
+                                                         
+                                                         ≥
+                                                         τ
+                                                      
+                                                   
+                                                   
+                                                      μ
+                                                      
+                                                         τ
+                                                         i
+                                                         j
+                                                      
+                                                      4
+                                                   
+                                                   +
+                                                   
+                                                      ∑
+                                                      
+                                                         
+                                                            (
+                                                            k
+                                                            ,
+                                                            i
+                                                            )
+                                                         
+                                                         ∈
+                                                         
+                                                            GP
+                                                            4
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ∑
+                                                      
+                                                         τ
+                                                         :
+                                                         t
+                                                         +
+                                                         
+                                                            p
+                                                            
+                                                               i
+                                                               m
+                                                            
+                                                         
+                                                         <
+                                                         τ
+                                                         +
+                                                         
+                                                            δ
+                                                            
+                                                               k
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      μ
+                                                      
+                                                         τ
+                                                         k
+                                                         i
+                                                      
+                                                      4
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+@&#REFERENCES@&#
+

@@ -1,0 +1,798 @@
+@&#MAIN-TITLE@&#Revisiting actor programming in C++
+
+@&#HIGHLIGHTS@&#
+
+
+               
+                  
+                  
+                     
+                        
+                           
+                           We analyze the problem and design space for actor programming in C++.
+
+
+                        
+                        
+                           
+                           We find that type-safe message passing interfaces are important for the robustness of actor programs.
+
+
+                        
+                        
+                           
+                           Pattern Matching as a DSL in C++ eases the definition of message handlers.
+
+
+                        
+                        
+                           
+                           We introduce an according framework for actor programming in C++ (CAF).
+
+
+                        
+                        
+                           
+                           Core algorithms and the scalable architecture are thoroughly discussed.
+
+
+                        
+                        
+                           
+                           Benchmarking CAF against many other frameworks reveals overall performance benefits.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+C++ Actor framework
+
+Concurrent programming
+
+Message-oriented middleware
+
+Distributed software architecture
+
+GPU computing
+
+Performance analysis
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  The actor model of computation has gained significant popularity over the last decade. Its high level of abstraction makes it appealing for concurrent applications in parallel and distributed systems. However, designing a real-world actor framework that subsumes full scalability, strong reliability, and high resource efficiency requires many conceptual and algorithmic additives to the original model.
+                  In this paper, we report on designing and building CAF, the C++ Actor Framework. CAF targets at providing a concurrent and distributed native environment for scaling up to very large, high-performance applications, and equally well down to small constrained systems. We present the key specifications and design concepts—in particular a message-transparent architecture, type-safe message interfaces, and pattern matching facilities—that make native actors a viable approach for many robust, elastic, and highly distributed developments. We demonstrate the feasibility of CAF in three scenarios: first for elastic, upscaling environments, second for including heterogeneous hardware like GPUs, and third for distributed runtime systems. Extensive performance evaluations indicate ideal runtime at very low memory footprint for up to 64 CPU cores, or when offloading work to a GPU. In these tests, CAF continuously outperforms the competing actor environments Erlang, Charm++, SalsaLite, Scala, ActorFoundry, and even the raw message passing framework OpenMPI.
+               
+            
+
+@&#INTRODUCTION@&#
+
+In recent times, an increasing number of applications require very high performance for serving concurrent tasks. Hosted in elastic, virtualized environments, these programs often need to scale up instantaneously to satisfy high demands of many simultaneous users. Such use cases urge program developers to implement tasks concurrently wherever algorithmically feasible, so that running code can fully adapt to the varying resources of a cloud-type setting. However, dealing with concurrency is challenging and handwritten synchronization easily lacks performance, robustness, or both.
+
+At the low end, the emerging Internet of Things (IoT) pushes demand for applications that are widely distributed on a fine granular scale. Such loosely coupled, highly heterogeneous IoT environments require lightweight and robust application code which can quickly adapt to ever changing deployment conditions. Still, the majority of existing applications in the IoT is built from low-level primitives and lacks flexibility, portability, and reliability. The envisioned industrial-scale applications of the near future urge the need for an appropriate software paradigm that can be efficiently applied to the various deployment areas of the IoT.
+
+Forty years ago, a seminal concept to the problems of concurrency and distribution has been formulated in the actor model by Hewitt et al. [1]. With the introduction of a single primitive—called actor—for concurrent and distributed entities, the model separates the design of a software from its deployment at runtime. The high level of abstraction offered by this approach combined with its flexibility and efficiency makes it highly attractive for the parallel multi-core systems of today, as well as for tasks distributed on Internet scale. As such, the actor concept is capable of providing answers to urgent problems throughout the software industry and has been recognized as an important contribution for efficiently using the current system infrastructure.
+
+On its long path from an early concept to a wide adoption in the real world, many contributions were needed in both conceptual modeling and practical realization. In his seminal work, Agha [2] introduced mailboxing for the message processing of actors and later laid out the fundament for open and dynamically reconfigurable actor systems [3]. Actor-based languages like Erlang [4] or SALSA Lite [5], frameworks such as ActorFoundry, which is based on Kilim [6], or vendor-specific environments like Casablanca [7] have been published but remained in their specific niches. Today, Scala includes the actor-based framework Akka [8] as part of its standard distribution, after the actor model has largely gained popularity among application developers. The application fields of the actor model also include cluster computing as demonstrated by the actor-inspired framework Charm++ [9]. In previous work [10,11], we reported on our initial steps for bringing a C++ actor library to the native domain.
+
+In this work, we revisit and discuss the C++ Actor Framework (CAF).
+                        1
+                     
+                     
+                        1
+                        http://www.actor-framework.org, a predecessor of CAF was named libcppa.
+                      CAF has evolved over the last four years to a full-fledged development platform—a domain-specific language in C++ and a powerful runtime environment. Moreover, CAF subsumes components for GPGPU computing, introspection of distributed actor systems, and adaptations to a loose coupling for the IoT [12]. It has been adopted in several prominent application environments, among them scalable network forensics [13].
+
+In this paper, we rethink the design of actors with CAF, donating special focus to the following core contributions:
+                        
+                           1.
+                           We present the scalable, message-transparent architecture of CAF along with core algorithms.
+
+We introduce type-safe message passing interfaces for enhancing the robustness of actor programs.
+
+We illustrate operations and use of the CAF pattern matching facility.
+
+We lay out a scheduling infrastructure for the actor runtime environment that improves scaling up to high numbers of concurrent processors.
+
+The remainder of this paper is organized as follows. In Section 2, we re-position the use of actors and highlight our platform from a programming and performance perspective. The evolution of the actor approach up to current requirements is discussed in Section 3 together with related work. Section 4 introduces key concepts and technologies that are central for the development of the C++ Actor Framework. The software design for type-safe messaging interfaces between actors are developed in Section 5, followed by the chapter on actor scheduling (Section 6). Extensive performance evaluations are shown in Section 7. We conclude in Section 8 and give an outlook on future research.
+
+In a first discussion, we want to shed light on the developing field of C++ actor programming from three motivating perspectives: characteristic use cases, programming characteristics, and performance potentials.
+
+
+                        Elastic programming for adaptive deployment: The actor approach allows a general purpose software to safely scale up and down by orders of magnitudes, while running in local or distributed environments. Such extraordinary robustness is enabled by assigning small application tasks to a possibly very high number of actors at negligible cost. In consequence, such programs can dynamically adapt to their runtime environment while executing efficiently on a mobile, a many-core server, or Internet-wide distributed hosts. The default domain of this case lies naturally in the cloud.
+
+
+                        End-to-end messaging at loose coupling: Actors directly exchange messages with each other, while the deployment specific message transport remains transparent. The hosting environment of an actor system may well admit loose coupling, using a stateless transactional transport for example. This extends traditional models of distributed programming like Remote Method Invocation (RMI) [14], which enables direct access to remote methods but requires a tight coupling, or the REST [15] facade, which is designed for loose coupling but adds an indirection. Typical applications can use this capability to directly exchange signals with remote controllers—a light bulb, for example—or to move software instances between sites without reconfiguration. It is worth noting that rigorously defined (typed) message interfaces allow for dedicated ‘firewall’ control, and do not open new vulnerabilities to Internet hosts.
+
+
+                        Seamless integration of heterogeneous hardware: The abstract transport binding of actors seamlessly covers dedicated peripheral channels that may connect GPUs/coprocessors, semi-internal buses in heterogeneous multi-CPU architectures like big.LITTLE boards, as well as gateway-based network structures in current cars, buildings, or factories. This allows actor systems to transparently bridge architectural design gaps and frees software developers from crafting dedicated glue code.
+
+We now want to highlight the actor-based abstraction mechanisms for programming as opposed to traditional object-oriented designs. Consider the class definition in Listing 1.
+
+
+                        
+                           
+                        
+                     
+
+It defines an interface named key_value_store supporting put and get operations. When accessible by multiple threads in parallel, the class has to be implemented in a thread-safe manner. A simple approach is to guard both member functions using a mutex in the implementing class. This does not scale well, mainly because readers block other readers. More scalable approaches require a specific synchronization protocol that is based on read-write locks, for example. Architecturally, though, lock-based solutions are best avoided, as locks do not compose and combining individually thread-safe classes can lead to deadlocks [16]. In any case, the interface itself is not aware of concurrency.
+
+Listing 2 illustrates the interface definition of an actor offering put and get operations using our framework. The interface type kvs_actor specifies a message passing interface.
+
+
+                        
+                           
+                        
+                     
+
+Actors can be programmed without knowledge about concurrency primitives, but at the same time support massively parallel access (see Section 7.2). In our example, get requests are sequentially processed without further coordination, as there is no intra-actor concurrency. For parallelization, actors can explicitly redistribute tasks to a set of workers. In this context, we should mention extensions for task-level parallelism at actor level in other frameworks [17]. They can be used to handle read-write concurrency on partitioned data [18]. Our message passing interface uses so-called atoms (see Section 4.4) to identify specific operations instead of member function names.
+
+
+                        
+                           
+                        
+                     
+
+Our actor framework provides network-transparent messaging. When sending a message to a kvs_actor—as shown in Listing 3—the sender can remain agnostic about where the receiver is located. Caller and callee are also not coupled via the type system. This differs from RMI-based designs and reflects the desire for abstracting interfaces from implementations. The typed message handles enable the compiler to statically check input and output types, but do not expose the actual type of the callee. The requester is rather able to send messages with partial type information as the callee may implement additional message handlers for the kvs_actor interface not exposed to the caller.
+
+Our third consideration is about performance. High-level abstractions in software design often disregard efficiency. We question whether performance has to suffer when switching from low-level message passing systems to actor frameworks. For an answer, we compare CAF with the well-known high-performance but low-level Message Passing Interface (MPI) [19].
+
+We test in a distributed system with an implementation to calculate a fixed number of the Mandelbrot set, using the same C++ program code with distribution done by CAF for actor programming in C+ +, and Boost.MPI. For network communication, CAF uses a network abstraction over TCP sockets based on a middleman (see Section 4.1) with message-based network I/O (see Section 5.5). Boost.MPI is a C++ wrapper for OpenMPI. Both versions exclusively rely on asynchronous communication and reduce synchronization steps to a minimum. Since both programs share one C++ implementation for the calculation, the measurements reveal the overhead added by the distributed runtime system in use. Hence, this setup discloses the trade-offs in performance which developers make when opting for a high-level abstraction like the actor model instead of low-layer primitives. Time measurements were restricted to application program flow and do not include the initial setup phase performed by each platform.
+
+
+                        Fig. 1
+                         shows the runtime results for distributed setups as functions of available worker nodes. In the first evaluation depicted in Fig. 1(a), we have used one host running 4 to 64 virtual machines for worker nodes. Both frameworks admit a quite similar runtime behavior. However, CAF runs 4% faster on 64 worker nodes, indicating a slightly better scalability. To achieve an evenly distributed workload, we added worker nodes in increments of four, as the host machine consists of four AMD Opteron 2.3GHz processors with 16 hardware-level threads each.
+
+Our second evaluation compares the performance of CAF and OpenMPI in a physically distributed environment. Fig. 1(b) displays the performance results using 16 identical worker nodes connected in a switched network, each equipped with one quadcore Intel i7 3.4GHz processor. Hence, both setups have a maximum of 64 working actors or MPI processes, respectively. Qualitatively, the physically distributed system attains a behavior close to the virtual environment, while the absolute run times changed with altered CPU types. CAF runs 3% faster with 16 physical worker nodes, again indicating a slightly better scalability.
+
+These results clearly illustrate that actors in CAF do not impose a performance penalty when compared to a lower level message passing approach. Consequently, developers are not burdened with trading between a high level of abstraction on the one hand, and runtime performance on the other hand. An efficient implementation of the actor model can even outperform a low-level message exchange.
+
+Although formulated in the early 1970s [1], the actor model of computation was primarily used by the Erlang community until recently. The advent of multi-core machines and the growing importance of elastic cloud infrastructure made the model interesting for both academia and industry. In this section, we first discuss open conceptual questions in the current evolution of actor systems that arise from new application domains. Second, we contrast our approach with related work in the field of actor programming.
+
+The actor model allows us to scale software from one to many cores and from one to many nodes. This flexibility in deployment makes the approach attractive for many application domains. This includes (1) infrastructure software, (2) Internet-wide distributed or IoT applications, as well as (3) high-performance applications that scale dynamically with demand. Still, available actor model implementations address only a subset of the requirements arising from these scenarios.
+
+
+                        Robust Composition: Initial definition and implementation of software is only a small fraction of its lifetime. Maintenance and evolution are considered the main tasks of developers [20]. Programming environments should support all parts of the life cycle equally well and statically verify invariants. Still, available systems for actor programming either cannot statically verify inter-actor relationships, or require re-compilation and re-deployment even for minor changes from a monolithic code base. The first approach imposes excessive integration tests or constant model checking, while the latter is not suitable for large infrastructure software with independently maintained software components. Neither approach is robust with respect to existing compositions. Changing one part of the software in a downward compatible way must not affect other parts of the system, while invariants of a system should be statically verified at all times.
+
+
+                        Native Programming: We believe that writing dynamic, concurrent, or distributed applications using a native programming language such as C++ is ill-supported today. Standardized libraries only offer low-level primitives for concurrency such as locks and condition variables. It requires significant expert knowledge to use such primitives correctly and can cause subtle errors that are hard to find [21]. A naïve memory layout may in addition severely slow down program execution due to false sharing 
+                        [22]. The support for distribution is even less advanced, and developers often fall back to hand-crafted networking components based on socket-layer communication. Transactional memory—supplied either in software [23] or hardware [24]—and atomic operations can help with implementing scalable data structures [25], but neither account for distribution, nor for communication between software components, nor for dynamic software deployment. A native programming environment based on the actor model leaves full control over all performance-relevant aspects of a system with the developers while remaining at a very high level of abstraction. This enhanced level of abstraction can simplify reasoning about the code [26] without requiring expert knowledge on synchronization primitives. At the same time, the choice of C++ as host language allows programmers to mix actors with other concurrency abstractions if needed. While this seems to be a disadvantage at first, a recent study by Tasharofi et al. [27] showed that integrating legacy components is common practice and shortcomings of an actor framework—the lack of high-level coordination patterns for building HTTP servers for instance—can be compensated by using special-purpose APIs. However, we believe the issue of missing high-level building blocks based on actors will naturally be addressed in the future as more and more developers switch to actor frameworks and consequently more of those building blocks are developed and available to the public.
+
+
+                        Memory Efficiency: Implementations of the actor model traditionally focus on virtualized environments such as the JVM [28], while actor-inspired implementations for native programming languages focus on specific niches. For example, Charm++ [9] focuses on software development for supercomputers. A general-purpose framework for actor programming that minimizes memory consumption is not available. Still, memory is the limiting resource on embedded devices and massively multi-user infrastructure software requires low per-user memory footprint at runtime in order to scale. In this way, a memory-efficient actor environment broadens the range of applications in both low-end and high-end computing.
+
+
+                        Heterogeneous Hardware Environment: Specialized hardware components are ubiquitously available. Modern graphics cards in commodity hardware are programmable via GPGPU languages such as CUDA [29] or OpenCL [30]. Algorithms running on such SIMD-components make use of hundreds or thousands of parallel processing units and outperform multi-core CPUs by orders of magnitudes for appropriate tasks. Hybrid coprocessors like the Intel PHI likewise contribute performance boosts while allowing for branching program flows. Custom hardware such as ASICs or reconfigurable hardware such as FPGAs achieve much higher performance than software for tasks like data encryption [31]. Recent trends on mobile devices also couple two general-purpose processors of different complexities and speeds on a single chip [32] that activates the fast but power consuming processor only when needed. In all cases, programmatic access to specialized hardware components requires to use a dedicated API. This makes integration of such devices into existing software systems cumbersome. A heterogeneous system architecture that transparently enables message passing between actors running on different hardware architectures helps developers to integrate heterogeneous components.
+
+@&#RELATED WORK@&#
+
+The actor model was created by Hewitt et al. [1] and formalized by Agha et al. [3] to enable its use as a theoretical framework for modeling and verification languages such as Rebeca [33]. The first de-facto implementation of the actor model with industrial applications was Erlang [4]. While Hewitt et al. foresaw actors to monitor each other, Armstrong [34] implemented a refined failure propagation model in Erlang to achieve reliability in the presence of hardware and software errors. This failure propagation model is based on monitoring, linking and hierarchical supervision trees and inspired most successive implementations, including CAF.
+
+When multi-core processors became prevalent, intra-machine concurrency became relevant. Since thread-based solutions are inherently error-prone and non-composable [35], developers started to seek better solutions. This lead to a growing interest in actor programming outside the Erlang community. As a result, it became important to provide actor implementations for other platforms.
+
+A first step in achieving lightweight and fast actors in runtime environments that were not originally developed with actors in mind—such as the JVM—was made by Haller and Odersky. Their goal was to combine the efficiency of event-based systems without inversion of control [36] to build lightweight, event-based actor systems that are able to outperform thread-based approaches [37]. Lightweight actor systems like Akka [8] and CAF adopted parts of this implementation technique. In general, actor frameworks hosted by programming languages that allow sharing of state cannot ensure isolation of actors. At the same time, general-purpose environments give developers access to a large set of well-tested special-purpose libraries that are unavailable in shielded actor frameworks [27]. An exception to this is Kilim [6] that ensures isolation of actors in Java applications using a bytecode postprocessor. With CAF, we explicitly decided to refrain from using code generators or similar tools, but to remain with only a standard-compliant C++ compiler. In this way, we omit complex toolchains and are able to port CAF to many compilers and platforms.
+
+Agha [2] introduced mailbox-based message processing in his seminal modeling work on actors. A mailbox is a FIFO ordered message buffer that is only readable by the actor owning it, while all other actors are allowed to enqueue new messages. Mailboxes exclusively enable communication between actors, as no state is shared. Implementation concepts of mailbox management fall into two categories. In the first category, an actor iterates over messages in its mailbox. On each receive call, it begins with the first but is free to skip messages. As actors can change their behavior in response to a message, a newly defined behavior may apply to previously skipped messages. A message remains in the mailbox until it is eventually processed and removed as part of its consumption. Erlang is the classical example for this category of message processing.
+
+The second category of actor systems follows a more restrictive message processing scheme. A message handler is invoked exactly once per message with the specific behavior of the actor. An untreated message cannot be recaptured at a later time, even though some systems allow us to change the message handler at runtime. Consequently, actors are forced to treat messages in the order of arrival. The examples of Akka and Kilim fall in this category.
+
+We follow the first approach, as it naturally allows prioritizing messages and waiting for responses prior to returning to a default behavior. Skipping messages for later retrieval is an important feature for most actor systems to allow for communication patterns that require an actor to process response messages from multiple actors in a particular order. For example, Akka provides this feature as an explicit opt-in mechanism called stashing [38]. The downside to an implicit approach as used in CAF is that developers need to explicitly drop messages that are never processed. Without dropping, those messages will accumulate in the mailbox of an actor and slow down operations of the queue, since they need to be traversed repeatedly after each successful message invocation. Further, a large number of messages to be skipped in a mailbox can lead to performance degradations for the same reason. It is worth mentioning that explicit dropping can be omitted for statically typed actors in CAF, as such actors can never receive unexpected messages.
+
+In the context of message handling, pattern matching has proven useful and very effective to ease definition of message handlers. Thus, we provide pattern matching for message handling as a domain-specific language (see Section 5). Further, we developed a concurrent queue algorithm tailored for use as the mailbox (see Section 4.2).
+
+The original actor model allows actors to send arbitrary data and requires the sender to dispatch on received content dynamically. This is natural in a dynamically typed language like Erlang, but also has been adopted in statically typed languages such as Scala or Java by the Akka framework for instance. In contrast to previous actor implementations for existing statically typed languages, we question whether dynamic dispatching of messages is always a good fit. Not performing static checks for actor messages at compile time leaves correctness testing to the programmer, who is forced into unit and integration tests. Static analysis tools such as Dialyzer [39] or dynamic model checkers such as McErlang [40] can help finding bugs as long as the source code for all components is available (McErlang and other dynamic checkers require recompilation). This issue is also discussed within the Akka community and potentially limits composability of actors.
+                           2
+                        
+                        
+                           2
+                           For example, see the online discussion at http://lambda-the-ultimate.org/node/4830.
+                         A typed messaging interface which correlates input and output types allows a more functional view to actors and enables the compiler to detect errors. Further, such interfaces define a message flow based on input and output messages that allow the programmer—or the runtime—to redirect response messages, e.g., for modeling pipelines. Consequently, we have introduced abstract messaging interfaces in CAF that enable static verification of actor communication.
+
+Previous actor-inspired systems that statically type-check messages use an object-oriented design philosophy. Charm++ models actors as classes and represents actors with proxy instances on remote nodes. Invoking a member function implicitly uses message passing. The SALSA [41] programming language uses typed behaviors for actors that allows for static verification by the compiler. In both cases, callers are bound to the type of the callee. Changing the type of one actor requires a recompilation of all dependent actors, even for downward-compatible changes such as adding new handlers. In summary, the object-oriented design enables static type checking but introduces tight coupling in the type system.
+
+With CAF, we introduce a third approach that enables static verification of messaging without adding dependencies between caller and callee. Instead of exposing the type of an actor, we introduce abstract messaging interface definitions of pre-set semantics (see Section 4.5). Actors can communicate even if only a subset of the messaging interface is known by the sender. Further, this enables actors to restrict available operations to others via the type system based on the context. In this way, we decouple callers and callees while preserving the static verification for actor messaging performed by the C++ compiler.
+
+The software design of CAF is based on a set of high-level goals, namely reliability, scalability, resource efficiency, and distribution transparency. We want to make actor programming viable for a broad area of applications, ranging from (performance-) critical infrastructure software down to code running on embedded devices. All benefit from native execution and a low memory footprint, the latter being the limiting factor on embedded devices. A runtime that scales down to such constrained environments is required for bringing actor programming to the IoT.
+
+From these high-level goals and use cases, we can derive a number of key requirements. For reliability, type safety is needed to provide a robust programming environment. Resource efficiency demands (1) an efficient processing of messages to minimize costs of the message-based abstraction, (2) a very low memory footprint of actors, and (3) a release of allocated memory as early as possible for re-use. Scalability foremost requires efficient usage of many CPU cores at minimal management overhead. In turn, it enables applications to use a large number of actors—thousands to millions—without performance penalty while consuming only a few hundred bytes per actor, and distributed systems to include up to hundreds of nodes while allowing dynamic rescaling at runtime.
+
+The design principles and algorithms that built CAF follow these goals and requirements as closely as possible. In addition, we adopt well-established design decisions that we consider best practice in actor systems such as the failure propagation model based on links and monitors known from Erlang for tightly coupled actors.
+
+This section presents concepts and algorithms for building a programming environment that meets these criteria. We first give an overview of the software architecture of CAF in Section 4.1. Important building blocks for the efficient messaging layer are presented in Sections 4.2 and 4.3. Our software design enabling type-safe actor messaging interfaces is discussed in Sections 4.4 and 4.5. Lastly, Section 4.6 discusses our inclusion of GPGPU components.
+
+Actors in CAF are hosted in a runtime environment that provides message dispatching, local scheduling, queue management, and everything required for adapting to dynamic deployment. Typically, a single runtime spans a full node in a distributed application. Actors communicate with other remote actors via this runtime environment in a transparent fashion. Even though only a single transport channel (port) needs to be exposed to the public, a multiplexer called ‘middleman’ enables the mutually direct communication between thousands of actors on distinct machines.
+
+
+                        Fig. 2
+                         depicts the architecture of a distributed CAF environment. Actors see individual queues and are not aware of their physical deployment, but form a communication graph spanning multiple nodes. This flexible topology is enabled by the global message passing layer of the CAF runtime. The layer interconnects components that implement individual services for actors, and multiple instances of the runtime exchange messages via the Binary Actor System Protocol (BASP).
+
+Distributed runtime environments establish a common message passing layer via middlemen. The main function of a middleman is to organize the message exchange via networking interfaces like sockets. It multiplexes and encapsulates the network API of the host system to hide communication primitives. Packet and byte streams are converted to messages that are delivered to brokers. A broker is an actor that performs asynchronous I/O and lives in the event-loop of the middleman (see Section 5.5). When an application starts, the CAF runtime instantiates an actor that implements BASP. The protocol transports actor messages and propagates errors from failing actors at the remote. Further, the BASP Broker contacts remote actors on demand and transparently forwards inter-actor messages on the network.
+
+The cooperative scheduler organizes a concurrent, fair execution of actors on a sub-thread level of the local host. It manages worker threads using the C++ standard library and distributes work load among them. To perform the latter at runtime, the scheduler transparently dispatches message handlers from event-based actors to the workers. The scheduler is a crucial component for performance as well as scalability and is discussed in detail in Section 6.
+
+Heterogeneous components are integrated using facades that manage communication between a host and accelerator devices. Creating actors from OpenCL kernels is shown in Section 4.6.
+
+The message queue or mailbox implementation is a critical component of any message passing system. All messages sent to an actor are delivered to its mailbox, which acts as a shared resource whenever an actor receives messages from multiple senders in parallel. Thus, the overall system performance, foremost its scalability, depends significantly on the selected algorithm.
+
+A mailbox is a single-reader-many-writer queue. It is exposed to parallel write access, but only the owning actor is allowed to dequeue a message. Hence, the dequeue operation does not need to support parallel access.
+
+We achieved fast concurrent enqueue and fast—but non-concurrent—dequeue operations by combining a lock-free stack implementation with a FIFO ordered queue as internal cache. A lock-free stack can be implemented using a single atomic compare-and-swap (CAS) operation. It does not suffer from the so-called ABA problem of concurrent access that can corrupt states in CAS-based systems [42], as the enqueue operation only needs to manipulate the tail pointer. Without reordering, the dequeue operation would have to traverse the (LIFO-sorted) stack in order to find the oldest element.
+
+
+                        Fig. 3
+                         shows the dequeue operation of our mailbox implementation. It always dequeues elements from the FIFO ordered cache (CH). The stack (ST) is emptied and its elements are moved in reverse order to the cache whenever it drains. Emptying the stack can be done by a single CAS operation as it only needs to set ST to NULL.
+
+Our mailbox has complexity O(1) for enqueue operations, while the dequeue operation has an average runtime of O(1), but a worst case of O(n), where n is the maximum number of messages in the stack. Concurrent access to the cached stack is reduced to a minimum and both enqueueing and dequeueing perform only a single CAS operation. Our performance measurements (see Section 7) show that this lock-free implementation enables CAF to utilize hardware concurrency in N :1 communication scenarios more efficiently than common implementations of the actor model.
+
+Copy-on-write is an optimization strategy to minimize copying overhead in a runtime instance of CAF. A message can be shared among several actors in the same CAF instance as long as all participants only demand read access. An actor implicitly copies the shared message when it requires write access and is only allowed to modify its own copy. Thus, data races cannot occur by design and each message is copied only if needed. This also implements garbage collection, as unreferenced messages are deleted automatically. As a result, message passing has call-by-value semantics from the perspective of a programmer. This eases reasoning about source code by removing manual lifetime management for messages.
+
+We have used an atomic, intrusive reference counting smart pointer implementation that adds only a negligible runtime overhead. Any non-const dereferencing implicitly causes the smart pointer to detach its data whenever the reference count is greater than one. The overlaying pattern matching implementing is aware of this behavior and deduces const-ness from user-defined message handlers. In particular, the pattern matching engine will call the non-const dereference operator only if a message handler expects a mutable reference in its signature. In this way, CAF only relies on const correctness of user-generated code and does not impose any additional requirement on programmers to enable call-by-value semantics with implicit sharing. Pessimizations by the programmer—by taking arguments in a message handler by mutable reference when in fact no mutation takes place for example—can lead to unnecessary runtime overhead due to copying, but never affect the correctness of a program.
+
+Object-oriented designs use method names to unambiguously identify operations. When using a non class-based abstraction, programmers need an equivalently powerful way of encoding the target operation. Erlang introduced so-called atoms for this purpose. An atom is a named constant that uniquely identifies an operation on the receiver. Since C++ does not support atoms natively, we contribute a design for uniquely typed named constants with minimal runtime overhead.
+
+
+                        
+                           
+                        
+                     
+
+Atoms are part of a message and serve as meta data. This makes an efficient processing of atoms mandatory, as they are always processed with the content of the message. Further, creating atoms must have negligible overhead, because senders frequently request atoms when sending data.
+
+Listing 4 illustrates the definition of two atoms in CAF named x and hello. The function atom is declared constexpr, meaning that it is evaluated at compile time. As a result, sending a message with atoms does in fact incur no runtime overhead. The compiler replaces the function call to atom with a constant 64-bit value generated from the given string literal. Thus, evaluating atoms at runtime has the overhead of one integer comparison.
+
+In order to enforce static checking of messaging interfaces, we need to render the actual value of an atom visible to the compiler. Unfortunately, C++ cannot generate unique types for string literals, why the function atom always returns an atom_value. To make these values accessible at compile time, we lift them to types by using the template class atom_constant, as shown in Listing 5.
+
+
+                        
+                           
+                        
+                     
+
+The template atom_constant is an implementation of the int-to-type idiom [43] and enables programmers to use atoms in typed messaging interfaces. Each atom constant declares the static member value to get an instance of that particular type. This allows a seamless use of atoms as both type and value. Actors that match on atom_value will receive all atoms, while matching on a particular atom_constant will match exactly one value. In this regard, atom_value can be seen as common base type for all atom constants.
+
+Our implementation of the function atom converts ASCII characters to a 6-bit encoding similar to Base64 [44]. This restricts the input string length to 10 characters but provides a collision-free, reversible mapping. The remaining four bits are used as starting sequence to detect the position of the first character.
+
+Software entities in message passing systems have two characteristic attributes: identifiers and interfaces. The former address software entities—in our case actors— in a network-transparent manner, while the latter encode valid inputs. For the remainder of this paper, we refer to a messaging interface simply as interface for brevity.
+
+The original actor model uses mail addresses as identifiers with an implicit wildcard interface [1]. A wildcard interface accepts any input and the receiver is responsible to perform dynamic dispatching on received data, usually via pattern matching.
+
+Most actor implementations closely follow this design. Either by using a dynamically typed programming language or by using type erasure techniques at the sender to allow arbitrary inputs. An example for such a design in a statically typed language is ActorRef in Akka. This locator type is used directly for message passing and accepts inputs of type Any in Scala and Object in Java. This is the respective root of the class hierarchy in both languages. Such an approach hides information from the compiler, rendering a static analysis of the interfaces impossible.
+
+Actor model implementations that do not use implicit wildcard interfaces such as SALSA or Charm++ use an object-oriented approach for defining interfaces that causes dependencies between senders and receivers and thus is not well-suited for open systems (cf. Section 3). Interfaces in this approach are modeled as proxy objects that hide the identifier, but expose the type of the callee. Since proxy objects are bound to a specific type, interfaces providing the same operations are not interchangeable. Further, sub-interfaces can only be emulated with complex and brittle inheritance hierarchies.
+
+CAF contributes a new design that enables static type checking without introducing dependencies between senders and receivers. Our design discloses all type information to the compiler in order to enable globally type-checked messaging without relying on brittle OO-like inheritance hierarchies. By using a domain-specific interface definition, we further enable actors to send messages with only partial type information of the receiver. Also, our design explicitly distinguishes between identifiers and interfaces and makes both accessible to programmers. An identifier in CAF is an opaque data type which only allows developers to uniquely identify actors or monitor them. This explicit design is different from the original actor model and—to the best of our knowledge—unique to CAF.
+
+An interface is a mapping from unique input types to output types in our system. Mappings are sets, i.e., the ordering of mapping rules in the source code does not matter and interfaces have subset semantics. Wherever an actor with interface X is expected, programmers are allowed to pass an actor with interface Y instead, as long as 
+                           X
+                           ⊆
+                           Y
+                        . This is also true across the network. When connecting to a remote actor, the expected interface must be passed as a parameter. The call succeeds if a connection could be established and the expected interface is a subset of—or equal to—the published interface of an actor. The published, i.e., publicly available, interface can in turn be a subset of the full interface of an actor. This feature of CAF allows developers to add more handlers to any actor in the system without breaking existing compositions. In particular, a re-compilation of dependent actors is not necessary. The flexible subset semantics give programmers fine-grained control over accessibility of certain operations by hiding parts of an interface depending on the context.
+
+A handle in CAF stores the interface of an actor as well as its identifier. Further, the definition of an interface specifies the handle as a type alias for the variadic template typed_actor 
+                        
+                           <
+                        
+                        Ts...
+                        
+                           >
+                        . The parameter pack Ts is a compile-time list of 
+                           input
+                           →
+                           output
+                         rules. Each rule is specified using the notation replies_to 
+                        
+                           <
+                        
+                        Xs...
+                        
+                           >
+                        
+                        ::with 
+                        
+                           <
+                        
+                        Ys...
+                        
+                           >
+                         or replies_to 
+                        
+                           <
+                        
+                        Xs...
+                        
+                           >
+                        
+                        ::with_either 
+                        
+                           <
+                        
+                        Ys...
+                        
+                           >
+                        
+                        ::or_else 
+                        
+                           <
+                        
+                        Zs...
+                        
+                           >
+                        . The latter allows programmers to specify operations that return Ys... on success and Zs... on failure. Operations that do not produce results can use reacts_to 
+                        
+                           <
+                        
+                        Xs...
+                        
+                           >
+                         for convenience, which is an alias for replies_to 
+                        
+                           <
+                        
+                        Xs...
+                        
+                           >
+                        
+                        ::with 
+                        
+                           <
+                        
+                        void 
+                        
+                           >
+                        . Listing 6 shows the definition of three different interfaces as type aliases, where adder is a subset of calculator and handles of the latter are consequently assignable to handles of type adder.
+
+
+                        
+                           
+                        
+                     
+
+CAF also supports explicit wildcard interfaces. This special case is modeled by the handle type actor. Handles of this type are not assignable to typed handles and vice versa. Actors of this type are closer to the original actor model and can reduce code size when implementing a tightly coupled set of actors, e.g., when spawning local workers for single tasks. A more detailed discussion on typed vs. untyped handles can be found in Section 5.2.
+
+Both handle types can be queried to return the identifier of type actor_addr. This identifier is used by the runtime to uniquely address and monitor actors in a distributed system. It can be used by programmers to determine whether two handles—possibly of different type—point to the same actor.
+
+With the advent of GPGPU programming, it became a crucial factor for a broad range of applications to make use of the heterogeneous computing platforms found in modern hardware deployments. This demand has lead to the development of the open standard OpenCL [30]. In OpenCL, developers provide an implementation of an algorithm, the so-called kernel, in a C dialect that is compiled for the detected hardware at runtime. Listing 7 shows the definition of an OpenCL kernel to multiply two matrices.
+
+
+                        
+                           
+                        
+                     
+
+Instantiating this kernel requires an index space definition. In our example, we use a two-dimensional index space to uniquely address each element of the 2D input matrices. Executing the kernel in OpenCL requires creating tasks by assigning parameters and output buffers. These tasks are then managed by a command queue. Awaiting completion of specific tasks can be either done synchronously via blocking or asynchronously via callbacks.
+
+The task-based workflow of OpenCL is a natural fit to the actor model. An OpenCL program can be regarded as an actor. It awaits input parameters and then produces results. In this exact way, CAF creates a message passing interface for OpenCL programs, as shown in the following example.
+
+
+                        
+                           
+                        
+                     
+
+The function spawn_cl expects the source code and name of the kernel as the first two arguments in form of strings. The name is required since the source code can contain multiple functions marked as a kernel. The spawn_config contains the dimensions of the index space for the calculation. All remaining parameters represent the signature of the kernel and mark each parameter as input, output or both. The invocation example above creates an actor that receives two arrays, each consisting of size·size (dimension on the x-axis multiplied with the dimension on the y-axis) elements, and replies a new array containing the resulting matrix. The matrices are represented in one dimension, since OpenCL does not support multi-dimensional arrays.
+
+The function spawn_cl also provides several overloads for fine-tuning the OpenCL behavior, or to perform data transformation. The latter allows us to hide the kernel signature by providing a different interface to other actors. This is particularly useful to integrate OpenCL actors into an existing application.
+
+Once created, an actor matches incoming messages against the types of all input arguments. In case of a match, memory buffers are created for all arguments. Otherwise, the message is discarded. Arguments marked as input are contained in the message and use the existing size while the size of output-only arguments defaults to the product of all dimensions, but can be set manually via the class out. Memory transfer to and from the device works via the commands in the command queue as well. It is performed asynchronously before and after the kernel execution, respectively. Details on concept and evaluation can be found in our previous work on Manyfold Actors [45].
+
+An actor is defined in terms of the messages it receives and sends. Its behavior is hence specified as a set of message handlers that dispatch extracted data to associated functions. Defining such handlers is a common and recurring task in actor programming. The pattern matching facilities known from functional programming languages have proven to be a powerful, convenient and expressive way to define such message handlers. Despite being recognized by the C++ community as a powerful abstraction mechanism [46], there is neither language support nor a standardized API available yet. However, pattern matching is a key ingredient for defining actors in a convenient and natural way. Hence, we provide an internal domain-specific language (DSL) for this purpose.
+
+Our DSL is limited to actor messages to keep the interface lightweight and focused on defining message handlers. Unlike other runtime dispatching mechanisms, our pattern matching implementation discloses all types of incoming messages as well as the type of outgoing messages to the compiler. In this way, the compiler can derive the interface of an actor from the definition of its behavior to perform static type checking.
+
+A pattern in CAF is a list of match cases. Each case is either (1) trivial, (2) a catch-all rule, or (3) an advanced expression enabling guards and projections. A trivial match case is generated from callbacks, usually lambda expressions. The input and output types are simply derived from the signature of the callback. A catch-all rule starts with others, followed by a callback with zero arguments returning void. A case of this kind always matches and produces no response message. An advanced match case begins with a call to the function on that returns an intermediate object providing the operator 
+                           ⪢
+                        . The right-hand side of the operator denotes a callback which should be invoked after a message matches the types derived from on. Each argument to on is either a function object of signature T-
+                        
+                           >
+                        
+                        optional 
+                        
+                           <
+                        
+                        U 
+                        
+                           >
+                         or a value. The latter are automatically converted to function objects using a semantically equal function to to_guard shown in Listing 9.
+
+
+                        
+                           
+                        
+                     
+
+We call function objects that map a value either to itself or to none 
+                        guards. They restrict the invocation of a callback based on the input value and forward the value itself to the callback. We further call functions that change the representation of a value projections. An example for a projection is a string parser that tries to convert its input to an integer.
+
+
+                        
+                           
+                        
+                     
+
+Listing 10 shows an example using both trivial and advanced match cases. Line 1 declares a guard named odd_val that accepts only odd integer values. Line 7 declares a projection that converts strings to floating point numbers using the C function strtof. In line 16, we declare a local variable of type behavior and initialize it using a list of match cases. The first case in line 17 uses the convenience functionality of CAF to generate guards from values. The following lambda expression is called if and only if the received message consisted of the single integer value 42. The second match case in line 20 uses the odd_val guard and its associated lambda expression is only called for messages containing a single odd integer. The third (trivial) match case in line 24 is called whenever a message consisting of a single integer was received that was not matched by the previous two cases. Hence, the argument i inside the lambda expression can neither be odd nor 42. The fourth match case in line 28 uses the projection str_float. It matches on messages consisting of a single string while the associated callback takes a float. Whenever the conversion fails, the last case in line 31 gets called with the unchanged string.
+
+Our DSL-based approach has more syntactic noise than a native support within the programming languages itself, for instance when compared to functional programming languages such as Haskell or Erlang. However, we only use ISO C++ facilities, do not rely on brittle macro definitions, and our approach only adds negligible—if any—runtime overhead by making use of expression templates [47]. There is no additional compilation step required for the pattern matching. Further, CAF does neither rely on code generators nor any vendor-specific compiler extension.
+
+An important characteristic of our pattern matching engine is its tight coupling with the message passing layer. The runtime system of CAF will create a response message from the value returned by the callback unless it returns void. Not only is this convenient for programmers, it also exposes the type of the response message to the type system. This information is crucial to define type-safe messaging interfaces.
+
+CAF supports dynamically and statically typed actors. In both cases, programmers can either use free functions or classes. All examples shown in the remainder of this section assume the definitions from Listing 11.
+
+
+                        
+                           
+                        
+                     
+
+A dynamic approach has the benefit of being able to provide a single handle type for all actors. This resembles the original actor modeling of Hewitt et al. that does not specify how—or even if—actors specify the interface for incoming and outgoing messages. Rather, actors are defined in terms of names they use, access rights they grant to acquaintances, and patterns they specify to dispatch on the content of incoming data [1].
+
+With statically typed actors, the compiler is able to verify the protocols between actors. Hence, the compiler is able to rule out a whole category of runtime errors, because protocol violation cannot occur once the program has been compiled. Note, that the compiler does not only verify the correct sending of a message but also the handling of the result when using sync_send. For instance, the example shown in Listing 12 would be rejected by the compiler, because the client expects the wrong type in the response message.
+
+
+                        
+                           
+                        
+                     
+
+When using sync_send, a unique ID is assigned to the message. The sending actor can use .then to install a continuation for the response message. The continuation itself is a message handler that is only used for the response message to that particular ID. The sender synchronizes with the receiver by skipping any other incoming message until it either receives the response message or an (optional) timeout occurs. Any error, e.g., if the sender no longer exists or is no longer reachable, will cause the sender to exit with non-normal exit reason unless it provides a custom error handler. Hence, using sync_send---even without a timeout—gives programmers a guaranteed error handling. Further, the runtime will generate an empty response message if the receiver handles the message but fails to reply with a message on its own. Thus, the semantics of sync_send capture errors in the program logic. Combined with statically typed actors, this also eliminates the possibility that the receiver never responds (dynamically typed actors never respond if a message is never matched). Hence, sync_send in combination with typed actors eliminate accidental deadlock scenarios where a sender waits forever because it failed to use a timeout and does not monitor the receiver.
+
+
+                        
+                           
+                        
+                     
+
+It is worth mentioning that the synchronization does not rely on blocking system calls and thus does not occupy any thread belonging to CAF. Instead, any actor engaging in synchronous communication will simply not invoke any of its behavior-specific message handlers until the synchronous communication has taken place, ignoring all but the expected response message. The dynamically typed actor in Listing 13 illustrates an actor sending two synchronous messages. The output of this example is always “wait … value 2 … value 1”. The member function .then installs a continuation for the response. Thus, sync_send(…).then(…) returns immediately and “wait …” is printed first. Only the last synchronous send is active at any time. Hence, “value 2 …” is printed second. Finally, the continuation of the first sync_send gets executed and prints “value1”. This order is independent of the arrival order of the response messages.
+
+When using a statically typed system, developers are trading convenience for safety. Since software systems grow with their lifetime and are exposed to many refactoring cycles, it is also likely that the interface of an actor is subject to change. This is equivalent to the schema evolution problem in databases: once a single message type—either input or output—changes, developers need to locate and update all senders and receivers for that message. When introducing a new kind of message to the system, developers also need to identify and update all possible receivers by hand.
+
+With CAF, we lift the type system of C++ and make it applicable to the interfaces of actors. At the same time, we are aware of the fact that dynamically typed systems do have their benefits and that these approaches are not mutually exclusive. Rather, we believe a co-existence between the two empowers developers to make the ideal tradeoff between flexibility and safety. Hence, we have implemented a hybrid system with CAF. Type-safe and dynamic message passing interfaces are equally well supported and interaction between type-safe and dynamic actors is not restricted in any way. From our experience, a good rule of thumb is that an actor should expose a typed interface whenever its visibility exceeds a single source file. In other words, actors with non-local dependencies should be checked by the compiler. Such actors are usually central components of a larger system and offer a service to a set of actors that is either not known at coding time or might grow in the future. Type-safe messaging interfaces allow the compiler to keep track of non-local dependencies that exist between central actors and a—possibly large—set of clients.
+
+Dynamically typed actors implemented as a free function optionally take an event_based_actor* as first argument, return a behavior, or both. The first argument is a pointer to the actor itself. Returning a behavior implicitly calls self-
+                        
+                           >
+                        
+                        become(), which programmers can also call manually to dynamically change the behavior.
+
+
+                        
+                           
+                        
+                     
+
+Unhandled messages remain in the mailbox of an actor until eventually consumed. Whenever an actor receives a message that it does not handle in any state, this message remains indefinitely. To discard otherwise unmatched messages, an “others” case can be used. A common work flow is to discard otherwise unhandled messages with an error report as shown in lines 9–11 of Listing 14. CAF follows the semantics of functional languages like Erlang or Haskell, i.e., the matching stops on the first hit. Any additional case after “others” would be unreachable code.
+
+Values returned from message handlers are automatically used as response to the sender. Returning multiple values can be achieved by returning a tuple as shown in lines 4 and 7.
+
+
+                        
+                           
+                        
+                     
+
+Listing 15 shows an equivalent actor implementing the interface math_actor. The type for the self pointer can be obtained via math_actor::pointer. The interface type also defines behavior_type, which is a typed behavior allowing the compiler to statically verify the returned set of message handlers. Typed actors are allowed to change their state using self-
+                        
+                           >
+                        
+                        become(), which also expects a behavior_type. Thus, actors must implement the full interface in each state. It is worth mentioning that using the others case from the previous example would result in a compiler error. Wildcards are not allowed in statically typed actors to enforce compliance to the implemented interface. Otherwise, subtle errors like typos or a change in the interface definition would cause unexpected behavior at runtime instead of compiler errors.
+
+Dynamically typed actors implemented as a class derive from event_based_actor and must override the pure virtual member function make_behavior.
+
+
+                        
+                           
+                        
+                     
+
+Listing 16 shows a class-based, dynamically typed actor with the same logic as implemented in Section 5.3. Since the object itself is of type event_based_actor, there is no need for capturing an explicit self pointer. Class-based actors are particularly useful for implementing actors with complex state, as managing data members can be more intuitive to programmers than recursively re-defining a behavior for state changes. There is no other benefit in using a class as opposed to using a free function.
+
+
+                        
+                           
+                        
+                     
+
+Listing 17 shows the implementation of an equivalent actor as seen in Listing 16 using the typed interface math_actor. Each interface handle type defines base as an alias for typed_event_based_actor 
+                        
+                           <
+                        …
+                           >
+                        . This alias allows programmers to implement typed actors without repeating the interface. The type behavior_type is a typed behavior inherited from the base class.
+
+When communicating with other services in the network, handling data packets or byte streams manually is often inevitable. For this reason, CAF provides brokers as an actor-based abstraction mechanism over networking primitives. This is comparable to existing abstractions in Erlang or Akka. A broker is an event-based actor running in the so-called middleman (MM). The middleman is a software entity that multiplexes low-level (socket) I/O and enables late binding to platform-specific communication primitives. It translates network-layer events and byte streams to CAF messages as shown in Listing 18.
+
+
+                        
+                           
+                        
+                     
+
+Brokers operate on any number of opaque handle types. Handles of type accept_handle identify a connection endpoint others can connect to. A connection_handle identifies a point-to-point byte stream, e.g., a TCP connection. Whenever a new connection is established, the MM sends a new_connection_msg to the associated broker. Messages of this type contain the handle that accepted the connection (source) and a handle to the new connection (handle). Whenever new data arrives, the MM sends a new_data_msg to the associated broker containing the source of this event (handle) and a buffer containing the received bytes (buf).
+
+
+                        
+                           
+                        
+                     
+
+Listing 19 shows a function-based broker that writes back all data it receives. Brokers can configure how many bytes the MM aggregates before it sends a new_data_msg by setting a receive policy using the member function configure_read as shown in line 4. A policy configures either at least, exactly, or at most a certain number of bytes and remains active until it is replaced. Outgoing data is written to an implicitly allocated buffer using the member function write as shown in line 7. It is worth noting that brokers do not contain any technology-specific information. They are usually bound during creation, e.g., to TCP port 42 using io::spawn_io_server(mirror, 42).
+
+Since brokers run in the middleman and share a single I/O event loop, implementations should be careful to consume as little time as possible in message handlers. Any considerable amount of computational work should be outsourced to other event-based actors. The MM directly calls message handlers of its brokers on I/O events, always using the same message and re-writing its buffer over and over again. As long as the broker does not add a new reference count to this message, no copy of this buffer will ever be produced due to the copy-on-write optimization.
+
+The CAF runtime maps N actors to M threads on the local machine. The number of threads depends on the number of available cores at runtime, while the number of actors dynamically grows and shrinks over the lifetime of an application. Actor-based applications scale by decomposing tasks into many independent steps that are spawned as actors. In this way, sequential computations performed by individual actors are small compared to the total runtime of the application, and the attainable speedup on multi-core hardware is maximized in agreement with Amdahl׳s law [48].
+
+Decomposing tasks implies that actors are often short-lived and assigning a dedicated thread to each actor would not scale well. Instead, the runtime of CAF includes a scheduler that dynamically assigns actors to a pre-dimensioned set of worker threads. Actors are modeled as lightweight state machines that either (1) have at least one message in their mailbox and are ready, (2) have no message and are waiting, (3) are currently running, or (4) have finished execution and are done. Whenever a waiting actor receives a message, it changes its state to ready and is scheduled for execution. The runtime of CAF is implemented in user space and thus cannot interrupt running actors. As a result, actors that use blocking system calls such as I/O functions can suspend threads and create an imbalance or lead to starvation. Such “uncooperative” actors can be explicitly detached by the programmer and assigned to a dedicated thread instead.
+
+Here we focus on the scheduling of actors in a single runtime instance of CAF that is hosted on a single node. The remainder of this section presents the software design of our scheduling infrastructure in Section 6.1 and discusses our deployed algorithm in Section 6.2.
+
+The performance of actor-based applications depends on the scheduling algorithm in use and on its configuration. Different application scenarios require different trade-offs. For example, interactive applications such as shells or GUIs want to stay responsive to user input at all times, while batch processing applications demand to perform a given task in the shortest possible time. Programmers of the former applications want to minimize latency—the time between sending a message to an actor and receiving its response—while programmers of the latter kind only seek to maximize instructions performed per second. Actors operate on the granularity of individual messages and can be rescheduled at this pace. Allowing a running actor to drain its mailbox prior to rescheduling maximizes the CPU time available to actors, and minimizes the efforts for the scheduler and for context switching. Actors with many messages in their mailbox, though, may delay execution of subsequent actors significantly, reduce agility, and increase the latency of the overall system.
+
+Further, when running CAF on a system that is shared with other demanding applications, developers may want to control the assignments of CPU cores to each application. Our design provides default settings for general purpose use cases, but our API allows for configuring the algorithm in use, the maximum number of messages processed per slot, and the number of worker threads.
+
+
+                        
+                           
+                        
+                     
+
+Aside from managing actors, the scheduler bridges actor and non-actor code. For this reason, the scheduler distinguishes between external and internal events. An external event occurs whenever an actor is spawned from a non-actor context or an actor receives a message from a thread that is not under the control of the scheduler. Internal events are send and spawn operations from scheduled actors.
+
+Listing 20 shows the policy class to implement a scheduling algorithm. Our scheduler consists of a single coordinator and a set of workers. Note that the coordinator is needed by the public API to bridge actor and non-actor contexts, but is not necessarily an active software entity. A policy provides the two data structures coordinator_data and worker_data that add additional data members to the coordinator and its workers respectively, e.g., work queues. This grants developers full control over the state of the scheduler.
+
+Whenever a new work item is scheduled—usually by sending a message to an idle actor—one of the functions central_enqueue, external_enqueue, and internal_enqueue is called. The first function is called whenever non-actor code interacts with the actor system. For example when spawning an actor from main. Its first argument is a pointer to the coordinator singleton and the second argument is the new work item—usually an actor that became ready. The function external_enqueue is never called directly by CAF. It models the transfer of a task to a worker by the coordinator or another worker. Its first argument is the worker receiving the new task referenced in the second argument. The third function, internal_enqueue, is called whenever an actor interacts with other actors in the system. Its first argument is the current worker and the second argument is the new work item.
+
+Actors reaching the maximum number of messages per run are re-scheduled with resume_job_later and workers acquire new work by calling dequeue. The two functions before_resume and after_resume allow programmers to measure individual actor runtime, while after_completion allows to execute custom code whenever a work item has finished execution by changing its state to done, but before it is destroyed. In this way, the last three functions enable developers to gain fine-grained insight into the scheduling order and individual execution times.
+
+The class scheduler_policy is not abstract. Rather, it is a concept class that shows all required types and functions a policy must provide for the templated scheduler implementation.
+
+
+                        
+                           
+                        
+                     
+
+Listing 21 shows the prototype of set_scheduler. This function allows programmers to configure all three parameters of the scheduler. The algorithm can be changed by setting the template parameter Policy, which defaults to the default algorithm discussed in Section 6.2. The first function argument configures the number of workers and the second argument the number of messages each actor is allowed to consume in a single run. The former defaults to the number of available CPU cores and the latter defaults to the maximum integer value of size_t, i.e., approximates no limit.
+
+CAF is a general-purpose framework for actor programming. Hence, the default implementation of CAF should cover the majority of common use cases, while the selection of an appropriate algorithm is constrained in the following two dimensions.
+
+The first thing to consider when choosing a scheduling algorithm is the architecture of multi-core machines. Independent of manufacturer, all multi-core designs—regardless of the number of processors on the die—use a single interconnect to coordinate memory access [49]. Modifying the same memory region from multiple threads in parallel causes contention on the shared interconnect and severely slows down execution [50]. In this way, the hardware penalizes applications with frequent communication between threads and sets strict limits on the scalability of centralized scheduler designs.
+
+The second consideration is about the scheduled entities. CAF is not limited to a particular application domain and thus can neither make assumptions on the average runtime of an actor nor on the spawn behavior. Instead, the scheduler of CAF is oblivious to the tasks it schedules and cannot distribute tasks proactively, because CAF is unaware of the application logic.
+
+The basic algorithm for oblivious scheduling in multiprogrammed environments is work stealing. The original algorithm was developed for fully strict computations by Blumofe et al. [51] and has an expected execution time of 
+                           
+                              
+                                 T
+                              
+                              
+                                 1
+                              
+                           
+                           /
+                           P
+                           +
+                           
+                              
+                                 T
+                              
+                              
+                                 ∞
+                              
+                           
+                         (which was also verified empirically), where P is the number of workers, T
+                        1 is the computation time on a single CPU and 
+                           
+                              
+                                 T
+                              
+                              
+                                 ∞
+                              
+                           
+                         is the minimum execution time with an infinite number of processors. Communication overhead between workers is at most 
+                           P
+                           ·
+                           
+                              
+                                 T
+                              
+                              
+                                 ∞
+                              
+                           
+                           ·
+                           (
+                           1
+                           +
+                           
+                              
+                                 n
+                              
+                              
+                                 d
+                              
+                           
+                           )
+                           ·
+                           
+                              
+                                 S
+                              
+                              
+                                 max
+                              
+                           
+                        , where n
+                        
+                           d
+                         is the maximum number of synchronizations of a single thread and S
+                        max is the largest activation record of any thread. Later extensions to the original design of the algorithm proved its applicability to arbitrary concurrent computations [52].
+
+A work stealing scheduler has no shared work queue. Instead, each worker dequeues work items from an individual queue until it is drained. Once this happens, the worker becomes a thief, picks one of the other workers—usually at random—as a victim and tries to steal a work item. As a consequence, tasks (actors) are bound to workers by default and only migrate between threads as a result of stealing.
+
+The aforementioned bounds apply to schedulers that use a work-first strategy. When creating subtasks, a worker pushes the continuation of the current work to its queue, allowing others to steal it, and executes the newly created (presumably lightweight) item first. The alternative, help-first, is to push the new task to the queue instead and execute the remainder of the computation. We implemented the latter, since the only way to emulate work-first without compiler-supported code transformation is expensive context switching to keep the original context and local variables intact. Further, work-first performs best for small numbers of steals and deep recursion. It can be outperformed by help-first strategies for certain work loads such as Depth First Search [53]. Note that deep recursion does not occur in event-based actor systems, because computation is driven by asynchronous message handlers and thus cannot be considered as a directed acyclic graph (DAG) with join steps as considered by Blumofe et al. in their theoretical model. Consequently, the bounds should be regarded as an approximation when using work stealing for message-driven applications.
+
+Examples that use work stealing include Cilk [54], Cilk++ [55], Java fork-join [56] (which is used by Akka), X10 [57], Intel׳s Threading Building Blocks [58], NUMA-aware OpenMP schedulers [59], and parallelized implementations of the STL [60]. Further, Lifflander et al. demonstrated that a hierarchical version of the algorithm scales to cluster deployments with up to 163,840 cores [61].
+
+Our implementation of the scheduler equips each worker with a double-ended, concurrent queue. Workers dequeue elements from the front of their own queue, but steal elements from other workers from the back. In this way, workers steal actors with the potentially longest waiting time. Top-level spawns—spawns without a parent—and messages from threads that do not belong to a worker of CAF add new elements to the back of the queue, while new items generated in the thread of a worker add new elements to the front. This approach increases cache locality, since the message causing an actor to be scheduled is likely still in the cache.
+
+In relation to the interface described in Section 6.1, the default policy is implemented as follows. The coordinator_data contains only a single atomic integer, while worker_data contains the double-ended queue and a random-number generator. Calls to external_enqueue on the workers add elements to the back, while calls to internal_enqueue add elements to the front. Top-level spawns and messages from non-actors result in calls to central_enqueue, which dispatches the item in round-robin order (using the atomic integer) to workers with external_enqueue. The round robin order enables an even distribution during the bootstrapping phase, when the first actors are spawned (usually from main). The function resume_job_later calls external_enqueue on the same worker.
+
+@&#PERFORMANCE EVALUATION@&#
+
+In this section, we analyze the performance of CAF. Our study focuses on the scalability of our software in comparison to other common actor systems and extends our previous work [11]. We want to examine the scaling behavior in terms of CPU utilization and memory efficiency. Our host system is equipped with four 16-core AMD Opteron processors at 2299MHz each and runs Linux. First, we perform two micro benchmarks on actor creation and mailbox efficiency. Second, we run a larger scenario involving mixed operations. Third, we adopt a Mandelbrot calculation from the Computer Language Benchmarks Game community. Fourth, we examine the scalability when pushing parts of a workload to the GPU. Our final benchmark considers a distributed computation using actors.
+
+For comparative references, we use ActorFoundry, Charm++, Erlang, SALSA Lite, and Scala with Akka. In detail, our benchmarks are based on the following implementations of the actor model: (1) C++ with CAF 0.13.2 (CAF) and Charm++ 6.5.1 (Charm), (2) Java with ActorFoundry 1.0 (ActorFoundry), (3) Erlang in version 5.10.2 using HiPE for native code generation and optimization level O3 (Erlang), (4) the latest alpha release of the SALSA Lite programming language (SalsaLite) and (5) Scala 2.10.3 with the Akka toolkit (Scala). CAF and Charm++ have been compiled as release versions using the Clang C++ compiler in version 3.5.2. Scala, SALSA Lite and ActorFoundry run on a JVM configured with a maximum of 10GB of RAM. For compiling ActorFoundry, we use the Java compiler in version 1.6.0_38, since this version is required by its bytecode post-processor.
+
+We measure both wall-clock time and memory consumption. Measurements are averaged over 10 independent runs to eliminate statistical fluctuations. The memory consumption is recorded every 50ms during the runtime and the results are visualized as box plots to represent their variability in a transparent way. Each box plot depicts a box containing 50% of all measured values limited by the first quartile at its bottom and the third one at its top. The median is shown as a band inside of the box and the mean is marked with a small square. In addition, the whiskers mark the 5th and 95th percentiles, while the 1st and 99th percentiles are marked with crosses. All graphs visualizing clock time are plotted with an error bar according to the 95% confidence interval. Our source code for all benchmark programs is published online at github.com/actor-framework/benchmarks.
+
+Our first benchmark reflects a simple divide & conquer algorithm. It computes 220 by recursively creating actors. In each step N, an actor spawns two additional actors of recursion counter 
+                           N
+                           −
+                           1
+                         and waits for the (sub) results of the recursive descent. This benchmark creates more than one million actors, primarily revealing the overhead for actor creation. Note that this algorithm does not imply the coexistence of one million actors at the same time.
+
+
+                        Fig. 4
+                        (a) displays the time consumed by this task as a function of available CPU cores. CAF and SALSA Lite scale nicely with cores, i.e., the scheduling of actor creation parallelizes visibly for them. While Charm++ does exhibit scaling behavior up to 32 cores, subsequent measurements are slightly higher in some cases. In contrast, ActorFoundry only exhibits scalability up to 24 cores and Scala increases significantly in runtime after reaching a global minimum at 12 cores. CAF is the fastest implementation with less than a second on eight or more cores. On 64 cores, CAF, SALSA Lite and Charm++ run the benchmark in 3 or less seconds. In contrast, Scala and ActorFoundry require 17 and 14s respectively, while the high error bars indicate heavily fluctuating values.
+
+
+                        Fig. 4 (b) compares the memory consumption during this benchmark. Results vary a lot in values and spread. Notably, the highest values measured for CAF, Charm, SALSA Lite and Scala are lower than 75% of all recorded values for Erlang and ActorFoundry. ActorFoundry allocates significantly more memory than all other implementations, peaking around 3.5GB of RAM with an average of ≈1.8GB. Erlang follows with a spike above 2GB of RAM and has a mean of ≈1GB. Scala has an average RAM consumption of 500MB, with a spike at about 750MB. SALSA Lite and Charm++ stay below 300MB, while CAF consumes about 10MB. This low limit does not imply that an actor uses less than 10 Bytes in CAF. CAF merely releases system resources as soon as possible and efficiently re-uses memory from completed actors. A correlation of memory and runtime performance is not apparent. Although Scala showed the worst performance, it does consume a medium amount of memory.
+
+Our second benchmark measures the performance in an N:1 communication scenario. This communication pattern can be frequently observed in actor programs, typically whenever an actor distributes tasks by spawning a series of workers and awaits the results.
+
+We use 100 actors, each sending 1,000,000 messages to a single receiver. The minimal runtime of this benchmark is the time the receiving actor needs to process its 100,000,000 messages. It is to be expected that the runtime increases with cores, because adding more hardware concurrency increases the speed of the senders and thus the probability of write conflicts.
+
+
+                        Fig. 5
+                        (a) visualizes the time consumed by the applications to send and process the 100,000,000 messages as a function of available CPU cores. As expected, all actor implementations show a steady growths of runtime on average, but differ significantly in values and fluctuations. Erlang stands out with a performance jump by an order of magnitude, indicating a largely discontinuous resource scheduling. The overall slopes differ greatly. While CAF has a slope of 0.4, SALSA Lite is at 1.64, Charm++ at 2.97 and Erlang reaches a slope of 23.6. However, the tail slopes above 32 cores can be separated into two groups. While the first one with CAF, Charm and Salsa presents good scalability with a slope around 0, the remaining three implementations do not scale as well and have slopes between 6.2 and 6.7. CAF outperforms all competitors in terms of absolute values. On 64 cores, CAF has an average runtime of 104s, which is about a tenth of the 1086s measured for Scala.
+
+
+                        Fig. 5 (b) shows the resident set size during the benchmark execution. In this scenario, a low memory usage can indicate a performance bottleneck, as 100 writers should be able to fill a mailbox faster than one single reader can drain it. Erlang seems to deliver a good trade-off between runtime and memory consumption at first, but fails to maintain a reasonable runtime for high levels of hardware concurrency. All three JVM-hosted applications have a high memory consumption while running significantly slower than the native programs on average, indicating that writers block readers and messages accumulate in the mailbox while the receiver is unable to dequeue them due to synchronization issues. Compared to the other memory plots, Fig. 5(b) depicts a high variance for all implementations. During the benchmark, the mailbox of the receiver fills with messages until all senders are done and no new messages arrive. At that point it is emptied again. Hence, the plot summarizes the mailbox growth over the runtime of the benchmark.
+
+In this benchmark, we consider a realistic use case including a mixture of operations under heavy work load. The benchmark program creates a simple multi-ring topology while handling a fixed number of actors per ring. A token with an initial value of 1000 is passed along the ring and its value is decremented by one in each round. A client that receives the token forwards it to its neighbor and terminates whenever the value of the token is 0. Each of the 100 rings consists of 100 actors and is re-created 4 times. Thus, we continuously create and terminate actors with a constant stream of messages. In addition, one worker per ring performs prime factorization to add CPU-intensive numeric work load to the system.
+
+
+                        Fig. 6
+                        (a) shows the runtime behavior as a function of available CPU cores. Ideal scaling would halve the runtime when the number of cores doubles. ActorFoundry stands out as it remains at a runtime above 200s. The process viewer from the operating system revealed that the benchmark program for ActorFoundry never utilizes more than five CPU cores at a time, why a better scalability cannot be expected. SALSA Lite is the only implementation under test that performs similar to CAF in this benchmark, followed by Akka which is slightly slower. SALSA Lite required a manual work load distribution by the programmer. Without putting each ring into its own Stage—a scheduling unit in SALSA Lite—, the runtime increases by a factor of 10–20.
+
+
+                        Fig. 6 (b) shows the memory consumption during the mixed scenario. Qualitatively, these values coincide well with our first benchmark results on actor creation. CAF again has a very constant and thus predictable memory footprint, while using significantly less memory than all other implementations (below 50MB). Compared to CAF, SALSA Lite, Erlang and ActorFoundry allocate more than a factor of ten of memory. However, SALSA uses the most memory of all benchmark programs and shows good performances, indicating that it may trade memory consumption for runtime efficiency.
+
+Visualizing the runtime leads to similar curves for all implementations but ActorFoundry. We normalized each curve in relation to its performance on 4 cores to examine the scaling behavior further. The results are shown in Fig. 7
+                        , which displays the speedup of the mixed case benchmark as a function of the available cores using logarithmic scaling on both axes. An ideal linear speedup, indicating that doubling the number of cores leads to twice the performance, is plotted as a dashed line. Benchmarks that are close to the ideal line or have a similar slope exhibit scaling behavior. Overall, CAF is closest to the ideal line, followed by SALSA and Scala. Charm++ and Erlang show good performance up to 16 cores, but have decreased speedup thereafter. Lastly, and consistent with Fig. 6(a), ActorFoundry has the largest distance to the ideal curve indicating that it does not scale well in this benchmark. It is noteworthy that all curves have an increasing deviation from the ideal behavior as the number of cores increases. In relative values the speedup increase of CAF is in a range from 99% to 93% for each doubling in cores. While SALSA is slightly behind with a speedup of 90%, Scala fluctuates close to 93%. Erlang exhibits a rapid decrease in speedup, starting around 100% and rapidly falling towards 62% as can be seen in its negative slope after 32 cores. On 8 cores, Charm++ appears to have a better than linear scaling which is explained by high variances in its measurements. Thereafter, its speedup decreases, mimicking the progression Erlang presented up to 32 cores.
+
+The Computer Language Benchmarks Game is a publicly available benchmark collection hosted by the Debian community.
+                           3
+                        
+                        
+                           3
+                           
+                              http://benchmarksgame.alioth.debian.org.
+                         It compares implementations of specific problems in different programming languages. These benchmarks were written by community members and provide a standard way to compare different implementations of the same algorithms.
+
+Among others, the benchmarks game includes the calculation of the Mandelbrot set, which we chose for our evaluation. The calculation of the Mandelbrot set is a straightforward algorithm that parallelizes at fine granularity. The benchmark computes an N-by-N pixel Mandelbrot set in the area 
+                           [
+                           −
+                           1.5
+                           −
+                           i
+                           ,
+                           0.5
+                           +
+                           i
+                           ]
+                        . While the original benchmark writes the resulting bitmap to a file, we chose to omit the output as we are not interested in I/O performance. Each program distributes the problem by creating one actor per calculated row. In contrast to the publicly available results, we plotted results from 4 to 64 cores in steps of 4, consistent with our previous experiments. We consistently use a problem size of N=16,000 and increased the iteration maximum from 50 to 500. This increase provides us with a problem that is complex enough to observe scaling behavior up to 64 cores.
+
+Our benchmark implementations are modified versions of the x64 Ubuntu quad-core programs. We ported the available code from threads to the actor frameworks under test where needed. Even if other solutions might be faster, they could not offer the features provided by the actor model—as considered in this paper. The Erlang implementation is the unchanged version from the website and uses High Performance Erlang (HiPE) for native code generation. For Scala, we chose the unnumbered Scala benchmark and adapted it to use Akka actors. The CAF benchmark is adapted from the C++ benchmark #9 and uses CAF for parallelization instead of OpenMP. As Charm++ is also based on C+ +, it uses the identical implementation for the Mandelbrot set. However, parallelization in Charm++ did not work as expected. We observed a drop in runtime after separating actor creation and message passing into two loops instead of one. This is surprising, since both versions finished the loops nearly instantly, but afterwards required different times for the remaining calculations. Furthermore, a straightforward implementation in a way similar to our other Charm++ benchmarks did not distribute the workload over all cores. We improved the performance of Charm++ by assigning an equal fraction of actors to all cores dynamically at runtime, which reduced the runtime significantly. Due to the previous slow results, we excluded ActorFoundry from this competition even though Java versions of the algorithm exist. Further, we do not have measurements for SALSA Lite as an implementation in its language was not available.
+
+
+                        Fig. 8
+                         shows the runtime as a function of the available CPU cores. Even though all benchmarks show a good overall scalability, their runtime varies largely. CAF shows the best performance in this benchmark with a runtime of 3.2s on 64 cores, followed by Scala at around 4.9 seconds. Charm++ requires 7.0s and Erlang performs worst at 28.2s, which is more than CAF requires on 4 cores. Since the benchmark focuses on number crunching, the performance of Erlang does not surprise as the VM of Erlang does not perform competitively for heavy numeric calculations. However, we were surprised by the performance difference between Charm++ and CAF. Even though both use the identical code for calculating the Mandelbrot set and performed very similar on the actor creation benchmark, Charm++ takes twice as long to complete. Since both frameworks use a non-preemptive scheduler, the performance difference must come from overhead in the runtime environment. We do not display memory measurements for this benchmarking task, as results merely reflect the size of the pixel array for the image.
+
+It is well known that GPUs vastly outperform CPUs for suitable problems. Such problems need to be divisible to execute concurrently on these SIMD machines. The Mandelbrot set used in the Computer Language Benchmarks Game falls into this category and is easily ported to OpenCL. In this benchmark we focus on the scalability of our OpenCL actor interface, and want to detect the overheads from offloading parts of our problem to the GPU.
+
+This benchmark was performed on a machine equipped with two hexacore Intel Xeon CPUs clocked at 2.4GHz and a Tesla C2075GPU. It runs Linux and uses the OpenCL drivers provided by Nvidia. The workload of our experiment is a cut from the inner part of a Mandelbrot set that has a balanced processing complexity for the entire image. We measured the wall-clock time for 11 different problem distributions, stepwise pushing a linearly increasing part of the calculation to the GPU. Starting from 0% (full problem on CPU), we offloaded in steps of 10% up to 100% of the workload to the GPU. Furthermore, we measured two different problem sizes to examine the difference in scaling. Our workload is an image with a resolution of 
+                           1920
+                           ×
+                           1080
+                         pixels in the area 
+                           [
+                           −
+                           0.5
+                           −
+                           0.7375
+                           i
+                           ,
+                           0.1
+                           −
+                           0.1375
+                           i
+                           ]
+                         with a different number of maximum iterations. For each measurement we performed 100 runs and plotted the mean as well as error bars that show the standard deviation.
+
+Both graphs in Fig. 9
+                         depict the runtime as functions of the problem fraction offloaded to the GPU. Though the runtime is measured in milliseconds in both cases, the scales differ by an order of magnitude according to the different problem sizes. The problem evaluated in Fig. 9(a) is 10 times larger than in Fig. 9(b). In addition to the total runtime, the graphs include the runtime for the CPU and GPU calculations only, i.e., the time between starting all actors and their termination. The total runtime is not a sum of both as the calculations are performed in parallel. Generally, the CPU runtime is slightly lower than the total runtime as long as the CPU is used for the calculation. In comparison, the GPU requires a fraction of the CPU for processing in all cases the CPU is included in the calculation.
+
+Overall, Fig. 9(a) shows excellent scalability with a clean linear decay of CPU consumption—the runtime falls at appropriate rate until execution on the GPU becomes dominant (
+                           >
+                           90
+                           %
+                        ). The error bars are small compared to the runtime and nearly invisible in the graph. In contrast, Fig. 9(b) presents visible overhead. Because the runtime of the offloaded background tasks is short, the penalty from feeding the Tesla with code and data degrades the speed-up of offloading. Transferring a sub-millisecond task to the GPU does indeed create little performance improvements. Larger tasks again lead to linear program acceleration, but an overhead penalty of a few milliseconds remains as the gap between total and CPU-bound execution times. Larger error bars indicate that major parts of these operations are performed (and scheduled) by the operating system. In both test series, it takes longer to calculate 10% of the problem on the CPU than is needed to calculate 100% on the GPU. As a result, the lower bound is the time required to process the complete workload on the GPU.
+
+In summary, these experiments on a large Tesla GPU reveal excellent scalability of programming GPUs with CAF actors. Significant executions attain an ideal speed-up, while the limit of offloading efficiency was detected for sub-millisecond tasks. Experiments with (smaller) desktop GPUs showed a lower efficiency threshold.
+
+In our final benchmark, we re-visit the computation of Mandelbrot images in a distributed system. We have used the same setup—16 Intel i7 quad core worker machines running at 3.4GHz each—and C++ source code as shown in Section 2.2 (Fig. 1). Instead of comparing actor programming to low-level message passing (OpenMPI), we now consider the actor systems CAF, Charm++, Erlang and Scala.
+
+
+                        Fig. 10
+                         depicts the runtime as a function of available worker nodes. Each worker node hosts four actors, one for each available CPU core. We measure the runtime as the delta between sending the first task and receiving the last result in order to exclude initial setup times. Further, we use the same C++ source code for the computation in all setups
+                           4
+                        
+                        
+                           4
+                           We have implemented a wrapper class using the Java Native Interface (JNI) with a static method returning byte[] for Scala and a Native Interface Function (NIF) returning Binary for Erlang.
+                         as we are only interested in serialization and networking performance.
+
+All implementations under test perform similarly and approach ideal speedup, i.e., doubling the number of worker nodes halves the runtime. CAF is the fastest implementation, followed by Scala. In detail, Charm++ is ≈ 7.9%, Erlang is ≈3.2%, and Scala is ≈2.3% slower than CAF on average. This is highlighted by the magnification in Fig. 10 that depicts the runtimes in range 120–180s for 12–16 worker nodes. It is worth mentioning that CAF is the only implementation that runs faster than the OpenMPI version of the program (cf. Fig. 1), with Scala running merely ≈1% slower. Since Charm++ is built on OpenMPI and uses the mpirun tool to distribute its workers, we expected a performance close to our hand-written MPI version. The comparably high runtime of Charm++ originates either in an inefficient serialization of std::vector 
+                        
+                           <
+                        
+                        char 
+                        
+                           >
+                         objects or an inherently higher message passing overhead. The latter may explain the gap in performance to CAF observed in the previous benchmarks.
+
+@&#DISCUSSION@&#
+
+The first part of our analysis focused on tasks performed as part of the runtime environment. Even short tasks with a small overhead can have a large impact on the runtime of an application. Specifically, we performed two micro-benchmarks to examine actor creation and the reception of massive amounts of messages. Real world applications depend on the interaction of all tasks performed by the runtime in addition to their own logic. In the extreme, previously well performing tasks may block each other, compete for resources when combined, or compete for resources with the applications logic. The second part of our benchmarks focused on more balanced scenarios that efficiently makes use of actors to solve a specific problem. To increase the scope of our testing, we included a community benchmark in this category. Our final benchmark examined the performance of message passing in a distributed actor system.
+
+In Section 2, we had started our discussion of ‘actors in the wild’ with the use case elastic programming for adaptive deployment. It essentially demands for very low overhead from actor creation and high scalability of the overall runtime system. Our extensive evaluations target these key indicators and reveal a diverse picture. Only SALSA Lite and CAF scale clearly at a very low memory footprint in actor creation, even though SALSA Lite wastes memory in the mixed use case. Partially, Scala and Charm++ also show good performance, even though Charm++ is less efficient for high concurrency as well as distributed messaging, and actor creation in Scala is 50 times less lean than in CAF. Languages running on virtual machines naturally have a memory overhead due to garbage collection as well as a small runtime overhead for initializing the VM itself. Still, the difference in memory consumption observed between CAF and the virtualized languages is too big to be merely an artifact of the garbage collector. Likewise, even a slow initialization process would at most take a few milliseconds, which is negligible for the runtimes we observed.
+
+CAF and Charm++—the only C++ competitors—remain apart. CAF runs faster, scales better, uses less memory, and utilizes distributed workers more efficiently. Charm++ is optimized for performance on clusters and supercomputers and as a direct result may not be as efficient at single-host performance. Still, there are overlapping use cases for those systems such as shown in Section 7.6 that make a comparison justifiable. For our runtime comparison on single hosts, we used the standalone version of Charm++ instead of its charmrun launcher which can be used to distribute an application or parallelize it using processes.
+
+Overall, CAF consistently approximated ideal scaling up to 64 cores and required significantly less memory than its competitors. SALSA Lite and Scala revealed similar performance characteristics in some scenarios, but no competitor reached the memory efficiency of CAF. The mailbox performance benchmark was the only case where CAF consumed more memory than Erlang and Scala. However, the higher memory allocation is a direct result of a highly scalable, lock-free mailbox that allows CAF to outperform competing implementations by about an order of magnitude on 64 cores in terms of runtime.
+
+We highlighted the end-to-end messaging at loose coupling as the second paradigm in Section 2. This design concept has particular relevance for the IoT, where constrained devices are common. Because of its consistently low memory footprint and its low computational overhead, CAF can be deployed in such environments of strictly limited resources. Since the IoT is home to a wide range of distributed applications that rely on message passing, it is worth introducing the actor model as a high level abstraction for developing applications. Charm++, the other native solution, could be a candidate for IoT programming as well. However, no adaptations to this domain are currently visible.
+
+
+                        Seamless integration of heterogeneous hardware was our final area in focus when discussing key motivations for the actor model in Section 2. Offloading work to a GPU via the OpenCL actor offers a scalable solution to process heavy calculations at a low cost. While this can improve performance for small problems (from 1ms onwards), the gain in performance scales up ideally for large workloads.
+
+Currently, the community faces the need for software environments that provide high scalability, robustness, and adaptivity to concurrent as well as widely distributed regimes. In various use cases, the actor model has been recognized as an excellent paradigmatic fundament for such systems. Still, there is a lack of full-fledged programming frameworks, which in particular holds for the native domain.
+
+In this paper, we presented CAF, the C++ Actor Framework. CAF scales up to millions of actors on many dozens of processors including GPUs, and down to small systems—like Rasberry PIs [12]—in loosely coupled environments as characteristic for the IoT. We introduced a series of concepts to advance the reality of actor programming, most notably (a) a scalable, message-transparent architecture, (b) type-safe messaging interfaces between loosely coupled components with pattern matching, and (c) an advanced scheduling facility. Together with ultra-fast, lean algorithms in the CAF core, this gave rise to consistently strong benchmark results of CAF, which clearly confirmed its excellent performance in concurrent and distributed use cases.
+
+There are five future research directions. Currently, we are reducing the resource footprint of CAF even further and port to the micro-kernel IoT operating system RIOT [62]. Second, we work on extending scheduling and load sharing to distributed deployment cases and massively parallel systems. This work will stimulate further, compatible benchmarking [63]. Third, we will extend our design towards effective monitoring and debugging facilities. Fourth, we explore design space opened up by the typed messaging interfaces for composable actor handles. Finally, a robust security layer is on our schedule that subsumes strong authentication of actors in combination with opportunistic encryption.
+
+@&#ACKNOWLEDGMENTS@&#
+
+The authors would like to thank Matthias Vallentin and Matthias Wählisch, who had a helping hand or three in shaping CAF. A special thanks goes to Marian Triebe for implementing und running benchmarks as well as testing and bugfixing. We further want to thank the Hamburg iNET working group for vivid discussions and the anonymous reviewers for inspiring suggestions. Funding by the German Federal Ministry of Education and Research within the projects ScaleCast (Grant number 03FH010I3), SAFEST(Grant number 13N12236), and Peeroskop (Grant number 01BY1203B) is gratefully acknowledged.
+
+@&#REFERENCES@&#
+

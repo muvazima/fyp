@@ -1,0 +1,2274 @@
+@&#MAIN-TITLE@&#Robust surface tracking in range image sequences
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           A novel robust method for surface tracking in range-image sequences is presented.
+
+
+                        
+                        
+                           
+                           Comparisons are done with recently proposed state-of-the-art trackers.
+
+
+                        
+                        
+                           
+                           Results on challenging in-house datasets are shown.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Range video
+
+Surface fitting
+
+Tracking
+
+Segmentation
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  A novel robust method for surface tracking in range-image sequences is presented which combines a clustering method based on surface models with a particle-filter-based 2-D affine-motion estimator. Segmented regions obtained at previous time steps are used to create seed areas by comparing measured depth values with those obtained from surface-model fitting. The seed areas are further refined using a motion-probability region estimated by the particle-filter-based tracker through prediction of future states. This helps resolving ambiguities that arise when surfaces belonging to different objects are in physical contact with each other, for example during hand-object manipulations. Region growing allows recovering the complete segment area. The obtained segmented regions are then used to improve the predictions of the tracker for the next frame. The algorithm runs in quasi real-time and uses on-line learning, eliminating the need to have a priori knowledge about the surface being tracked. We apply the method to in-house depth videos acquired with both time-of-flight and structured-light sensors, demonstrating object tracking in real-world scenarios, and we compare the results with those of an ICP-based tracker.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Tracking the pose of objects in image sequences is one of the most fundamental tasks in computer vision [1], and many works in the past focused on tracking in grayscale and color images. Tracking in range images is less explored, but due to the availability of low-cost depth cameras and their increasing importance in science and industry, such tracking approaches are of growing interest to the machine-vision as well as the robotics community. For example, tracking of object surfaces based on range data can be used to monitor and control the actions of a robotic arm during object-manipulation tasks [2]. Using depth information as the primary information source has the advantage that objects can be directly described by their geometric form, which is not affected by changes in the object's appearance in terms of color and texture, lighting conditions, shadowing or reflections. Furthermore, geometric features required for grasping are immediately available. Disadvantages of using depth cameras are their limited resolution, accuracy, and operating range. This poses special demands regarding robustness and adaptability for the algorithms dealing with this type of data.
+
+Surface tracking in the domain of range image sequences has two main components: (i) extract the surfaces and establish the correspondence of the surfaces over the frames in the sequence of range images, and (ii) compute the motion transformation using these surface correspondences [3]. Both tasks are intertwined, as the correct extraction of surface patches helps finding correct correspondences, and vice versa. As long as surfaces are spatially disconnected, problem (i) can be more or less easily solved by clustering the 3D points based on their spatial proximity [2,4]. Problem (ii) can be solved by assuming 3D rigid-body motions between extracted point sets [3,5,6]. However, as soon as surfaces get in physical contact with each other, the problem becomes far more challenging, because in this case it is often impossible to distinguish between different objects based on depth differences alone. The situation becomes even more severe when both the manipulator and the manipulated surface undergo the same transformation at this time, e.g., during a hand-object manipulation. In this case, (i) and (ii) need to be solved conjointly, while taking the motion history of the objects into account.
+
+In this work, we offer a solution to this problem by combining a recent clustering approach based on surface-model fitting [2] with a particle-filter-based affine-motion-estimation approach [7] with some modifications. Because we use a split-and-merge procedure for region growing which automatically adapts to the dynamic range data, predictions from the particle filter can be incorporated in a straightforward manner by refining seeding and, in consequence, the input to the tracker.
+
+@&#RELATED WORK@&#
+
+Object tracking has previously been performed mostly for color/gray-scale image sequences [1,7–10]. However, depth images pose different challenges to the tracking algorithm than color/gray-scale images.
+
+Most methods for tracking in range images use a priori knowledge of 3D point correspondences and find the affine or rigid-body transformation on this basis [11]. These methods mainly work for sparse data sets, but are less useful when working with dense range images. Other techniques match surface patches instead, eliminating the need for finding exact point correspondences [3]. The range data is segmented into surface patches, then correspondences are established between patches of adjacent frames, and the motion transformation is estimated. However, such an approach is only effective if the initial (presumably correct) segmentation can be maintained over time. This is however not a trivial task, as small variations in the data and motions can change the segmentation drastically. To overcome this problem, a seeding and region growing technique for range-image sequences was proposed in [2,4]. Maintenance can be improved this way, but when two or more surfaces are in physical contact with each other, it remains difficult to determine the boundary between the surfaces in contact using depth differences alone [2].
+
+To cope with the specific characteristics of range data, some existing approaches put limitations on the tracked surface by considering only articulated motion [12–14]. This simplifies the tracking problem but also limits the usability of the algorithm to particular scenarios. Robust tracking of human hands assuming articulated motion constrained by the 54-dimensional parameter space has been performed in [15]. In [16], object tracking using a depth camera was performed (for 3D object reconstruction), but here the robotic hand had to be separated from the range data before applying the algorithm.
+
+Another option for 3D tracking is the Iterative Closest Point (ICP) algorithm. However, the basic ICP method [17] is a pairwise matching algorithm which does not take into account past measurements [18,6], hence the error starts to propagate. The ICP algorithm has been previously combined with Kalman filtering for object reconstruction [19]. However, in this case, the background was removed, leaving only the target object. In cluttered scenes, this approach may thus not be applicable. Point-to-point matching in 3D space requires a high accuracy in the estimation of the transformation matrix. This makes these approaches less suitable for our scenario because of the limited accuracy of the depth camera. Several variants of ICP which achieve better point set registration have been proposed, such as the expectation-maximization ICP [20] and softassign [21]. However, these variants have a higher computational cost and require specialized hardware such as GPUs to achieve real-time performance [22].
+
+In this work, we combine seeding and growing of surfaces with particle filtering to overcome the aforementioned limitations. Our main contribution is a robust mechanism for identifying a set of points belonging to a target object that is being manipulated in 3-D space, regardless of its physical contact with other objects.
+
+@&#METHOD@&#
+
+Our tracker requires a range image as input at each time step. The range image along with the camera's intrinsic parameters is used to construct a 3-D point cloud. The algorithm for surface tracking consists of the following steps. Initially a set of non-overlapping geometric surface patches are obtained by clustering the 3-D points. Each cluster is modeled by a quadratic function and the surface that we want to track is identified manually (see Section 3.1). Segmented surfaces at step t are used to create seed regions in the next frame 
+                        t
+                        +
+                        1
+                      by comparing the predicted depth values (from quadratic surface models fitted to the segments) to the actual depth values (see Section 3.3). At the same time, a motion-probability region is found by the particle-filter-based tracker through the prediction of future states (see Section 3.2). The extracted motion-probability region is used to refine the seeding. Region growing allows reconstructing the segment at 
+                        t
+                        +
+                        1
+                     . Based on this segmented area, the translation parameters of resampled states are re-estimated (see Section 3.4), which, provided the segmentation is correct, improves the predictions of the tracker for the next frame. The basic idea behind our approach is illustrated in Fig. 1
+                     .
+
+The adaptive surface fitting for clustering of 3-D points is used for both initial clustering, seeding and region growing during the tracking. At each time step t, a depth image 
+                        
+                           
+                              F
+                           
+                           
+                              t
+                           
+                        
+                        (
+                        u
+                        ,
+                        v
+                        )
+                      is acquired by the depth sensor, where 
+                        (
+                        u
+                        ,
+                        v
+                        )
+                      are the pixel positions in the image grid of size 
+                        (
+                        image length
+                        ×
+                        image width
+                        ×
+                        3
+                        )
+                     , containing the 3D data 
+                        x
+                        (
+                        u
+                        ,
+                        v
+                        )
+                     , 
+                        y
+                        (
+                        u
+                        ,
+                        v
+                        )
+                     , and 
+                        z
+                        (
+                        u
+                        ,
+                        v
+                        )
+                     .
+
+For the first frame 
+                           
+                              
+                                 F
+                              
+                              
+                                 t
+                                 =
+                                 0
+                              
+                           
+                           (
+                           u
+                           ,
+                           v
+                           )
+                        , we achieve an initial clustering by a split-and-merge approach [23,24]. Different from [24] where the depth image is segmented into planar surfaces only, our method uses a second-order surface model that is able to cluster 3D points belonging to curved surfaces. We first split the data points into two equally sized clusters 
+                           
+                              
+                                 c
+                              
+                              
+                                 j
+                                 =
+                                 1
+                                 ,
+                                 2
+                              
+                           
+                         with respective labels 
+                           
+                              
+                                 l
+                              
+                              
+                                 j
+                                 =
+                                 1
+                                 ,
+                                 2
+                              
+                           
+                        . Then for each cluster we estimate the parameters 
+                           {
+                           
+                              
+                                 a
+                              
+                              
+                                 j
+                              
+                           
+                           ,
+                           
+                              
+                                 b
+                              
+                              
+                                 j
+                              
+                           
+                           ,
+                           
+                              
+                                 d
+                              
+                              
+                                 j
+                              
+                           
+                           ,
+                           
+                              
+                                 e
+                              
+                              
+                                 j
+                              
+                           
+                           ,
+                           
+                              
+                                 g
+                              
+                              
+                                 j
+                              
+                           
+                           }
+                         of a quadratic surface 
+                           
+                              
+                                 f
+                              
+                              
+                                 j
+                              
+                           
+                           (
+                           x
+                           ,
+                           y
+                           )
+                         of the form
+                           
+                              (1)
+                              
+                                 z
+                                 =
+                                 
+                                    
+                                       f
+                                    
+                                    
+                                       j
+                                    
+                                 
+                                 (
+                                 x
+                                 ,
+                                 y
+                                 )
+                                 =
+                                 
+                                    
+                                       a
+                                    
+                                    
+                                       j
+                                    
+                                 
+                                 
+                                    
+                                       x
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 +
+                                 
+                                    
+                                       b
+                                    
+                                    
+                                       j
+                                    
+                                 
+                                 
+                                    
+                                       y
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 +
+                                 
+                                    
+                                       d
+                                    
+                                    
+                                       j
+                                    
+                                 
+                                 x
+                                 +
+                                 
+                                    
+                                       e
+                                    
+                                    
+                                       j
+                                    
+                                 
+                                 y
+                                 +
+                                 
+                                    
+                                       g
+                                    
+                                    
+                                       j
+                                    
+                                 
+                              
+                           
+                         such that the difference 
+                           
+                              
+                                 ∑
+                              
+                              
+                                 k
+                                 =
+                                 1
+                              
+                              
+                                 
+                                    
+                                       n
+                                    
+                                    
+                                       j
+                                    
+                                 
+                              
+                           
+                           
+                              
+                                 [
+                                 
+                                    
+                                       f
+                                    
+                                    
+                                       j
+                                    
+                                 
+                                 (
+                                 
+                                    
+                                       x
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 ,
+                                 
+                                    
+                                       y
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 )
+                                 −
+                                 
+                                    
+                                       z
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 ]
+                              
+                              
+                                 2
+                              
+                           
+                         is minimized, where 
+                           
+                              
+                                 n
+                              
+                              
+                                 j
+                              
+                           
+                         is the total number of points belonging to 
+                           
+                              
+                                 c
+                              
+                              
+                                 j
+                              
+                           
+                        . We use a Levenberg–Marquardt minimization to solve this problem.
+
+For each cluster 
+                           
+                              
+                                 c
+                              
+                              
+                                 j
+                              
+                           
+                        , we first unlabel all points within the cluster for which the difference between the actual depth value 
+                           
+                              
+                                 z
+                              
+                              
+                                 k
+                              
+                           
+                         and the estimated depth value 
+                           
+                              
+                                 f
+                              
+                              
+                                 j
+                              
+                           
+                           (
+                           
+                              
+                                 x
+                              
+                              
+                                 k
+                              
+                           
+                           ,
+                           
+                              
+                                 y
+                              
+                              
+                                 k
+                              
+                           
+                           )
+                         is larger than a threshold 
+                           
+                              
+                                 ψ
+                              
+                              
+                                 j
+                              
+                           
+                           =
+                           
+                              
+                                 ∑
+                              
+                              
+                                 (
+                                 u
+                                 ,
+                                 v
+                                 )
+                                 ∈
+                                 
+                                    
+                                       c
+                                    
+                                    
+                                       j
+                                    
+                                 
+                              
+                           
+                           |
+                           
+                              
+                                 f
+                              
+                              
+                                 j
+                              
+                           
+                           [
+                           x
+                           (
+                           u
+                           ,
+                           v
+                           )
+                           ,
+                           y
+                           (
+                           u
+                           ,
+                           v
+                           )
+                           ]
+                           −
+                           z
+                           (
+                           u
+                           ,
+                           v
+                           )
+                           |
+                           /
+                           (
+                           ρ
+                           
+                              
+                                 n
+                              
+                              
+                                 j
+                              
+                           
+                           )
+                        . Here, ρ is a constant which controls the number of unlabeled points. For all unlabeled points 
+                           (
+                           u
+                           ,
+                           v
+                           )
+                         in each cluster 
+                           
+                              
+                                 c
+                              
+                              
+                                 j
+                              
+                           
+                        , we find the new index label of the cluster that provides the smallest fitting error
+                           
+                              (2)
+                              
+                                 ξ
+                                 (
+                                 u
+                                 ,
+                                 v
+                                 )
+                                 =
+                                 arg
+                                 
+                                 
+                                    [
+                                    
+                                       
+                                          min
+                                       
+                                       
+                                          j
+                                       
+                                    
+                                    
+                                    
+                                       (
+                                       
+                                          {
+                                          
+                                             
+                                                δ
+                                             
+                                             
+                                                
+                                                   
+                                                      c
+                                                   
+                                                   
+                                                      j
+                                                   
+                                                
+                                             
+                                          
+                                          (
+                                          u
+                                          ,
+                                          v
+                                          )
+                                          }
+                                       
+                                       )
+                                    
+                                    ]
+                                 
+                              
+                           
+                         where
+                           
+                              (3)
+                              
+                                 
+                                    
+                                       δ
+                                    
+                                    
+                                       
+                                          
+                                             c
+                                          
+                                          
+                                             j
+                                          
+                                       
+                                    
+                                 
+                                 (
+                                 u
+                                 ,
+                                 v
+                                 )
+                                 =
+                                 
+                                    |
+                                    
+                                       
+                                          f
+                                       
+                                       
+                                          j
+                                       
+                                    
+                                    
+                                       [
+                                       x
+                                       (
+                                       u
+                                       ,
+                                       v
+                                       )
+                                       ,
+                                       y
+                                       (
+                                       u
+                                       ,
+                                       v
+                                       )
+                                       ]
+                                    
+                                    −
+                                    z
+                                    (
+                                    u
+                                    ,
+                                    v
+                                    )
+                                    |
+                                 
+                                 .
+                              
+                           
+                         For every unlabeled point 
+                           (
+                           u
+                           ,
+                           v
+                           )
+                        , we find the cluster 
+                           
+                              
+                                 c
+                              
+                              
+                                 ξ
+                              
+                           
+                         denoted by the index ξ, and assign the new respective label 
+                           
+                              
+                                 l
+                              
+                              
+                                 ξ
+                              
+                           
+                         to it. The resulting new clusters may be disconnected. In this case, we split all disconnected regions from the main (largest) region, assign new labels to them, and fit surface models to the data points (Eq. (1)). Additionally, neighboring surfaces are merged if they can be described approximately by the same surface model. We perform this splitting and merging iteratively until a stable solution is reached. Fig. 2
+                         shows the pseudo-code of the splitting and merging procedure and Fig. 3
+                         shows a typical segmentation result obtained with our clustering method. We manually identify the label of the surface that we want to track. We represent the points on the tracked surface as the 2-vector T which is a subset of the image grid.
+
+In order to determine the location of the projected tracked surface in the image at each time step t, we model its motion as a 2-D affine transformation matrix, i.e.,
+                           
+                              (4)
+                              
+                                 
+                                    
+                                       X
+                                    
+                                    
+                                       t
+                                    
+                                 
+                                 =
+                                 
+                                    [
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   A
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   k
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             0
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                    
+                                    ]
+                                 
+                                 ,
+                              
+                           
+                         where 
+                           
+                              
+                                 A
+                              
+                              
+                                 t
+                              
+                           
+                         is an invertible 
+                           2
+                           ×
+                           2
+                         matrix, 
+                           
+                              
+                                 k
+                              
+                              
+                                 t
+                              
+                           
+                         is the 2-D translation, and 
+                           
+                              
+                                 X
+                              
+                              
+                                 t
+                                 =
+                                 0
+                              
+                           
+                           =
+                           
+                              
+                                 I
+                              
+                              
+                                 3
+                              
+                           
+                        . For projective motion estimation, we compute 
+                           
+                              
+                                 X
+                              
+                              
+                                 t
+                              
+                           
+                         using a particle filter, whose state dynamics is based on a constant velocity model as described in [7], i.e.,
+                           
+                              (5)
+                              
+                                 
+                                    
+                                       X
+                                    
+                                    
+                                       t
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       X
+                                    
+                                    
+                                       t
+                                       −
+                                       1
+                                    
+                                 
+                                 ⋅
+                                 exp
+                                 ⁡
+                                 
+                                    (
+                                    a
+                                    log
+                                    ⁡
+                                    
+                                       (
+                                       
+                                          
+                                             X
+                                          
+                                          
+                                             t
+                                             −
+                                             2
+                                          
+                                          
+                                             −
+                                             1
+                                          
+                                       
+                                       ⋅
+                                       
+                                          
+                                             X
+                                          
+                                          
+                                             t
+                                             −
+                                             1
+                                          
+                                       
+                                       )
+                                    
+                                    +
+                                    
+                                       
+                                          V
+                                       
+                                       
+                                          t
+                                       
+                                    
+                                    )
+                                 
+                                 ,
+                              
+                           
+                         where a is the autoregressive process parameter and V is the Wiener process noise. For color/gray-scale images, the sum-of-squared differences (SSD) between the tracked image template 
+                           
+                              
+                                 F
+                              
+                              
+                                 t
+                                 =
+                                 0
+                              
+                              
+                                 
+                                    color
+                                 
+                              
+                           
+                           (
+                           T
+                           )
+                         and the acquired image 
+                           
+                              
+                                 F
+                              
+                              
+                                 t
+                              
+                              
+                                 
+                                    color
+                                 
+                              
+                           
+                           (
+                           K
+                           )
+                         in the predicted region K can be used as the measurement function. Here, T are the indexes defining the area of the template in the image grid and K is determined by transforming T with 
+                           
+                              
+                                 X
+                              
+                              
+                                 t
+                              
+                           
+                        .
+
+Contrary to color/gray-scale data, the 3-D range data of the tracked surface depends on the object's pose relative to the camera pose. Hence, the SSD between the template and the tracked image region cannot be computed in the same way as for color images [7]. In our approach, we first compute the rigid transform between the 3-D range vectors 
+                           
+                              
+                                 F
+                              
+                              
+                                 t
+                              
+                           
+                           (
+                           K
+                           )
+                         and 
+                           
+                              
+                                 F
+                              
+                              
+                                 t
+                                 =
+                                 0
+                              
+                           
+                           (
+                           T
+                           )
+                         which minimizes the nearest neighbor distance in the least-squares sense [25], and then compute the distance as the 
+                           
+                              
+                                 l
+                              
+                              
+                                 1
+                              
+                           
+                        -norm of the difference between the corresponding points, i.e., the measurement function
+                           
+                              (6)
+                              
+                                 h
+                                 (
+                                 
+                                    
+                                       K
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 )
+                                 =
+                                 
+                                    
+                                       ‖
+                                       
+                                          
+                                             F
+                                          
+                                          
+                                             t
+                                          
+                                       
+                                       
+                                          
+                                             (
+                                             
+                                                
+                                                   K
+                                                
+                                                
+                                                   i
+                                                
+                                             
+                                             )
+                                          
+                                          
+                                             ′
+                                          
+                                       
+                                       −
+                                       
+                                          
+                                             F
+                                          
+                                          
+                                             t
+                                             =
+                                             0
+                                          
+                                       
+                                       (
+                                       T
+                                       )
+                                       ‖
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 ,
+                              
+                           
+                         where 
+                           
+                              
+                                 F
+                              
+                              
+                                 t
+                              
+                           
+                           
+                              
+                                 (
+                                 
+                                    
+                                       K
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 )
+                              
+                              
+                                 ′
+                              
+                           
+                         is the 3-D feature vector obtained after applying the rigid transform to 
+                           
+                              
+                                 F
+                              
+                              
+                                 t
+                              
+                           
+                           (
+                           
+                              
+                                 K
+                              
+                              
+                                 i
+                              
+                           
+                           )
+                        . The measurement function 
+                           h
+                           (
+                           
+                              
+                                 K
+                              
+                              
+                                 i
+                              
+                           
+                           )
+                         has to be computed for every state 
+                           i
+                           =
+                           0
+                           …
+                           m
+                           −
+                           1
+                        , where m is the number of particles. Note that the affine transform handles the transformation of the projected tracked object in the image, while the 3D-rigid transform updates the 3D values of the points inside the tracked-object area. Since we know the actual shape of the template that we want to track (from the initial clustering), we can track the points that are inside the cluster silhouette instead of using a bounding box as in [7]. We generate a motion-probability-region 
+                           
+                              
+                                 P
+                              
+                              
+                                 t
+                              
+                           
+                           (
+                           u
+                           ,
+                           v
+                           )
+                         based on the re-sampled particles as 
+                           
+                              
+                                 P
+                              
+                              
+                                 t
+                              
+                           
+                           (
+                           u
+                           ,
+                           v
+                           )
+                           =
+                           1
+                         if 
+                           
+                              
+                                 Ω
+                              
+                              
+                                 t
+                              
+                           
+                           (
+                           u
+                           ,
+                           v
+                           )
+                           <
+                           τ
+                        , and 0 otherwise, with 
+                           τ
+                           =
+                           m
+                           /
+                           3
+                         and 
+                           
+                              
+                                 Ω
+                              
+                              
+                                 t
+                              
+                           
+                           (
+                           k
+                           ,
+                           l
+                           )
+                           =
+                           
+                              
+                                 ∑
+                              
+                              
+                                 i
+                                 =
+                                 0
+                              
+                              
+                                 m
+                                 −
+                                 1
+                              
+                           
+                           
+                              
+                                 W
+                              
+                              
+                                 t
+                              
+                              
+                                 i
+                              
+                           
+                           (
+                           k
+                           ,
+                           l
+                           )
+                        . 
+                           
+                              
+                                 W
+                              
+                              
+                                 t
+                              
+                              
+                                 i
+                              
+                           
+                         is a binary image which represents the tracked object-surface silhouette determined from the affine state matrix 
+                           
+                              
+                                 X
+                              
+                              
+                                 t
+                              
+                              
+                                 i
+                              
+                           
+                         of the re-sampled particle i, i.e.,
+                           
+                              (7)
+                              
+                                 
+                                    
+                                       W
+                                    
+                                    
+                                       t
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 (
+                                 k
+                                 ,
+                                 l
+                                 )
+                                 =
+                                 
+                                    {
+                                    
+                                       
+                                          
+                                             1
+                                          
+                                          
+                                             if 
+                                             (
+                                             k
+                                             ,
+                                             l
+                                             ,
+                                             1
+                                             )
+                                             ∈
+                                             Π
+                                          
+                                       
+                                       
+                                          
+                                             0
+                                          
+                                          
+                                             otherwise
+                                             ,
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                         where 
+                           Π
+                           =
+                           {
+                           
+                              
+                                 X
+                              
+                              
+                                 t
+                              
+                              
+                                 i
+                              
+                           
+                           ×
+                           (
+                           u
+                           ,
+                           v
+                           ,
+                           1
+                           )
+                           |
+                           for all 
+                           (
+                           u
+                           ,
+                           v
+                           )
+                           ∈
+                           T
+                           }
+                        . The motion-probability-region is defined in order to determine the most probable location of the seed for the tracked surface. We achieve this by considering the output of all the resampled particles, i.e., summing over all the resampled particles 
+                           
+                              
+                                 W
+                              
+                              
+                                 i
+                              
+                           
+                        , and applying a threshold afterwards.
+
+The particle filtering approach [26] consists of the following main steps:
+                           
+                              1.
+                              Sample 
+                                    
+                                       
+                                          X
+                                       
+                                       
+                                          t
+                                       
+                                       
+                                          (
+                                          i
+                                          )
+                                       
+                                    
+                                    ∼
+                                    p
+                                    (
+                                    
+                                       
+                                          X
+                                       
+                                       
+                                          t
+                                       
+                                    
+                                    |
+                                    
+                                       
+                                          X
+                                       
+                                       
+                                          t
+                                          −
+                                          1
+                                       
+                                       
+                                          (
+                                          i
+                                          )
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          y
+                                       
+                                       
+                                          t
+                                       
+                                    
+                                    )
+                                 
+                              
+
+Compute weights 
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          t
+                                       
+                                       
+                                          (
+                                          i
+                                          )
+                                       
+                                    
+                                    =
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          t
+                                          −
+                                          1
+                                       
+                                       
+                                          (
+                                          i
+                                          )
+                                       
+                                    
+                                    
+                                       
+                                          p
+                                          (
+                                          
+                                             
+                                                y
+                                             
+                                             
+                                                t
+                                             
+                                          
+                                          |
+                                          
+                                             
+                                                X
+                                             
+                                             
+                                                t
+                                             
+                                             
+                                                (
+                                                i
+                                                )
+                                             
+                                          
+                                          )
+                                          p
+                                          (
+                                          
+                                             
+                                                X
+                                             
+                                             
+                                                t
+                                             
+                                             
+                                                (
+                                                i
+                                                )
+                                             
+                                          
+                                          |
+                                          
+                                             
+                                                X
+                                             
+                                             
+                                                t
+                                                −
+                                                1
+                                             
+                                             
+                                                (
+                                                i
+                                                )
+                                             
+                                          
+                                          )
+                                       
+                                       
+                                          π
+                                          (
+                                          
+                                             
+                                                X
+                                             
+                                             
+                                                t
+                                             
+                                             
+                                                (
+                                                i
+                                                )
+                                             
+                                          
+                                          |
+                                          
+                                             
+                                                X
+                                             
+                                             
+                                                0
+                                                :
+                                                t
+                                                −
+                                                1
+                                             
+                                             
+                                                (
+                                                i
+                                                )
+                                             
+                                          
+                                          ,
+                                          
+                                             
+                                                y
+                                             
+                                             
+                                                0
+                                                :
+                                                t
+                                             
+                                          
+                                          )
+                                       
+                                    
+                                 
+                              
+
+Resample 
+                                    
+                                       
+                                          X
+                                       
+                                       
+                                          t
+                                       
+                                       
+                                          (
+                                          i
+                                          )
+                                       
+                                    
+                                  according to 
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          t
+                                       
+                                       
+                                          (
+                                          i
+                                          )
+                                       
+                                    
+                                 
+                              
+
+In order to generate seeds, we first estimate the surface models for each cluster. Based on these, we compute the difference between the predicted depth and the actual depth (see Eq. (3)), providing a seed area for each cluster, i.e., for all 
+                           (
+                           u
+                           ,
+                           v
+                           )
+                           ∈
+                           
+                              
+                                 c
+                              
+                              
+                                 j
+                              
+                           
+                        ,
+                           
+                              (8)
+                              
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       t
+                                    
+                                 
+                                 (
+                                 u
+                                 ,
+                                 v
+                                 )
+                                 =
+                                 
+                                    {
+                                    
+                                       
+                                          
+                                             j
+                                          
+                                          
+                                             if 
+                                             
+                                                
+                                                   δ
+                                                
+                                                
+                                                   
+                                                      
+                                                         c
+                                                      
+                                                      
+                                                         j
+                                                      
+                                                   
+                                                
+                                             
+                                             (
+                                             u
+                                             ,
+                                             v
+                                             )
+                                             <
+                                             
+                                                
+                                                   ψ
+                                                
+                                                
+                                                   j
+                                                
+                                             
+                                             ,
+                                          
+                                       
+                                       
+                                          
+                                             0
+                                          
+                                          
+                                             otherwise,
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                         where the non-seed points are assigned a zero value. For the target cluster 
+                           
+                              
+                                 c
+                              
+                              
+                                 i
+                              
+                           
+                         (that is being tracked) we refine the seed area by removing all points that are not inside 
+                           
+                              
+                                 P
+                              
+                              
+                                 t
+                              
+                           
+                           (
+                           u
+                           ,
+                           v
+                           )
+                        , and prohibit all other clusters 
+                           j
+                           ≠
+                           i
+                         to have seeds inside the probability region of the target, yielding
+                           
+                              (9)
+                              
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       t
+                                    
+                                    
+                                       ′
+                                    
+                                 
+                                 (
+                                 u
+                                 ,
+                                 v
+                                 )
+                                 =
+                                 
+                                    {
+                                    
+                                       
+                                          
+                                             0
+                                          
+                                          
+                                             if 
+                                             
+                                                
+                                                   P
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                             (
+                                             u
+                                             ,
+                                             v
+                                             )
+                                             =
+                                             0
+                                              and 
+                                             
+                                                
+                                                   s
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                             (
+                                             u
+                                             ,
+                                             v
+                                             )
+                                             =
+                                             i
+                                          
+                                       
+                                       
+                                          
+                                             0
+                                          
+                                          
+                                             if 
+                                             
+                                                
+                                                   P
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                             (
+                                             u
+                                             ,
+                                             v
+                                             )
+                                             =
+                                             1
+                                              and 
+                                             
+                                                
+                                                   s
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                             (
+                                             u
+                                             ,
+                                             v
+                                             )
+                                             =
+                                             j
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                   s
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                             (
+                                             u
+                                             ,
+                                             v
+                                             )
+                                          
+                                          
+                                             otherwise.
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+In Fig. 4
+                        , the basic idea behind the method is illustrated for a scene showing a hand manipulating a bottle. Fig. 4(a) shows the seeding procedure without using the refinement step. It can be observed that with passage of time, seed points of the hand aggregate in the region of the bottle. This results in error propagation and after every time instant the segmentation/tracking result gets worse. The reason is that the region growing approach is a least-squares minimization, which does not take into account factors such as shape deformation. Because of the similarity of the adjacent regions of the bottle and the hand, and the limited resolution of the data, the hand and the target object get merged. Using the motion-probability-region in the seeding process prevents the bottle and the hand to be merged (see Fig. 4(b)).
+
+Once we have obtained the seeds for all the surfaces, we determine the label for all the unlabeled points using the same procedure as during the initial clustering (see Section 3.1). Using Eq. (2) and Eq. (3), we determine the new labeling of the unlabeled points.
+
+In case of depth data, the employed quadratic surface fitting provides clusters of points whose spatial arrangement varies smoothly in 3-D space and is invariant to illumination changes. For the aforementioned reason, we did not find any advantage of periodically updating the target appearance model [27,7] and hence omitted this step. A simple computation of the mean of the tracked target proved to be sufficient to filter quantization noise in depth data.
+
+We refine the resampled particles of the tracker by averaging the translation component of the affine state matrices 
+                           
+                              
+                                 X
+                              
+                              
+                                 0
+                                 :
+                                 m
+                                 −
+                                 1
+                              
+                           
+                         from the current time step according to
+                           
+                              (10)
+                              
+                                 
+                                    
+                                       X
+                                    
+                                    
+                                       t
+                                       ,
+                                       0
+                                       :
+                                       m
+                                       −
+                                       1
+                                    
+                                    
+                                       ′
+                                    
+                                 
+                                 =
+                                 
+                                    [
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   A
+                                                
+                                                
+                                                   t
+                                                   ,
+                                                   0
+                                                   :
+                                                   m
+                                                   −
+                                                   1
+                                                
+                                             
+                                          
+                                          
+                                             (
+                                             
+                                                
+                                                   k
+                                                
+                                                
+                                                   t
+                                                   ,
+                                                   0
+                                                   :
+                                                   m
+                                                   −
+                                                   1
+                                                
+                                             
+                                             +
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                      
+                                                   
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                             )
+                                             /
+                                             2
+                                          
+                                       
+                                       
+                                          
+                                             0
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                    
+                                    ]
+                                 
+                                 ,
+                              
+                           
+                         where 
+                           
+                              
+                                 
+                                    
+                                       
+                                    
+                                 
+                              
+                              
+                                 t
+                              
+                           
+                           =
+                           (
+                           
+                              
+                                 
+                                    x
+                                    ¯
+                                 
+                              
+                              
+                                 t
+                              
+                           
+                           ,
+                           
+                              
+                                 
+                                    y
+                                    ¯
+                                 
+                              
+                              
+                                 t
+                              
+                           
+                           )
+                         is the centroid of the adaptive segment, obtained from the seeding and region growing procedure, which feeds back to the particle filter. The refined states 
+                           
+                              
+                                 X
+                              
+                              
+                                 t
+                                 ,
+                                 0
+                                 :
+                                 m
+                                 −
+                                 1
+                              
+                              
+                                 ′
+                              
+                           
+                         are used by the tracker for prediction at time step 
+                           t
+                           +
+                           1
+                        .
+
+@&#RESULTS@&#
+
+We tested the tracking algorithm on several in-house recorded depth videos of hand-object manipulations using a Microsoft Kinect and a PMD camera. The results for selected frames are shown in Figs. 5, 6 and 10
+                     
+                     . All the datasets along with the tracking results are made available for the readers.
+                        1
+                     
+                     
+                        1
+                        
+                           http://www.iri.upc.edu/people/shusain/tracking_data.html.
+                      In each of the examples, our goal is to track the manipulated object. To the best of our knowledge, to date there is no benchmark dataset for depth videos publicly available. Results obtained with our method are shown for selected movie frames and a Video demonstrating the tracking results is provided as supplemental material.
+
+
+                        Fig. 5(a) shows a human hand moving a cup such that it undergoes large changes in orientation and position. From frame 104 to frame 188, both the hand and the cup go through the same transformation. Nevertheless, the method succeeded to track the cup correctly, even though the two surfaces got in smooth continuity. Fig. 5(b) shows example of a human hand displacing a bottle from one spot to another. From frame 65 to frame 93, the bottle was tracked correctly. During this time, it was at the same depth and in physical contact with the surface on top of which it was placed. Fig. 5(c) shows a human manipulating another bottle. This time we tested if our tracker is able to handle a full rotation of 180 degrees involving also translation and scaling. Despite these challenges, the shape of the bottle could be preserved while being tracked. Fig. 6 shows tracking result for a cylindrical object with a low resolution PMD camera (
+                           200
+                           ×
+                           200
+                         pixels). The object was lifted up from the ground and then manipulated in different ways. It can be seen that the object was tracked correctly before, during, and after the human hand manipulated it.
+
+We calculate the RMS error 
+                           
+                              
+                                 e
+                              
+                              
+                                 rms
+                              
+                           
+                         (in number of pixels) between the ground truth centroid 
+                           (
+                           
+                              x
+                              ¯
+                           
+                           ,
+                           
+                              y
+                              ¯
+                           
+                           )
+                         and the estimated centroid 
+                           (
+                           
+                              
+                                 
+                                    x
+                                    ¯
+                                 
+                              
+                              
+                                 ′
+                              
+                           
+                           ,
+                           
+                              
+                                 
+                                    y
+                                    ¯
+                                 
+                              
+                              
+                                 ′
+                              
+                           
+                           )
+                         location for quantitative analysis according to
+                           
+                              (11)
+                              
+                                 
+                                    
+                                       e
+                                    
+                                    
+                                       rms
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             (
+                                             
+                                                x
+                                                ¯
+                                             
+                                             −
+                                             
+                                                
+                                                   
+                                                      x
+                                                      ¯
+                                                   
+                                                
+                                                
+                                                   ′
+                                                
+                                             
+                                             )
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                       +
+                                       
+                                          
+                                             (
+                                             
+                                                y
+                                                ¯
+                                             
+                                             −
+                                             
+                                                
+                                                   
+                                                      y
+                                                      ¯
+                                                   
+                                                
+                                                
+                                                   ′
+                                                
+                                             
+                                             )
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                    
+                                 
+                                 .
+                              
+                           
+                        
+                     
+
+
+                        Fig. 7
+                         shows a comparison of the RMS error at each time instant for the cup sequence (Fig. 5(a)). The range image sequence was used to track the cup with our approach, i.e., surface fitting along with refining seeds (see Eq. (9)) and the approach of [2] (surface fitting only). After frame 80, the surface of the cup got in smooth continuity with the hand and henceforth the surface fitting procedure alone was unable to disambiguate the boundary between the two surfaces and lost tracking, whereas when it was combined with the particle filter, the cup was successfully tracked.
+
+
+                        Fig. 7 also shows the results using two different particle-filter-based trackers from [7] and [28]. We used the corresponding color images of the cup sequence as an input for these trackers. It can be observed that these trackers have a higher RMS error when compared to ours. This is because the accuracy of color-based trackers depends on the richness of the texture in the color image.
+
+We also compute the difference 
+                           
+                              
+                                 e
+                              
+                              
+                                 size
+                              
+                           
+                         between the size (in number of pixels) of the tracked surface in the image plane 
+                           
+                              
+                                 s
+                              
+                              
+                                 ′
+                              
+                           
+                         and the size of the surface in the ground truth s, i.e.,
+                           
+                              (12)
+                              
+                                 
+                                    
+                                       e
+                                    
+                                    
+                                       size
+                                    
+                                 
+                                 =
+                                 |
+                                 s
+                                 −
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       ′
+                                    
+                                 
+                                 |
+                                 .
+                              
+                           
+                        
+                     
+
+
+                        Fig. 8
+                         shows a comparison of the region size using the four approaches described earlier. In Fig. 7 and Fig. 8 it can be seen that the method from [28] (green color), even though it was able to track the surface, could not maintain its size.
+
+
+                        Table 1
+                         shows the average of the RMS error and the region size error for the four approaches plotted in Fig. 7 and Fig. 8.
+
+We also compare our approach to an ICP-based tracker [18]. We compute the mean of the nearest neighbor distances for each point on the tracked surface with respect to the ground truth. To find the nearest neighbors, we used the approach from [29]. Figs. 9
+                        (a) and (b) show a comparison for the sequences shown in Fig. 5(a) and (c), respectively. The ICP algorithm was able to keep track of the surfaces but failed to correctly determine surface orientation, hence we see a greater average nearest neighbor distance with respect to the ground truth when the surface is rotating. Our approach clearly outperforms the ICP-based tracker. To create the ground-truth, we first over-segmented the video using the method proposed by [30] and then manually relabeled the segments that belong to the tracked object.
+
+In our approach, the translation component of the affine state matrix is refined by recomputing it after region growing (see Eq. (10)). Hence, we expect a better performance from the particle-filter-based estimator when the translation component of the tracked object dominates other kinds of transformations. This can be illustrated by tracking a spherical surface, since it can undergo translation and scaling only. Fig. 10
+                        (a) shows selected depth images from [2] together with the tracking results (red color). We determine the efficiency, by finding the number of effective particles, i.e., 
+                           
+                              
+                                 N
+                              
+                              
+                                 eff
+                              
+                           
+                           =
+                           1
+                           /
+                           
+                              
+                                 ∑
+                              
+                              
+                                 i
+                              
+                           
+                           
+                              
+                                 (
+                                 
+                                    
+                                       
+                                          
+                                             w
+                                          
+                                          
+                                             ˜
+                                          
+                                       
+                                    
+                                    
+                                       t
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 )
+                              
+                              
+                                 2
+                              
+                           
+                        , as defined in [26,7], where 
+                           
+                              
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       ˜
+                                    
+                                 
+                              
+                              
+                                 i
+                              
+                           
+                         are the normalized importance weights (for details see [7]). The number of effective particles provides a measure of how well the tracker managed to predict the future state of the object. Fig. 10(b) shows 
+                           
+                              
+                                 N
+                              
+                              
+                                 eff
+                              
+                           
+                         with (blue line) and without (red line) recomputing translation. We have used 15 particles in all our experiments, hence 
+                           
+                              
+                                 N
+                              
+                              
+                                 eff
+                              
+                           
+                         can vary between 1 (worst) to 15 (best). Clearly, the number of effective particles increases after applying the refinement.
+
+@&#IMPLEMENTATION DETAILS@&#
+
+Currently, the algorithm is able to process ∼2 frames per second for a frame size of 
+                           200
+                           ×
+                           200
+                         pixels in Matlab on Intel Xeon 3.3 GHz processor. We have implemented the particle filter in C++ which runs at ∼20 frames per second. With a complete C/C++ implementation of the method, we expect to reach real-time performance.
+
+@&#CONCLUSION@&#
+
+In this paper, we have proposed a novel approach to surface tracking by combining a state-of-the-art particle-filter-based tracker with a clustering method based on surface fitting. The combination of both methods allowed tracking of object surfaces in videos acquired with depth cameras (Kinect and PMD) despite their limited resolution and accuracy. Object surfaces could be tracked correctly even in situations where the object got in contact with other objects or got touched by the manipulator, assimilating the shape of the tracked object, which represents a highly challenging test case for tracking in depth movies. Since our method takes past measurements into account, errors arising in the method can be reduced, leading to an increased performance as compared with an ICP-based tracker, as seen in Fig. 9.
+
+The method could fail to track a complex surface that cannot be well fitted using a second order polynomial equation. Tracking performance is also dependent on the depth resolution of the range sensor. For example, the boundary of a tracked surface might become totally indistinguishable, when touching other surfaces. In such cases, the color based trackers could be used to compliment our method.
+
+The proposed approach could be extended to track multiple objects simultaneously while maintaining segmentation by employing multiple particle filters to model the individual motion of the different surfaces.
+
+@&#ACKNOWLEDGEMENTS@&#
+
+This work received support from the CSIC project MVOD no. 201250E028, the EU project IntellAct FP7-269959, the project PAU+ DPI2011-27510 and the project CINNOVA 201150E088. B. Dellen was supported by the Spanish Ministry for Science and Innovation via a Ramon y Cajal fellowship RYC-2009-05324.
+
+Supplementary material related to this article can be found online at http://dx.doi.org/10.1016/j.dsp.2014.09.011.
+
+The following is the Supplementary material related to this article.
+                        
+                           Video
+                           
+                              Video demonstrating the tracking results using our approach. Two different depth sensors are tested, i.e., a Kinect camera and a PMD camera.
+                           
+                           
+                        
+                     
+                  
+
+@&#REFERENCES@&#
+

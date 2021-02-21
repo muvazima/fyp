@@ -1,0 +1,1902 @@
+@&#MAIN-TITLE@&#Face detection by structural models
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We enrich face detection model by hierarchical structure and part subtype.
+
+
+                        
+                        
+                           
+                           We propose to explore the face-body co-occurrence to improve face detection.
+
+
+                        
+                        
+                           
+                           We achieve state-of-the-art performance on FDDB, AFW and a self-annotated dataset.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Face detection
+
+Structural model
+
+Face-body co-occurrence
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  Despite the successes in the last two decades, the state-of-the-art face detectors still have problems in dealing with images in the wild due to large appearance variations. Instead of leaving appearance variations directly to statistical learning algorithms, we propose a hierarchical part based structural model to explicitly capture them. The model enables part subtype option to handle local appearance variations such as closed and open month, and part deformation to capture the global appearance variations such as pose and expression. In detection, candidate window is fitted to the structural model to infer the part location and part subtype, and detection score is then computed based on the fitted configuration. In this way, the influence of appearance variation is reduced. Besides the face model, we exploit the co-occurrence between face and body, which helps to handle large variations, such as heavy occlusions, to further boost the face detection performance. We present a phrase based representation for body detection, and propose a structural context model to jointly encode the outputs of face detector and body detector. Benefit from the rich structural face and body information, as well as the discriminative structural learning algorithm, our method achieves state-of-the-art performance on FDDB, AFW and a self-annotated dataset, under wide comparisons with commercial and academic methods.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Face detection plays an important role in face based image analysis and is one of the most important problems in computer vision. The performance of various face based applications, from traditional face recognition and verification to modern face clustering, tagging and retrieval, relies on accurate and efficient face detection. Successful frontal face detectors have been built in early years, such as [1–5]. Among these detectors, the Viola and Jones (V–J) detector [5] is the most popular one due to its advantage in efficiency. The V–J detector and its subsequences have achieved great successes. However, their performance is still not satisfactory in many real world scenes (e.g., FDDB [6]), due to the large appearance variations in pose, illumination, occlusion, expression and imaging condition.
+
+There has been a lot of works on face detection. Successful face detectors benefit from statistical learning techniques such as SVM [3], Neutral Network [4], Bayesian [7], Boosting [5], and suitable feature representations such as Haar [5], LBP [8], and SURF [9]. Although be different in representation and learning, modern face detectors tend to follow a similar paradigm: distinguishing face and background by a “fixed” classifier. Here “fixed” means that no matter what the actual face configuration is, the same classifier is exploited. The “fixed” approach, however, results in the ambiguousness in practice, where the large appearance variations exist (e.g., the face organ layout for different individuals, the expression variations, and the heavy occlusion by sunglass or scarf).
+
+Different from “fixed” face detectors, and motivated by recent successful deformable object detection methods, such as [10–13], we propose a structural model to capture configuration variations of face flexibly and explicitly. We define a hierarchical part based structure, which captures low frequency information at the coarse resolution level by a global template and high frequency information at fine resolution level by a set of part templates. To give meticulous description of the local appearance variation (e.g., closed eye and open eye), our model allows each part to have different subtypes. Moreover, parts in our model can have deformation in order to simulate global face variations caused by expression and pose. The detection process includes a fitting step, where firstly a candidate sliding window is fitted to the structure to find the suitable part location and part subtype, and then the detection score is calculated based on the fitted configuration. In this way, configuration variations can be handled explicitly. Due to the tree structure, the inference can be conducted efficiently. For discriminative parameter learning, we cast the problem into a structural SVM framework and show how to learn it practically.
+
+According to our statistics on 8000 people from the real world images (see Fig. 2), there has been a strong co-occurrence between face and body. One question is that could the body information be helpful for face detection? We name this information as face-body co-occurrence and exploit it in the following three steps: (1) training suitable body detectors, (2) estimating the face localization by body detection, and (3) combining the activations generated by face detector and body detector. Considering the difficulty in capturing arbitrary body configuration, we propose a phrase based representation, where each phrase is a deformable part model to handle a special body configuration, such as “left orientated face on the shoulder” and “frontal face with upper body”. Each activated phrase provides an estimation of face position by linear regression model defined on the part locations of the phrase. Since the body detectors and the face detectors may activate the same face, a merge procedure is needed. However, the traditional Non-maximal Suppression (NMS) procedure cannot be used in this case since the scores generated by different detections do not have equal confidences. In this paper, we propose a structural context model to encode a detection and its nearby detections to a linear feature, and learn the parameters by a structural SVM to determine whether the detection should be suppressed or not.
+
+We conduct experiments on three challenging datasets, and achieve remarkable improvements over previous state-of-the-art methods. For example, our structural model improves the baseline [13] by 3% AP (average precision), and the face-body co-occurrence further improves 2% on the annotated faces from Pascal VOC. On AFW, the proposed method outperforms the baseline [13] by 8%, and outperforms the best academic method by 5%.
+
+This paper is a substantial extension of our conference paper [14]. Compared with [14], we present further details of our method, and conduct more extensive experiments. We examine different experimental settings, and add experiments on AFW [13]. The rest of the paper is organized as follows. In Section 2, we review the related work. The structural face model, body and context model are presented in Sections 3 and 4. The experimental comparisons are discussed in Section 5. Finally in Section 6, we conclude the paper.
+
+@&#RELATED WORK@&#
+
+From the pioneering knowledge based methods [1,2] to modern learning based methods [3–5], numerous works were proposed to advance face detection. The learning based methods depend on special statistical learning algorithms, such as SVM [3], Neural Network [4] and Bayesian [7]. In [5], Viola and Jones proposed a method to combine integral image based Haar-like feature, adaboost based classifier and cascade based fast inference. Due to the advantage in speed compared with other good performance methods [7,3,4] at that time, it became very popular, and a lot of methods were proposed to further enhance it. The subsequences include new features (e.g. LBP [8] and SURF [9]), new weak classifiers (e.g. asymmetric classifier [15]), new boosting algorithms (e.g. gentle adaboost [16], multiple instance boost [17], float boost [18], KLboost [19], vector boost [20]), and new cascade structures (e.g. soft cascade [21], boosting chain [22]). Some papers aimed to achieve pose-invariant face detection, and proposed various cascade structures, as in [23,24,20]. Recently, [25] added an adaptive mechanism in calculating the confidence of weak classifiers. The more detailed face detection surveys can be found in [26–29].
+
+Part based face representation has been explored in early years [30–32]. These methods have similar accuracy with V–J based methods. However, they are not popular at that time, mainly due to the high computation cost. These early models are still fixed, and ignore the flexibility in part based representation for face detection. Our structural face model follows a different framework with V–J detector, and is motivated by recent object detection and pose estimation systems, including [10–12]. Deformable part model (DPM) [10] is the basis of our model since our face model inherits hierarchical part based structure, spatial part deformation from it. Besides introducing the deformable part model to face detection area, we have three improvements over [10]: (1) we add subtype to each part, which is more flexible, (2) the parts are defined according to the landmark annotations instead of learning from ambiguous bounding box annotation, and (3) we use supervised structural learning algorithm instead of the Latent-SVM used in [10] to encode more supervision.
+
+The most similar work on deformable face representation is [13], which exploited local parts around landmarks for joint face detection, landmark localization and pose estimation with promising performance. However, there are still problems in [13]. It did not consider the local variation of part and ignored the global structure information. The defined structure model in [13] is not robust to occlusion since the location of parent node may affect the location of its child node. In particular, the detection model in [13] can be seen as a special case of our face model by removing the hierarchical structure and part subtype option. Recently, [33,34] proposed methods to speed up part based face detection by cascade classifiers.
+
+Face detection using body information has been discussed in several early works [35,36]. However, these works are limited to constrained setting, and how to use it for images in the wild is still unclear. Recent Pascal VOC person layout competition aims to predict the location of head, hands and feet given the location of the body [37]. Nevertheless, in real applications, the body location is not always known. Our phrase based body representation is motivated by the Poselet [38], but we add part information in the Poselet and get a phrase level representation to extract useful context information for face detection.
+
+Compared with these prior works, there are three main contributions in our paper:
+                        
+                           •
+                           We enrich the prior work on deformable part based face detection [13] by introducing hierarchical structure and part subtype.
+
+We present a phrase based model for body representation, and propose a structural context model to improve face detection by exploring the face-body co-occurrence.
+
+We achieve state-of-the-art performance on FDDB [6], AFW [13] and a self-annotated dataset compared with a lot of academic and commercial systems.
+
+In this part, we first present the structural face model for flexible face representation, and then discuss the corresponding inference and learning algorithms.
+
+The lack of alignment for real world faces results in large appearance variation, which needs to be handled by the face model. To represent faces in arbitrary configurations without information loss, the ideal way is to model every pixel and the high order relationships between them. However, it is impracticable because the joint distribution is too complex to be learned by current machine learning techniques. Instead, a simple but flexible structure is defined to approximate the complex joint distribution. To provide flexibility in representing faces with complex variations, we conduct part based representation. We sequentially enrich the face model 
+                           M
+                        , to get the final hierarchical part based structure with part subtype option and part deformation.
+
+Useful information for face detection exists in different resolution levels. The global information is salient at low resolution level and more detailed face texture information can be found at high resolution level. We define a global root template to represent faces at low resolution level, and a set of part templates to represent faces at high resolution level, which is two times larger than the low resolution level. The parts are defined around the landmarks, such as eye corner and mouth center, as examples in Fig. 1(a). To capture the relationships between different levels, we also define spatial relationships between root and parts. In this way, we get the hierarchical part based structure, and factorize the face model 
+                              M
+                            into three components:
+                              
+                                 (1)
+                                 
+                                    
+                                       M
+                                       →
+                                       
+                                          
+                                             M
+                                             r
+                                          
+                                          
+                                             M
+                                             p
+                                          
+                                          
+                                             M
+                                             s
+                                          
+                                       
+                                       ,
+                                    
+                                 
+                              
+                           where 
+                              M
+                           
+                           
+                              r
+                           , 
+                              M
+                           
+                           
+                              p
+                           , 
+                              M
+                           
+                           
+                              s
+                            are the global root face model at low resolution level, part set model at high resolution level and spatial relationship model, respectively. Since 
+                              M
+                           
+                           
+                              p
+                            consists of a series of parts, 
+                              M
+                           
+                           
+                              p
+                            can be further factorized to:
+                              
+                                 (2)
+                                 
+                                    
+                                       
+                                          M
+                                          p
+                                       
+                                       →
+                                       
+                                          
+                                             
+                                                M
+                                                
+                                                   p
+                                                   1
+                                                
+                                             
+                                             ,
+                                             
+                                                M
+                                                
+                                                   p
+                                                   2
+                                                
+                                             
+                                             ⋯
+                                             ,
+                                             
+                                                M
+                                                
+                                                   p
+                                                   N
+                                                
+                                             
+                                          
+                                       
+                                       ,
+                                    
+                                 
+                              
+                           where 
+                              
+                                 M
+                                 
+                                    p
+                                    i
+                                 
+                              
+                            is the i-th part model and N is the number of parts.
+
+Although the part is local enough and tends to have less appearance variations compared with the full face, a single linear model is not enough to capture the local face appearance variations. For example, the nose type can range from “fleshy” to “celestial”, the eye can range from open eye, closed eye and obscured eye (by sunglass or hair). To capture these local variations, we enable subtype option in our model, where the number of subtypes in each part is K. Denoting the j-th subtype model of the i-th part as 
+                              
+                                 M
+                                 
+                                    p
+                                    
+                                       i
+                                       ,
+                                       j
+                                    
+                                 
+                              
+                           , we get the following factorization:
+                              
+                                 (3)
+                                 
+                                    
+                                       
+                                          M
+                                          
+                                             p
+                                             i
+                                          
+                                       
+                                       →
+                                       
+                                          
+                                             
+                                                M
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      ,
+                                                      1
+                                                   
+                                                
+                                             
+                                             |
+                                             
+                                                M
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      ,
+                                                      2
+                                                   
+                                                
+                                             
+                                             |
+                                             ⋯
+                                             |
+                                             
+                                                M
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      ,
+                                                      K
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       .
+                                    
+                                 
+                              
+                           where “|” is the “OR” operation. Note that by introducing the subtype, our model can represent KN
+                            different face configurations by KN part models, since each part can have K different choices. It equals to sharing KN parts in KN
+                            different models.
+
+There are two sources of global appearance variations for faces in the real world: (1) faces from different individuals have different face organs layout, such as the distance between two eyes; and (2) faces from the same individual can also have deformation, due to the pose and expression variations. To capture these appearance variations, we add a deformation model on each part. Although the deformation model of a single part can be very simple, the combination of deformations for all parts can simulate complex nonlinear face variation.
+
+Given the definition of 
+                              M
+                           
+                           
+                              r
+                            and 
+                              M
+                           
+                           
+                              s
+                           , a model is constructed to constrain the deformation of parts by modeling their spatial relationships with the root. Adding pairwise or higher order interactions between arbitrary parts can capture more structural information, but it will result in a loopy graph which is not efficient in inference. To keep the model to be tree-structured, we only define the spatial relationships between parts and root, and ignore pairwise relationships between different parts. We have N parts, each of which has K subtypes, and the corresponding factorization of 
+                              M
+                           
+                           
+                              s
+                            is:
+                              
+                                 (4)
+                                 
+                                    
+                                       
+                                          M
+                                          s
+                                       
+                                       →
+                                       
+                                          
+                                             M
+                                             
+                                                s
+                                                1
+                                             
+                                          
+                                          
+                                             M
+                                             
+                                                s
+                                                2
+                                             
+                                          
+                                          ⋯
+                                          
+                                             M
+                                             
+                                                s
+                                                N
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                           
+                              
+                                 (5)
+                                 
+                                    
+                                       
+                                          M
+                                          
+                                             s
+                                             i
+                                          
+                                       
+                                       →
+                                       
+                                          
+                                             
+                                                M
+                                                
+                                                   s
+                                                   
+                                                      i
+                                                      ,
+                                                      1
+                                                   
+                                                
+                                             
+                                             |
+                                             
+                                                M
+                                                
+                                                   s
+                                                   
+                                                      i
+                                                      ,
+                                                      2
+                                                   
+                                                
+                                             
+                                             |
+                                             ⋯
+                                             |
+                                             
+                                                M
+                                                
+                                                   s
+                                                   
+                                                      i
+                                                      ,
+                                                      K
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       ,
+                                    
+                                 
+                              
+                           where 
+                              
+                                 M
+                                 
+                                    s
+                                    i
+                                 
+                              
+                            is the spatial model between i-th part and the root, and 
+                              
+                                 M
+                                 
+                                    s
+                                    
+                                       i
+                                       ,
+                                       j
+                                    
+                                 
+                              
+                            is the j-th subtype of 
+                              
+                                 M
+                                 
+                                    s
+                                    i
+                                 
+                              
+                           .
+
+Given a configuration H in an image I, we need a function to measure whether the configuration H matches face model 
+                           M
+                         or not. A face configuration H includes configurations of root h
+                        0 and parts hi
+                        . Here hi
+                        
+                        ={li
+                        , ti
+                        }, where li
+                         defines a location, which consists of upper-left corner (xi
+                        , yi
+                        ), width wi
+                         (we assume the face region is a square) and subtype label ti
+                        . We compute the score following the structure of the model as:
+                           
+                              (6)
+                              
+                                 
+                                    
+                                       
+                                          S
+                                          
+                                             I
+                                             H
+                                             M
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          =
+                                          
+                                             S
+                                             r
+                                          
+                                          
+                                             I
+                                             
+                                                l
+                                                0
+                                             
+                                             
+                                                M
+                                                r
+                                             
+                                          
+                                          +
+                                          
+                                             S
+                                             p
+                                          
+                                          
+                                             I
+                                             H
+                                             
+                                                M
+                                                p
+                                             
+                                          
+                                          +
+                                          
+                                             S
+                                             S
+                                          
+                                          
+                                             I
+                                             H
+                                             
+                                                M
+                                                s
+                                             
+                                          
+                                          ,
+                                       
+                                    
+                                 
+                              
+                           
+                        where S
+                        
+                           r
+                        (I,l
+                        0,
+                           M
+                        
+                        
+                           r
+                        ), S
+                        
+                           P
+                        (I,H,
+                           M
+                        
+                        
+                           p
+                        ), and S
+                        
+                           S
+                        (I,H,
+                           M
+                        
+                        
+                           s
+                        ) are the match scores of the root, part and deformation. The S
+                        
+                           P
+                        (I,H,
+                           M
+                        
+                        
+                           p
+                        ) and S
+                        
+                           S
+                        (I,H,
+                           M
+                        
+                        
+                           s
+                        ) are further parsed into:
+                           
+                              (7)
+                              
+                                 
+                                    
+                                       S
+                                       P
+                                    
+                                    
+                                       I
+                                       H
+                                       
+                                          M
+                                          p
+                                       
+                                    
+                                    =
+                                    
+                                       
+                                          ∑
+                                          
+                                             i
+                                             =
+                                             1
+                                          
+                                          N
+                                       
+                                       
+                                          
+                                             S
+                                             p
+                                          
+                                          
+                                             I
+                                             
+                                                l
+                                                i
+                                             
+                                             
+                                                M
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      ,
+                                                      
+                                                         t
+                                                         i
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (8)
+                              
+                                 
+                                    
+                                       S
+                                       S
+                                    
+                                    
+                                       I
+                                       H
+                                       
+                                          M
+                                          s
+                                       
+                                    
+                                    =
+                                    
+                                       
+                                          ∑
+                                          
+                                             i
+                                             =
+                                             1
+                                          
+                                          N
+                                       
+                                       
+                                          
+                                             S
+                                             s
+                                          
+                                          
+                                             I
+                                             
+                                                l
+                                                0
+                                             
+                                             
+                                                l
+                                                i
+                                             
+                                             
+                                                M
+                                                
+                                                   s
+                                                   
+                                                      i
+                                                      ,
+                                                      
+                                                         t
+                                                         i
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          ,
+                                       
+                                    
+                                 
+                              
+                           
+                        where Sp
+                         and Ss
+                         are the appearance and deformation score of each part, li
+                         is the location of the i-th part, and l
+                        0 is the location of the root. Considering the efficiency in detection and learning, we assume all are of the linear form:
+                           
+                              (9)
+                              
+                                 
+                                    
+                                       S
+                                       r
+                                    
+                                    
+                                       I
+                                       
+                                          l
+                                          0
+                                       
+                                       
+                                          M
+                                          r
+                                       
+                                    
+                                    =
+                                    
+                                       w
+                                       r
+                                       T
+                                    
+                                    
+                                       Φ
+                                       a
+                                    
+                                    
+                                       I
+                                       
+                                          l
+                                          0
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (10)
+                              
+                                 
+                                    
+                                       S
+                                       p
+                                    
+                                    
+                                       I
+                                       
+                                          l
+                                          i
+                                       
+                                       
+                                          M
+                                          
+                                             p
+                                             
+                                                i
+                                                ,
+                                                
+                                                   t
+                                                   i
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    =
+                                    
+                                       w
+                                       
+                                          p
+                                          
+                                             i
+                                             ,
+                                             
+                                                t
+                                                i
+                                             
+                                          
+                                       
+                                       T
+                                    
+                                    
+                                       Φ
+                                       a
+                                    
+                                    
+                                       I
+                                       
+                                          l
+                                          i
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (11)
+                              
+                                 
+                                    
+                                       S
+                                       s
+                                    
+                                    
+                                       I
+                                       
+                                          l
+                                          0
+                                       
+                                       
+                                          l
+                                          i
+                                       
+                                       
+                                          M
+                                          
+                                             s
+                                             
+                                                i
+                                                ,
+                                                
+                                                   t
+                                                   i
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    =
+                                    
+                                       w
+                                       
+                                          s
+                                          
+                                             i
+                                             ,
+                                             
+                                                t
+                                                i
+                                             
+                                          
+                                       
+                                       T
+                                    
+                                    
+                                       Φ
+                                       s
+                                    
+                                    
+                                       I
+                                       
+                                          l
+                                          0
+                                       
+                                       
+                                          l
+                                          
+                                             i
+                                             ,
+                                             
+                                                t
+                                                i
+                                             
+                                          
+                                       
+                                       
+                                          l
+                                          i
+                                       
+                                    
+                                    ,
+                                 
+                              
+                           
+                        where wr
+                        , 
+                           
+                              w
+                              
+                                 p
+                                 
+                                    i
+                                    ,
+                                    
+                                       t
+                                       i
+                                    
+                                 
+                              
+                           
+                         and 
+                           
+                              w
+                              
+                                 s
+                                 
+                                    i
+                                    ,
+                                    
+                                       t
+                                       i
+                                    
+                                 
+                              
+                           
+                         are the model parameters of root appearance, part appearance and deformation. 
+                           
+                              l
+                              
+                                 i
+                                 ,
+                                 
+                                    t
+                                    i
+                                 
+                              
+                           
+                         is the anchor point of 
+                           
+                              M
+                              
+                                 s
+                                 
+                                    i
+                                    ,
+                                    
+                                       t
+                                       i
+                                    
+                                 
+                              
+                           
+                         relative to l
+                        0. We use the appearance feature and spatial feature discussed in [10]. The appearance feature Φ
+                           a
+                        (I, li
+                        ) is 31 dimensional HOG features on location li
+                         of image I, which includes 9 dimensional contrast insensitive features,18 dimensional contrast sensitive features and 4 dimensional gradient energy features. The bin size in HOG is set to be 4. The deformation feature is defined as (dx, dy, dx
+                        2, dy
+                        2), where dx and dy are the relative deformation of each part to its anchor.
+
+For the linear property, the total score of configuration H in image I can be simplified as:
+                           
+                              (12)
+                              
+                                 
+                                    S
+                                    
+                                       I
+                                       H
+                                       M
+                                    
+                                    =
+                                    
+                                       w
+                                       T
+                                    
+                                    Φ
+                                    
+                                       I
+                                       H
+                                    
+                                    ,
+                                 
+                              
+                           
+                        where w is the concatenation of all the parameters including wr
+                        , 
+                           
+                              w
+                              
+                                 p
+                                 
+                                    i
+                                    ,
+                                    
+                                       t
+                                       i
+                                    
+                                 
+                              
+                           
+                         and 
+                           
+                              w
+                              
+                                 s
+                                 
+                                    i
+                                    ,
+                                    
+                                       t
+                                       i
+                                    
+                                 
+                              
+                           
+                        . Φ(I, H) is the concatenation of all the features with the same order. For subtypes which are not activated, the corresponding dimensions in Φ(I, H) are filled with 0.
+
+In detection, standard sliding window procedure is used to scan images in different locations and scales to determine whether the special window corresponds to a face or not. For each scanning window in image I, we first fit the window to the structure model 
+                              M
+                            to get the part configuration on it, and then calculate the score of the window according to the inferred configuration by Eqs. (6)–(11).
+
+The fitting step aims to find the configuration H
+                           ⁎ with the highest match score according to the learned model 
+                              M
+                            on all configurations of a sliding window. Here we set the root location l
+                           0 exactly be the location of sliding window. Mathematically, the optimization problem is to find H
+                           ⁎ that satisfies:
+                              
+                                 (13)
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                H
+                                                ∗
+                                             
+                                             =
+                                             arg
+                                             
+                                                max
+                                                H
+                                             
+                                             
+                                                S
+                                             
+                                             
+                                                I
+                                                
+                                                   l
+                                                   0
+                                                
+                                                
+                                                   M
+                                                   r
+                                                
+                                             
+                                             +
+                                             
+                                                
+                                                   ∑
+                                                   
+                                                      i
+                                                      =
+                                                      1
+                                                   
+                                                   N
+                                                
+                                                
+                                                   
+                                                      
+                                                         S
+                                                         p
+                                                      
+                                                   
+                                                   
+                                                      I
+                                                      
+                                                         l
+                                                         i
+                                                      
+                                                      
+                                                         M
+                                                         
+                                                            p
+                                                            
+                                                               i
+                                                               ,
+                                                               
+                                                                  t
+                                                                  i
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      +
+                                                      
+                                                         S
+                                                         s
+                                                      
+                                                      
+                                                         I
+                                                         
+                                                            l
+                                                            0
+                                                         
+                                                         
+                                                            l
+                                                            i
+                                                         
+                                                         
+                                                            M
+                                                            
+                                                               s
+                                                               
+                                                                  i
+                                                                  ,
+                                                                  
+                                                                     t
+                                                                     i
+                                                                  
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                             .
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+The score of each part in the model is independent once the root is specified, so that we can maximize the following problem instead:
+                              
+                                 (14)
+                                 
+                                    
+                                       
+                                          h
+                                          i
+                                          ∗
+                                       
+                                       =
+                                       arg
+                                       
+                                          max
+                                          
+                                             
+                                                h
+                                                i
+                                             
+                                             =
+                                             
+                                                
+                                                   l
+                                                   i
+                                                
+                                                
+                                                   t
+                                                   i
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                S
+                                                p
+                                             
+                                             
+                                                I
+                                                
+                                                   l
+                                                   i
+                                                
+                                                
+                                                   M
+                                                   
+                                                      p
+                                                      
+                                                         i
+                                                         ,
+                                                         
+                                                            t
+                                                            i
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                             +
+                                             
+                                                S
+                                                s
+                                             
+                                             
+                                                I
+                                                
+                                                   l
+                                                   0
+                                                
+                                                
+                                                   l
+                                                   i
+                                                
+                                                
+                                                   M
+                                                   
+                                                      s
+                                                      
+                                                         i
+                                                         ,
+                                                         
+                                                            t
+                                                            i
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       ,
+                                    
+                                 
+                              
+                           where hi
+                            is composed of part subtype label ti
+                            and the part location li
+                           . In optimization, we first fix part subtype label ti
+                            and find the best li
+                           , and then travel all subtypes to find the h
+                           
+                              i
+                           
+                           ∗. The complexity of maximizing one single sliding window is high, but benefit from the generalized distance transform proposed in [39], the average complexity in simultaneously optimizing all the sliding windows in one pyramid level is of linear complexity with the size of image. Actually, the optimization problem defined in Eq. (13) is very efficient compared with the HOG feature and appearance score computation. The confidence of the sliding window is computed by S(I,H
+                           ∗,
+                              M
+                           ) in Eq. (6). By adding the fitting step before calculating, the latent face configuration is inferred, and the influence of configuration variation is reduced.
+
+We use supervised learning instead of Latent-SVM which adopted in [10] to discriminatively learn parameters in the structural model. The positive training set in training is denoted as {Ia
+                           , Ha
+                           }, where Ha
+                            is the annotated face configuration in image Ia
+                           , including part subtype labels and part locations. The negative samples are denoted as {Ib
+                           , Hb
+                           }. We ensure that there is no face in Ib
+                           , so that any configuration Hb
+                            on Ib
+                            is not a face. In structural SVM, the optimal w should ensure that the score of positive samples wT
+                           Φ(Ia
+                           , Ha
+                           ) is bigger than 1, and the score of negative samples wT
+                           Φ(Ib
+                           , Hb
+                           ) is smaller than −1. Thus we get the following structural SVM problem:
+                              
+                                 (15)
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                min
+                                                
+                                                   w
+                                                   ,
+                                                   
+                                                      ξ
+                                                      i
+                                                   
+                                                   ≥
+                                                   0
+                                                
+                                             
+                                             
+                                          
+                                          
+                                             
+                                                1
+                                                2
+                                             
+                                             
+                                                
+                                                   w
+                                                
+                                                2
+                                             
+                                             +
+                                             C
+                                             
+                                                ∑
+                                                
+                                                   
+                                                      ξ
+                                                      n
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                           
+                              
+                                 (16)
+                                 
+                                    
+                                       
+                                          
+                                             s
+                                             .
+                                             t
+                                             .
+                                             
+                                             ∀
+                                             
+                                                
+                                                   I
+                                                   a
+                                                
+                                                
+                                                   H
+                                                   a
+                                                
+                                             
+                                             
+                                          
+                                          
+                                             
+                                                w
+                                                T
+                                             
+                                             Φ
+                                             
+                                                
+                                                   I
+                                                   a
+                                                
+                                                
+                                                   H
+                                                   a
+                                                
+                                             
+                                             ≥
+                                             1
+                                             −
+                                             
+                                                ξ
+                                                n
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             ∀
+                                             
+                                                
+                                                   I
+                                                   b
+                                                
+                                                
+                                                   H
+                                                   b
+                                                
+                                             
+                                             ,
+                                          
+                                          
+                                             
+                                                w
+                                                T
+                                             
+                                             Φ
+                                             
+                                                
+                                                   I
+                                                   b
+                                                
+                                                
+                                                   H
+                                                   b
+                                                
+                                             
+                                             ≤
+                                             −
+                                             1
+                                             +
+                                             
+                                                ξ
+                                                n
+                                             
+                                             ,
+                                          
+                                       
+                                    
+                                 
+                              
+                           where ξ is the penalty for violation. The problem is difficult because the number of negative configuration Hb
+                            is of combinatorial explosion. We use the coordinate descent solver, which iteratively: (1) solves w in dual, (2) mines violated constraints according to current learned w, and adds them to the constraint pool, until the convergence condition is satisfied.
+
+In practical learning, we first learn the appearance parameters of root and all the parts independently, and then take them as initial values for structural SVM learning. Since there is no annotation of subtype, we use K-means to cluster annotated landmarks to K subtypes according to the positions in face. To cover the large poses, we train three models, including face yaw angles in (−90°, −30°), (−30°, 30°) and (30°, 90°), respectively.
+
+It seems that no matter how powerful an appearance based face detector is, it would not always perform well for all scenes, due to the large appearance variations in novel faces. Besides the face itself, the most possible information that can contribute to face detection is the human body. As an intuitive example, a heavy occlusion on face can defeat the state-of-the-art face detectors, but we human beings can easily localize it with the help of un-occluded body.
+
+To validate the co-occurrence between face and body in real world images, we analyze 8000 people annotations provided by [40] on Pascal VOC dataset. These images are sampled from Flickr, and we believe that the statistic can reflect the distributions of images in real world. Some of the annotation examples and the occurrence frequency of face and human body are shown in Fig. 2
+                     .
+
+The interesting observation in Fig. 2 is that the shoulder of above 80% annotated people is available in the images and the statistic for hip is 50%. It proves the co-occurrence between face and other body parts on real world images. Here the question is how to effectively use the body context to enhance face detection. In the part, we first show our phrase based body detection and then present the structural context model to combine the information of face and body detection.
+
+Body detection itself is a challenging problem since the body can have large appearance variations, such as articulation of different parts. The best body (people) detector on Pascal VOC benchmark can only achieve about 50% AP (Average Precision) [37], which is far from satisfactory. Learning a better people detector would always be helpful in improving face detection, but it's beyond the scope of the paper. Here we only focus on how to get reliable body detection to provide useful information for face detection.
+
+Deformable part model (DPM) [10] and some of its subsequences [11,41] can achieve state-of-the-art performance on people detection task. However, the part used in DPM has no clear correspondence to semantic part, which makes it not suitable to estimate face localization with body location. Another promising people detector is Poselet [40], which divides complex body configuration into simple local configurations and every Poselet just describes a single one. However, the Poselet defined in [40] can only provide the coarse body location template which is not rich enough to estimate the face location.
+
+To provide richer body information, we conduct a phrase based representation. The phrase can be “left-orientated face on the shoulder” and “frontal half face with torso”. Although the detection of body under arbitrary configuration is a hard task, the detection of body with more constrained configuration is much easier and expected to have higher precision at a given detection rate. To generate phrase and its corresponding training samples, we use the technique described in [40] to find image patches similar to a seed patch according to annotated landmarks. The patches with similar configuration are used to train a DPM detector. In training DPM based phrase detector, we modified the DPM code [42] to be fully supervised since all latent information in DPM are available given the body landmark annotation. Examples of trained phrase model are shown in Fig. 3(a) and (b).
+
+Scanning an image using all the phrase independently is very time consuming. In this paper, we use the branch and bound implementation proposed in [43], which achieves logarithmic complexity in the image size. In our final implementation, we use 43 phrases and get a 10 times speed-up than original dynamic programming described in [10] with the same performance. Recent advances in detection such as [44] can handle 100,000 DPM detectors in 10s on a single machine by hashing technique, which could be used to further speed up the phrase based detection.
+
+Given the rich part locations provided by phrase based body detectors, we conduct linear model to predict the location of face. For each phrase based detector, we can get one root location and n part locations. We adopt a 2n
+                           +3 dimensional vector v
+                           =(ρ
+                           0,x
+                           0,y
+                           0,x
+                           1,y
+                           1, ⋯,x
+                           
+                              n
+                           ,y
+                           
+                              n
+                           )
+                              T
+                           , where ρ
+                           0 is the width of the root, and (x
+                           0, y
+                           0) is the upper-left corner coordinate of the root. (xi
+                           , yi
+                           ) is the upper-left corner coordinate of the i-th part. The ρ
+                           0 encodes the scale of the face, and the coordinates of root and parts encode the location information. We feed the vector v into a linear regression model to estimate the upper-left corner 
+                              
+                                 
+                                    f
+                                    
+                                       x
+                                       l
+                                    
+                                 
+                                 
+                                    f
+                                    
+                                       y
+                                       u
+                                    
+                                 
+                              
+                            and lower-right corner 
+                              
+                                 
+                                    f
+                                    
+                                       x
+                                       r
+                                    
+                                 
+                                 
+                                    f
+                                    
+                                       y
+                                       l
+                                    
+                                 
+                              
+                            of the corresponding face:
+                              
+                                 (17)
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                f
+                                                
+                                                   x
+                                                   l
+                                                
+                                             
+                                             
+                                                f
+                                                
+                                                   y
+                                                   u
+                                                
+                                             
+                                             
+                                                f
+                                                
+                                                   x
+                                                   r
+                                                
+                                             
+                                             
+                                                f
+                                                
+                                                   y
+                                                   l
+                                                
+                                             
+                                          
+                                          T
+                                       
+                                       =
+                                       
+                                          
+                                             
+                                                w
+                                                1
+                                             
+                                             
+                                                w
+                                                2
+                                             
+                                             
+                                                w
+                                                3
+                                             
+                                             
+                                                w
+                                                4
+                                             
+                                          
+                                          T
+                                       
+                                       v
+                                       ,
+                                    
+                                 
+                              
+                           where w
+                           
+                              i
+                           , i
+                           ∈{1,2,3,4} are the parameter vectors of linear regression model conducted on v independently. Since some of the parts may be not correlated with the face location, we use lasso instead of ridge regression, which can automatically select the correlated parts.
+
+Since face detector and phrase based body detectors may activate the same face, a merge mechanism is needed to remove repetitive activations in combining face detection and body detection. Widely used merge method such as non-maxima suppression (NMS) cannot be directly used here, because the scores in different models do not have equal confidence. [45] proposed a learning based merge method for multiple classes object detection and reported advantages over NMS. However, the pairwise relationship results in a loopy graph in inference, which harms the convergence of the learning algorithm as pointed in [46].
+
+Motivated by [45,47], we present a learning based context model to merge detection results of face detection and body detection. Given an image I, we use the face detector and phrase based body detectors to get initial face candidates B
+                           ={b
+                           1, b
+                           2,…, bD
+                           }, where bi
+                           
+                           ={li
+                           , si
+                           , ci
+                           } includes the location li
+                           , detection score si
+                            and the corresponding detector ID ci
+                           . Here the detector ID identifies which detector the candidate comes from, which can be either face detector or 43 phrase based body detectors. The merge procedure is to assign a binary label set T
+                           ={t
+                           1, t
+                           2,…, tD
+                           } to B, where ti
+                           
+                           =1 means that bi
+                            corresponds a face and should be kept. Otherwise, bi
+                            is not a face or the face in bi
+                            has been activated by nearby candidate, which should be suppressed.
+
+The basic idea of the context model is to use the candidates nearby to help decide whether the candidate should be suppressed or not. To use information of nearby activations, we encode the nearby overlapped activations into feature representation of bi
+                           , denoted as xi
+                           . xi
+                            is a (3M
+                           +2) dimensional vector, where M is the number of detectors (including both face and body detectors). The first two dimensions of xi
+                            are the score si
+                            of the candidate bi
+                            and a bias term 1. The following 3M dimensions of xi
+                            are defined as follows: for each bj
+                           , j
+                           ≠
+                           i, if there is an overlap between bj
+                            with bi
+                           , we set the 3cj
+                           , 3cj
+                           
+                           +1 and 3cj
+                           
+                           +2 dimensions to be the overlap ratio, the scale ratio between bi
+                            and bj
+                           , and the detection score sj
+                            of bj
+                           , respectively. If some dimensions are not activated by any bj
+                           , they are filled with 0. For overlapped activations with the same detector ID, we just keep the one with the largest overlap ratio. In this way, the context information of nearby candidates are encoded into a feature vector which is ready for a learning algorithm, instead of the heuristic NMS. The demonstration of the feature component is shown in Fig. 4
+                           .
+
+We build a linear model parameterized by 
+                              
+                                 w
+                                 
+                                    c
+                                    i
+                                 
+                              
+                            on feature xi
+                            to infer the label ti
+                            of bi
+                           , where ti
+                            is set to be 1 if 
+                              
+                                 
+                                    w
+                                    
+                                       c
+                                       i
+                                    
+                                    T
+                                 
+                                 
+                                    x
+                                    i
+                                 
+                                 >
+                                 0
+                              
+                            otherwise 0. It equals to 
+                              
+                                 ma
+                                 
+                                    x
+                                    
+                                       
+                                          t
+                                          i
+                                       
+                                       =
+                                       0
+                                       ,
+                                       1
+                                    
+                                 
+                                 
+                                    w
+                                    
+                                       c
+                                       i
+                                    
+                                    T
+                                 
+                                 Φ
+                                 
+                                    
+                                       b
+                                       i
+                                    
+                                    
+                                       t
+                                       i
+                                    
+                                 
+                              
+                           , where Φ(bi
+                           , ti
+                           )=
+                           xi
+                            if ti
+                           
+                           =1 and Φ(bi
+                           , ti
+                           )=−
+                           xi
+                            if ti
+                           
+                           =0. Given an image, we assign labels to each activations bi
+                            independently, and then whole label set T of the image I can be inferred by 
+                              
+                                 ma
+                                 
+                                    x
+                                    T
+                                 
+                                 
+                                    w
+                                    c
+                                    T
+                                 
+                                 Φ
+                                 
+                                    B
+                                    T
+                                 
+                                 =
+                                 ∑
+                                 
+                                    ma
+                                    
+                                       x
+                                       
+                                          t
+                                          i
+                                       
+                                    
+                                    
+                                       w
+                                       
+                                          c
+                                          i
+                                       
+                                       T
+                                    
+                                    Φ
+                                    
+                                       
+                                          b
+                                          i
+                                       
+                                       
+                                          t
+                                          i
+                                       
+                                    
+                                 
+                              
+                           . Here to simplify the notation, we concatenate 
+                              
+                                 w
+                                 
+                                    c
+                                    i
+                                 
+                              
+                            to be a long vector wc
+                           , and concatenate Φ(bi
+                           , ti
+                           ) to be a long vector Φ(B, H) with the same order. The wc
+                            combines the parameters for all the detectors, and the Φ(B, H) encodes the contextual information for the whole image. The ideal wc
+                            should ensure the true hypothesis H of the image has a bigger score w
+                           
+                              c
+                           
+                           
+                              T
+                           Φ(B,H) than any wrong hypothesis T with a margin L(T, H). wc
+                            can be discriminatively learned from labeled training image set {In
+                           } by the following structural SVM problem:
+                              
+                                 (18)
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                min
+                                                
+                                                   
+                                                      w
+                                                      c
+                                                   
+                                                   ,
+                                                   
+                                                      ξ
+                                                      n
+                                                   
+                                                   ≥
+                                                   0
+                                                
+                                             
+                                             
+                                          
+                                          
+                                             
+                                                1
+                                                2
+                                             
+                                             
+                                                
+                                                   
+                                                      w
+                                                      c
+                                                   
+                                                
+                                                2
+                                             
+                                             +
+                                             C
+                                             
+                                                
+                                                   ∑
+                                                   n
+                                                
+                                                
+                                             
+                                             
+                                                ξ
+                                                n
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                           
+                              
+                                 (19)
+                                 
+                                    
+                                       s
+                                       .
+                                       t
+                                       .
+                                       
+                                       ∀
+                                       n
+                                       ,
+                                       
+                                          T
+                                          n
+                                       
+                                       
+                                       
+                                          w
+                                          c
+                                          T
+                                       
+                                       Φ
+                                       
+                                          
+                                             B
+                                             n
+                                          
+                                          
+                                             H
+                                             n
+                                          
+                                       
+                                       −
+                                       
+                                          w
+                                          c
+                                          T
+                                       
+                                       Φ
+                                       
+                                          
+                                             B
+                                             n
+                                          
+                                          
+                                             T
+                                             n
+                                          
+                                       
+                                       ≥
+                                       L
+                                       
+                                          
+                                             T
+                                             n
+                                          
+                                          
+                                             H
+                                             n
+                                          
+                                       
+                                       −
+                                       
+                                          ξ
+                                          n
+                                       
+                                       ,
+                                    
+                                 
+                              
+                           where Tn
+                            is arbitrary hypothesis of Bn
+                            in In
+                           . The difference between Tn
+                            and Hn
+                            is measured by the L(Tn
+                           , Hn
+                           ), which is defined as a Hamming loss.
+
+Since the number of hypothesis Tn
+                            is of exponential order, the constraints in above optimization problem cannot be stored into memory once in practice. We further use the coordinate descent procedure in our optimization. At each loop, we use the current model to scan images and find the hardest wrong hypotheses, and then use hard wrong hypotheses as the negative samples to update the model.
+
+In this part, we first describe the training data used in learning structural face model and body context model. After that, we examine the affect of different parameters on face detection performance on a self-annotated dataset. Finally, we compare our method with various commercial and academic methods on FDDB [6] and AFW [13].
+
+The positive samples used in training structural face model come from AFLW database [48], which is a large scale face dataset collected from Flickr, with maximum 21 landmark annotations. Some of the faces in the dataset are not fully annotated, and we just ignore these faces for simplicity. In our experiments, we use 3065 faces for training frontal face model with 21 landmark annotations and 1552 faces for training profile face model with 14 landmark annotations. Our phrase based body detection models are trained on the training and validation set of Pascal VOC 2009 detection [37] and H3D dataset [38]. We use 4087 images with 8566 people in Pascal detection dataset, and we use the 33 landmark annotations from [49]. In H3D dataset, there are 2000 people annotations on 520 images. For both the face and body model learning, the negative samples are all from non-people images in Pascal VOC dataset [37]. To train the context model between face and body, we select 1000 images from Pascal detection test set and annotate faces on them by ourselves.
+
+To investigate the influence of different parameter settings on real world images, we annotate a face detection benchmark collected from the test set of Pascal person layout dataset, which is a subset from Pascal VOC [37]. It contains 1335 faces from 851 images with large appearance variations. A detection is taken as correct if the area of overlap ratio (the intersection of two regions against the union of the two regions) is greater than 50%, and the performance is reported by Recall–Precision curve used in [37]. To give a summary of the Recall–Precision curve, we use the average precision (AP) metric, which is defined as the area under the Recall–Precision curve. Here we explore each parameter sequentially while keep others constant.
+
+The proposed structure face model has some components, such as the root, parts and deformations. To evaluate the contribution of each aspect of the structure model, we test the following structure settings: (1) root, which has only the root and can be taken as a standard multi-view HOG+SVM detector; (2) parts, where only fixed parts are used (similar to the structure used in [13]) and the parts are structured to be a tree, (3) root+parts, which is the tree structure defined in this paper that combines both the root and parts; and (4) root+part+deformation, which further adds the deformation of parts, but without part subtype option. Different structures are compared by AP and reported in Fig. 5(a). The root+parts outperforms root model by 7.1% and outperforms parts model by 3.0%. The deformation further improves 1.9%.
+
+Generally, more part subtypes are able to capture more local appearance variations but easier in overfitting and with higher computational cost. We test the face detection performance when the part subtype number K varies from 1 to 5, and the corresponding AP is demonstrated in Fig. 5(b). It can be seen that the best detection result is achieved when the subtype number K is set to 4, which improves the result of K
+                           =1 as adopted in [10,13] by 2.4%.
+
+Each part in the proposed structural model is set to be of equal size, which contains nd
+                           
+                           ×
+                           nd
+                            HOG cells. Here we take nd
+                            as the size of the part. Larger part could capture more information, but may lose the advantage in robustness of local part. We measure the AP when the part size varies from 2 to 5, and the best performance is achieved when the part size is set to be 3.
+
+In addition, we examine the contribution of the face-body co-occurrence and the influence of phrase number, as shown in Fig. 5(d). Adding more phrases can have more body activations, thus can improve the performance. However, more phrases would take more inference and learning cost. In the following experiments, we fix the phrase number to be 43, which contributes to 2.6% AP as a trade-off between detection accuracy and computational efficiency.
+
+In the following experiments (including experiments on FDDB and AFW), we use the root+parts+deformation structure, where the part subtype is set to be 4, the part size is set to be 3, and the phrase number is set to be 43. On the dataset, the proposed method is compared with other state-of-the-art methods including: (1) OpenCV implementation of 2-view Viola–Jones, (2) Kala's weighted sampling based boosting [50], including frontal and profile face detectors provided by the author, (3) TSM (tree structure model) [13], (4) the proposed structural face model, and (5) the proposed structural face model with body context AP curves are shown in Fig.6
+                        . The proposed method outperforms TSM in [13] by 4.4% and outperforms the V–J detector in OpenCV by 14.6%. Some of the detection results are shown in Fig. 9.
+
+In this part, we use the FDDB [6] as a standard benchmark to compare the proposed method with other state-of-the-art methods. FDDB is a challenging face detection benchmark designed to study unconstrained face detection. It contains 5171 faces in 2845 images collected from news photographs. In the dataset, we compare the proposed method with the following methods: (1) Olaworks face detector, which is a commercial system that achieved the best performance on FDDB, (2) Li-intel SURF cascade detector [9], (3) Jain's face detector [51], (4) OpenCV implementation of 2-view Viola–Jones, (5) Subburaman's face detector [52], (6) Mikolajczyk's face detector [36], which used body information, and (7) Shen's face detector [53]. Following the protocol defined in [6], we report ROC curve under both the discrete and continuous metric, as shown in Fig. 7(a) and (b), respectively. The experiments are conducted on 10 subfolders, and finally the average ROC is reported. In continuous ROC, the overlap ratio is taken as the weight to measure matching quality. Some of the qualitative results on FDDB are shown in Fig. 9.
+
+From Fig. 7, we can find that the proposed method and the commercial Olaworks are among the leading methods, which largely outperform others. The true positive rate of the proposed method is slight higher than Olaworks when the number of false positive is above 258 on discrete score ROC and 43 on continuous score ROC. The best academic method is [53], and the proposed method achieves 5% improvement on both discrete and continuous ROC over it. We also measure the average precision of different methods by cumulating the areas under the Recall–Precision curve. Our detector achieves 83.7% average precision, better than the 82.0% of Olaworks.
+
+We also examine our method on AFW [13]. It contains 205 images with 468 real world faces. Following the protocol in [13], we report performance on two Recall–Precision curves, the first is for all faces and the second is for large faces only (above 150pixels in height), as in Fig. 8
+                        . The results of the following methods are also reported: (1) Open CV implementation of 2-view Viola–Jones, (2) Kala's weighted sampling based boosting [50], (3) Multi.HOG, which is a three view HOG+SVM implementation, (4) DPM [10], here the version 4 is used, (5) TSM [13], we use the best results reported in [13] to guarantee the best performance, (6) face.com, and (7) Google Picasa. In the first Precision–Recall curve, we also report the result from a recent work [53].
+
+The proposed method performs surprisingly well on this dataset. For “all faces” setting, the proposed method outperforms the baseline TSM by 8%, and outperforms the best academic method [53] by 5%. It even outperforms the commercial system face.com. Another commercial system Google Picasa has a higher precision at the same recall rate over the proposed method, but our method can recall more faces when slight more false positives are allowed. For “large faces” setting, our method achieves 96.5% average precision. On this setting, the proposed method outperforms baseline TSM by 3.6%. Some of the qualitative results on AFW are shown in Fig. 8. An interesting observation on the two curves is that the performance of traditional boosting based methods such as Viola–Jones and the Kalal's boosting does not increase with the resolution, while the HOG based methods DPM, TSM and our method can have remarkable improvements. A more detailed analysis of the phenomenon can be found in [54]. The qualitative results on Pascal, FDDB and AFW are shown in Fig. 9
+                        .
+
+@&#CONCLUSION@&#
+
+In this paper, we build structural models for face detection. The hierarchical part based representation provides flexibility in capturing appearance variations for faces in the wild. Furthermore, we propose a structural model to explore the face-body co-occurrence. We list the comparisons between proposed structural detector and the dominant V–J detector for face detection in the following three aspects:
+                        
+                           •
+                           
+                              Overall Accuracy Benefit from the rich structural information captured in our method, we achieve state-of-the-art performance on challenging FDDB and AFW. The structural model can encode a lot of priors, such as the landmarks of face and body, which are not fully explored in traditional face detection models. Our work proved the advantages of complex model over the simple model (e.g. V–J) in face detection.
+
+
+                              Occlusion Handling Occlusion can be naturally handled in our method. Firstly, the hierarchical part based representation sums the activation of the whole face, thus be robust to local occlusion. Secondly, the phrase based body detector is not affected by occlusion in face regions.
+
+
+                              Training Samples Traditional V–J based methods need millions faces or more to get a desired performance, which makes data collection a hard problem. With proper modeling on the structure, the proposed method can achieve better performance by only thousands of training images.
+
+@&#ACKNOWLEDGEMENT@&#
+
+We thank the reviewers and editors for helpful feedbacks. This work is supported by the Chinese National Natural Science Foundation Projects #61070146, #61105023, #61103156, #61105037, #61203267, and #61375037, the National IoT R&D Project #2150510, the National Science and Technology Support Program Project #2013BAK02B01, the Chinese Academy of Sciences Project No. KGZD-EW-102-2, the European Union FP7 Project #257289 (TABULA RASA), and Authen-Metric R&D Funds.
+
+@&#REFERENCES@&#
+

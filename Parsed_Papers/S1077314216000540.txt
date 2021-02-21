@@ -1,0 +1,2856 @@
+@&#MAIN-TITLE@&#COROLA: A sequential solution to moving object detection using low-rank approximation
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We propose an online formulation of the low-rank approximation algorithm for foreground object detection, named COROLA, by combination of online robust PCA and Markov Random Field.
+
+
+                        
+                        
+                           
+                           We separate outliers from noise using GMM in our combinatorial problem.
+
+
+                        
+                        
+                           
+                           Since COROLA works sequentially, it is appropriate for continuous operation.
+
+
+                        
+                        
+                           
+                           COROLA, spatially wraps the learned subspace to handle camera motion.
+
+
+                        
+                        
+                           
+                           Synthetic data are used to investigate the capability of COROLA against noise and its rank sensitivity.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Moving object detection
+
+Online low rank approximation
+
+Markov Random Fields
+
+Online background modeling
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  Extracting moving objects from a video sequence and estimating the background of each individual image are fundamental issues in many practical applications such as visual surveillance, intelligent vehicle navigation, and traffic monitoring. Recently, some methods have been proposed to detect moving objects in a video via low-rank approximation and sparse outliers where the background is modeled with the computed low-rank component of the video and the foreground objects are detected as the sparse outliers in the low-rank approximation. Many of these existing methods work in a batch manner, preventing them from being applied in real time and long duration tasks. To address this issue, some online methods have been proposed; however, existing online methods fail to provide satisfactory results under challenging conditions such as dynamic background scene and noisy environments. In this paper, we present an online sequential framework, namely contiguous outliers representation via online low-rank approximation (COROLA), to detect moving objects and learn the background model at the same time. We also show that our model can detect moving objects with a moving camera. Our experimental evaluation uses simulated data and real public datasets to demonstrate the superior performance of COROLA to the existing batch and online methods in terms of both accuracy and efficiency.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Moving object detection and background estimation are fundamental in various applications of computer vision and robotics such as visual surveillance [1], traffic monitoring [2], vehicle tracking and navigation [3], and avian protection [4]. Many methods have been proposed to extract objects from a sequence of images with a stationary camera [5,6] or with a moving camera [7–9]. These methods can be grouped into several categories. Motion-based methods [10,11] use motion information of the image pixels to separate the foreground from the background. These methods work based on the assumption that foreground objects move differently from the background. Therefore it is possible for these methods to classify pixels according to their movement characteristics even in the case of significant camera motion. However, these methods require point tracking to identify the foreground, which can be difficult especially with large camera motion [12]. In addition, they are limited in terms of dealing with dynamic background or noisy data [13].
+
+Another popular category for moving object detection methods is background subtraction [14], which compares the pixels of an image with a background model and considers those that differ from the background model as moving objects. Thus, building a background model plays a critical role in background subtraction methods. Conventional algorithms for background modelling include single Gaussian distribution [15], Gaussian mixture model (GMM) [5], and kernel density estimation [16]. These methods model the background for each pixel independently and so they are not robust against global variations such as illumination changes.
+
+Recently a new approach to background modelling, namely low-rank matrix approximation, has been developed [17,18]. Methods in this approach follow the basic idea from [19]. Oliver et al. [19] proposed Eigenbackground subtraction using PCA [20] (principal component analysis) to model the background and detect moving objects. It is based on the observation that the underlying background images should be unchanged and the composed matrix of vectorized background images can be naturally modeled as a low-rank matrix. Extending this idea, current methods exploit the fact that the background model in an image sequence can be defined by those pixels that are temporally linearly correlated [21]. By capturing the correlation between images one can naturally handle global variations. Algebraically speaking, if an image is vectorized in a column and all images are concatenated into a 2D matrix, then the columns are dependent and its low-rank approximation matrix represents the background model of the images. As a result, the background modeling problem is converted to the low-rank approximation problem. In general, by decomposing an input matrix of vectorized images into a low-rank matrix and a sparse matrix, the low-rank and sparse matrices correspond to the background model and the foreground objects in the image sequence respectively. Our COROLA algorithm described in this paper adopts the low-rank approximation approach. We will detail representative algorithms in this approach in Section 2.
+
+Most of the existing background subtraction algorithms based on low-rank approximation operate in a batch manner; i.e., all images whose background model is too constructed are first collected and then used to build a data matrix whose low-rank approximation is computed. This unfortunately limits the application of the low-rank approximation approach in terms of its efficiency and accuracy. Although existing online methods via low-rank approximation have addressed the efficiency issue to some extent, they are not robust against dynamic and noisy background. In this paper, we offer an algorithm, COROLA, that performs low-rank approximation in a sequential manner so that its computational complexity does not grow with the number of images in the sequence. In addition, through image registration, our algorithm is able to handle the case of a moving camera due to the adaptive nature of the background model that is being learned. The main contributions of this paper are as follows.
+
+                        
+                           1.
+                           We propose an online formulation of the low-rank approximation algorithm for foreground object detection. The proposed formulation enables online application without requiring an entire image sequence, as in the batch formulation and is more robust than existing online methods for dynamic background scene or noisy environment.
+
+COROLA uses a fixed window of images to perform low-rank approximation and so it is appropriate for continuous operation, which cannot be achieved by the batch formulation due to matrix decomposition and memory storage.
+
+In the case of significant camera motion, a batch formulation has the limitation that the first and the last images of a sequence must be similar to find the low-rank matrix. However, in the case of a moving camera, there is in general no similarity between the first and the last images in a sequence. Our proposed COROLA algorithm does not require a stationary background.
+
+The remainder of the paper is organized as follows. Related works on foreground detection via low-rank and sparse decomposition are summarized in Section 2. Section 3 explains the details of COROLA for foreground detection and background estimation, followed by the introduction of our online formulation via greedy bilateral sketch [22]. Experimental results and discussion are presented in Section 4, and concluding remarks in Section 5.
+
+In recent years, many algorithms have been developed for foreground detection based on low-rank matrix approximation with robust principal component analysis (RPCA) [18]. RPCA decomposes a given matrix D into low-rank matrix L and sparse matrix S called outliers. Different techniques exist for low-rank approximation including principal component pursuit (PCP) [21], augmented Lagrangian multiplier (ALM) [23], linearized alternating direction method with an adaptive penalty (LADMAP) [24], and singular value thresholding (SVT) [25]. All of these techniques need all the data in order to perform batch optimization that computes the low-rank matrix and the sparse outliers. Due to batch processing, the following two problems occur: memory storage and time complexity. In continuous monitoring tasks or video processing, if matrix D is built with a large number of images memory storage will be a problem [26]. In addition, by increasing the size of the input matrix D, time complexity for the matrix decomposition is also increasing.
+
+To address the problem of time complexity, some efficient algorithms have been proposed [22,27,28]. Rodrigues and Wohlberg [28] proposed a fast PCP algorithm to reduce the computation time of SVD in inexact ALM (IALM). The “Go Decomposition” (GoDec) method, proposed by Zhou et al. computes RPCA using bilateral random projections (BRP) [28]. Semi-Soft GoDec (SSGoDec) and Greedy SSGoDec methods [22] are extensions of GoDec to speedup it. Although these algorithms reduce the computation time of low-rank approximation, they still are not satisfactory for applications such as visual surveillance and robot navigation due to their batch formulation. In many applications, online processing is critical and batch methods are infeasible. One of the best known batch processing algorithms is the “detecting contiguous outliers in the low-rank representation” (DECOLOR) method [29]. This method uses a priori knowledge of the foreground objects that they should be connected components of relatively small size. Using this constraint in the method, DECOLOR provides promising results; however, due to batch processing, it still suffers from memory storage and time complexity problems. Furthermore, in the case of a moving camera, the current image is no longer similar to the first images in matrix D, and therefore DECOLOR is not able to detect foreground appropriately. In general, batch processing methods cannot operate on a continuous basis and cannot deal with a moving camera. Although DECOLOR has introduced an implementation for moving camera, it only works for short video sequences with small camera motion.
+
+To overcome the limitations of batch processing methods, incremental and online robust PCA methods have developed. He et al. [30] proposed Grassmannian robust adaptive subspace tracking algorithm (GRASTA),which is an incremental gradient descent algorithm on Grassmannian manifold for solving the robust PCA problem. This method incorporates the augmented Lagrangian of l
+                     1-norm loss function into the Grassmannian optimization framework to alleviate the corruption by outliers in the subspace update at each gradient step. Following the idea of GRASTA, He et al. [31] proposed transformed GRASTA (t-GRASTA), which iteratively performs incremental gradient descent constrained to the Grassmann manifold in order to simultaneously decompose a sequence of images into three parts: a low-rank subspace, foreground objects, and a transformation such as rotation or translation of the image. This method can be regarded as an extension of GRASTA and RASL [32] (Robust Alignment by Sparse and Low-Rank decomposition) by computing the transformation and solving the decomposition with incremental gradient optimization framework. To improve the accuracy of online subspace updates especially for dynamic backgrounds, Xu et al. [33] developed an online Grassmannian subspace update algorithm with structured-sparsity (GOSUS) via an alternating direction method of multipliers (ADMM).
+
+To deal with noisy conditions and dynamic background scene, Wang et al. [34] proposed a probabilistic approach to robust matrix factorization (PRMF) and its online extension for sequential data to obtain improved scalability. This model is based on the empirical Bayes approach and can estimate better background model than GRASTA. Recently, Feng et al. [35] proposed an online robust principal component analysis via stochastic optimization (OR-PCA). This method does not need to remember all the past samples and uses one sample at a time by a stochastic optimization. OR-PCA reformulates a nuclear norm objective function by decomposing to an explicit product of two low-rank matrices, which can be solved by a stochastic optimization algorithm. Javed et al. [36] used this technique for online foreground detection. Their method first extracts outliers from each image using OR-PCA and then uses Markov Random Field (MRF) to improve the quality of foreground segmentation. However, they did not solve the problem of foreground detection within a unified single optimization framework, i.e., MRF is only applied once to improve the outliers of OR-PCA and without alternating learning to update the OR-PCA. As a result, the reported performance is not competitive with respect to those in the literature.
+
+Since our COROLA method uses the sparsity and connectedness terms of DECOLOR method and estimates the background model using sequential low-rank approximation with the help of OR-PCA, we present a summary of these two methods and in the next section we describe our COROLA method that extends the two methods.
+
+DECOLOR is a formulation that integrates the outlier support and the estimated low-rank matrix in a single optimization problem, for joint object detection and background learning. Specifically, it works by solving the following minimization:
+
+                              
+                                 (1)
+                                 
+                                    
+                                       
+                                          
+                                          
+                                          
+                                             
+                                                
+                                                   min
+                                                   
+                                                      L
+                                                      ,
+                                                      S
+                                                   
+                                                
+                                                
+                                                   1
+                                                   2
+                                                
+                                                
+                                                   ∥
+                                                
+                                                
+                                                   P
+                                                   
+                                                      S
+                                                      ⊥
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         (
+                                                         D
+                                                         −
+                                                         L
+                                                         )
+                                                      
+                                                      ∥
+                                                   
+                                                   
+                                                      F
+                                                   
+                                                   2
+                                                
+                                                +
+                                                
+                                                   β
+                                                   2
+                                                
+                                                
+                                                   
+                                                      ∥
+                                                      S
+                                                      ∥
+                                                   
+                                                   1
+                                                
+                                                +
+                                                γ
+                                                
+                                                   
+                                                      ∥
+                                                      Φ
+                                                      
+                                                         (
+                                                         S
+                                                         )
+                                                      
+                                                      ∥
+                                                   
+                                                   1
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                          
+                                          
+                                             
+                                                
+                                                s
+                                                .
+                                                t
+                                                .
+                                                
+                                                
+                                                
+                                                r
+                                                a
+                                                n
+                                                k
+                                                (
+                                                L
+                                                )
+                                                ≤
+                                                r
+                                                ,
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           where D, L, and S are the matrix of vectorized images, estimated background images, and outlier support, respectively. S in (1) is binary and its elements are 1 for outliers. S
+                           ⊥ is the complement of S and its elements are 1 for background pixels of the images. Φ(S) means the difference between neighboring pixels and therefore the last term of the above minimization encourages connectedness of outliers. Zhou et al. [29] solved the first term of (1) with its constraint using an alternating algorithm (SOFT-IMPUTE) [37]. They then solved the rest of the minimization problem by MRF [38]. This two-step optimization is iterated until convergence. Although this method provides promising results, it still suffers from memory storage and time complexity problems in large datasets and, due to batch processing, it is not appropriate to operate on a continuous basis. Furthermore, in the case of a moving camera, DECOLOR only works for short video sequences with small camera motion and cannot deal with a moving camera in general.
+
+OR-PCA solves stochastic optimization sequentially, processing one sample at a time and producing a solution that is equivalent to that of the batch RPCA. As a result, its computation cost is independent of the number of samples. OR-PCA solves the following minimization problem:
+
+                              
+                                 (2)
+                                 
+                                    
+                                       
+                                          min
+                                          
+                                             U
+                                             ,
+                                             V
+                                          
+                                       
+                                       
+                                          1
+                                          2
+                                       
+                                       
+                                          
+                                             ∥
+                                             
+                                                (
+                                                D
+                                                −
+                                                U
+                                                V
+                                                −
+                                                E
+                                                )
+                                             
+                                             ∥
+                                          
+                                          
+                                             F
+                                          
+                                          2
+                                       
+                                       +
+                                       
+                                          
+                                             λ
+                                             1
+                                          
+                                          2
+                                       
+                                       
+                                          
+                                             (
+                                             ∥
+                                             U
+                                             ∥
+                                          
+                                          
+                                             F
+                                          
+                                          2
+                                       
+                                       +
+                                       
+                                          
+                                             ∥
+                                             V
+                                             ∥
+                                          
+                                          
+                                             F
+                                          
+                                          2
+                                       
+                                       
+                                          )
+                                          +
+                                       
+                                       
+                                          λ
+                                          2
+                                       
+                                       
+                                          
+                                             ∥
+                                             E
+                                             ∥
+                                          
+                                          1
+                                       
+                                    
+                                 
+                              
+                           where U, R, and E are the basis, coefficient, and sparse error matrices. Feng et al. [35] solved (2) in an online manner for one sample per time by two iterative updating parts. First, the coefficients and the sparse error for each new sample is updated by the previous basis. Then, the basis is updated using the new sample, updated coefficients, and sparse errors.
+
+In this paper, extending the work of DECOLOR and OR-PCA, we introduce a novel non-convex closed-form formulation for detection of moving objects named (COROLA). It solves the challenges of memory storage and time complexity of [29] and provides more accurate results than [35], especially in noisy environments. COROLA is also able to extract moving objects using a moving camera on a continuous basis, which cannot be achieved in general by a batch processing method especially in the case of large camera motion.
+
+In this section, we focus on online detection of moving objects for both static and moving cameras. We first formulate the problem of background modeling and foreground object detection and then describe in detail our COROLA algorithm, which computes the low-rank approximation and foreground detection sequentially.
+
+Let X ∈ Rm
+                         be a vectorized image and Xj
+                         be the jth image in a sequence, expressed as a column vector of m pixels. Then, 
+                           
+                              D
+                              =
+                              
+                                 [
+                                 
+                                    X
+                                    1
+                                 
+                                 ,
+                                 …
+                                 ,
+                                 
+                                    X
+                                    n
+                                 
+                                 ]
+                              
+                              ∈
+                              
+                                 R
+                                 
+                                    m
+                                    ×
+                                    n
+                                 
+                              
+                           
+                         is a matrix of n images and the ith pixel in the jth image is denoted as xij
+                        . To indicate foreground for an observed image j, we use a binary indicator vector 
+                           
+                              s
+                              =
+                              
+                                 
+                                    [
+                                    
+                                       s
+                                       1
+                                    
+                                    ,
+                                    
+                                       s
+                                       2
+                                    
+                                    ,
+                                    …
+                                    ,
+                                    
+                                       s
+                                       m
+                                    
+                                    ]
+                                 
+                                 T
+                              
+                           
+                         as the foreground support where
+
+                           
+                              (3)
+                              
+                                 
+                                    
+                                       s
+                                       i
+                                    
+                                    =
+                                    
+                                       {
+                                       
+                                          
+                                             
+                                                0
+                                             
+                                             
+                                                
+                                                   if
+                                                   
+                                                   i
+                                                   
+                                                   is
+                                                   
+                                                   background
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                1
+                                             
+                                             
+                                                
+                                                   if
+                                                   
+                                                   i
+                                                   
+                                                   is
+                                                   
+                                                   foreground
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        and matrix 
+                           
+                              S
+                              =
+                              [
+                              
+                                 s
+                                 1
+                              
+                              ,
+                              
+                                 s
+                                 2
+                              
+                              ,
+                              …
+                              ,
+                              
+                                 s
+                                 n
+                              
+                              ]
+                           
+                         shows a binary matrix of all images in D. Also, we use the function 
+                           
+                              
+                                 P
+                                 S
+                              
+                              
+                                 (
+                                 X
+                                 )
+                              
+                              ∈
+                              
+                                 R
+                                 
+                                    
+                                       |
+                                       s
+                                       |
+                                    
+                                    0
+                                 
+                              
+                           
+                         to construct a vector of at most m foreground pixels of image X. Note that l
+                        0-norm 
+                           
+                              
+                                 |
+                                 s
+                                 |
+                              
+                              0
+                           
+                         is the cardinality of 
+                           s
+                         or the number of non-zero elements in 
+                           s
+                        . In a matrix with more than one column, 
+                           
+                              P
+                              
+                                 S
+                                 ,
+                                 :
+                              
+                           
+                         constructs multiple columns each by applying 
+                           
+                              P
+                              S
+                           
+                         to a column in the input matrix. Now, let 
+                           
+                              L
+                              =
+                              U
+                              V
+                           
+                        . The objective function in (1) can be rewritten as follows.
+
+                           
+                              (4)
+                              
+                                 
+                                    
+                                       
+                                       
+                                       
+                                          
+                                             
+                                                min
+                                                
+                                                   U
+                                                   ,
+                                                   V
+                                                   ,
+                                                   S
+                                                
+                                             
+                                             
+                                                1
+                                                2
+                                             
+                                             
+                                                ∥
+                                             
+                                             
+                                                P
+                                                
+                                                   S
+                                                   ⊥
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      (
+                                                      D
+                                                      −
+                                                      U
+                                                      V
+                                                      )
+                                                   
+                                                   ∥
+                                                
+                                                
+                                                   F
+                                                
+                                                2
+                                             
+                                             +
+                                             
+                                                β
+                                                2
+                                             
+                                             
+                                                
+                                                   ∥
+                                                   S
+                                                   ∥
+                                                
+                                                1
+                                             
+                                             +
+                                             γ
+                                             
+                                                
+                                                   ∥
+                                                   Φ
+                                                   
+                                                      (
+                                                      S
+                                                      )
+                                                   
+                                                   ∥
+                                                
+                                                1
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       
+                                       
+                                       
+                                          
+                                             
+                                             s
+                                             .
+                                             t
+                                             .
+                                             
+                                             
+                                             
+                                             r
+                                             a
+                                             n
+                                             k
+                                             (
+                                             U
+                                             )
+                                             =
+                                             r
+                                             a
+                                             n
+                                             k
+                                             (
+                                             V
+                                             )
+                                             ≤
+                                             r
+                                             ,
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+With the above notations and equations, and by relaxing the constraints of (4) based on [35], the problem of background modeling and foreground object detection via sequential low-rank approximation and contiguous outlier representation solves the following optimization problem for each observed image.
+
+                           
+                              (5)
+                              
+                                 
+                                    
+                                       
+                                       
+                                       
+                                          
+                                             
+                                                min
+                                                
+                                                   U
+                                                   ,
+                                                   v
+                                                   ,
+                                                   s
+                                                
+                                             
+                                             
+                                                1
+                                                2
+                                             
+                                             
+                                                ∥
+                                             
+                                             
+                                                P
+                                                S
+                                             
+                                             
+                                                
+                                                   
+                                                      (
+                                                      X
+                                                      −
+                                                      U
+                                                      v
+                                                      )
+                                                   
+                                                   ∥
+                                                
+                                                
+                                                   F
+                                                
+                                                2
+                                             
+                                             +
+                                             
+                                                β
+                                                1
+                                             
+                                             
+                                                ∥
+                                             
+                                             
+                                                P
+                                                
+                                                   S
+                                                   ,
+                                                   :
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      (
+                                                      U
+                                                      )
+                                                   
+                                                   ∥
+                                                
+                                                
+                                                   F
+                                                
+                                                2
+                                             
+                                             +
+                                             
+                                                β
+                                                1
+                                             
+                                             
+                                                
+                                                   ∥
+                                                   v
+                                                   ∥
+                                                
+                                                
+                                                   F
+                                                
+                                                2
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       
+                                       
+                                       
+                                          
+                                             
+                                             +
+                                             
+                                             
+                                                β
+                                                2
+                                             
+                                             
+                                                
+                                                   ∥
+                                                   s
+                                                   ∥
+                                                
+                                                1
+                                             
+                                             +
+                                             γ
+                                             
+                                                
+                                                   ∥
+                                                   Φ
+                                                   
+                                                      (
+                                                      s
+                                                      )
+                                                   
+                                                   ∥
+                                                
+                                                1
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        where X ∈ Rm
+                         is an observed image, r is the upper bound on the rank of the basis matrix U ∈ R
+                        
+                           m × r
+                        , and 
+                           
+                              v
+                              ∈
+                              
+                                 R
+                                 r
+                              
+                           
+                         is a coefficient vector. 
+                           
+                              Φ
+                              (
+                              s
+                              )
+                           
+                         means the difference between neighboring pixels and it is computed by 
+                           
+                              
+                                 
+                                    ∥
+                                    Φ
+                                    
+                                       (
+                                       s
+                                       )
+                                    
+                                    ∥
+                                 
+                                 1
+                              
+                              =
+                              
+                                 ∑
+                                 
+                                    (
+                                    i
+                                    ,
+                                    k
+                                    )
+                                    ∈
+                                    E
+                                 
+                              
+                              
+                                 |
+                                 
+                                    s
+                                    i
+                                 
+                                 −
+                                 
+                                    s
+                                    k
+                                 
+                                 |
+                              
+                           
+                         and 
+                           E
+                         is the neighborhood clique. Note that the objective function defined in (5) is non-convex and involves both continuous and discrete variables. Since (5) is our online formulation for each input image, the loss over all data would be the cumulative for each image. The first three terms try to compute the low-rank representation of input image X by first expressing it as a linear combination of the background basis U and its coefficient vector 
+                           
+                              v
+                              ,
+                           
+                         and then penalizing only the foreground pixels using extraction function 
+                           
+                              P
+                              S
+                           
+                        . The last two terms of (5) find continuous and small outliers to represent the foreground mask. Specifically, the fourth term imposes a sparsity constraint on the foreground mask 
+                           s
+                        ; i.e., the foreground pixels should be low in number. The last term imposes a connectivity constraint on mask 
+                           s
+                         to account for correlation between neighboring pixels of an image. By minimizing (5) we can estimate the best low-rank representation of an input image and detect foreground objects, concurrently. However, solving this joint optimization in one step is difficult. Therefore, people use a two-step alternating optimization procedure by separating it to a low-rank approximation step involving U and 
+                           
+                              v
+                              ,
+                           
+                         and then a contiguous sparse optimization step involving 
+                           s
+                         to obtain background estimation and foreground detection, performed alternatively. In the first step people treat (5) as minimization over U and 
+                           
+                              v
+                              ,
+                           
+                         for which we introduce an online approach via the greedy semi-soft GoDec (Gre-SSGoDec) and OR-PCA methods rather than the SOFT-IMPUTE algorithm [37] in batch methods. In the second step, minimization over 
+                           s
+                         is conducted. In addition, we use the combination of GMM and first order MRF with binary labels in the second step to improve the foreground detection performance.
+
+For solving the first step of (5), we describe in this section our sequential method to compute the low rank background model of an image sequence and the foreground as its sparse outliers, in a way that is suitable for continuous and real time operation. In our sequential formulation, we adopt an online updating approach for optimization over U and 
+                           v
+                        . Therefore (5) can be rewritten as:
+
+                           
+                              (6)
+                              
+                                 
+                                    
+                                       
+                                          min
+                                       
+                                       
+                                          U
+                                          ,
+                                          v
+                                       
+                                    
+                                    
+                                    
+                                       1
+                                       2
+                                    
+                                    
+                                       ∥
+                                    
+                                    
+                                       P
+                                       S
+                                    
+                                    
+                                       
+                                          
+                                             (
+                                             X
+                                             −
+                                             U
+                                             v
+                                             )
+                                          
+                                          ∥
+                                       
+                                       
+                                          F
+                                       
+                                       2
+                                    
+                                    +
+                                    
+                                       β
+                                       1
+                                    
+                                    
+                                       ∥
+                                    
+                                    
+                                       P
+                                       
+                                          S
+                                          ,
+                                          :
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             (
+                                             U
+                                             )
+                                          
+                                          ∥
+                                       
+                                       
+                                          F
+                                       
+                                       2
+                                    
+                                    +
+                                    
+                                       β
+                                       1
+                                    
+                                    
+                                       
+                                          ∥
+                                          v
+                                          ∥
+                                       
+                                       
+                                          2
+                                       
+                                       2
+                                    
+                                    
+                                    
+                                    
+                                    
+                                    
+                                 
+                              
+                           
+                        Since (6) updates subspace of U based on foreground mask 
+                           
+                              s
+                              ,
+                           
+                         we rewrite the objective function for the rest of this section as follows.
+
+                           
+                              (7)
+                              
+                                 
+                                    
+                                       
+                                          min
+                                       
+                                       
+                                          
+                                             U
+                                             ^
+                                          
+                                          ,
+                                          v
+                                       
+                                    
+                                    
+                                    
+                                       1
+                                       2
+                                    
+                                    
+                                       ∥
+                                    
+                                    
+                                       X
+                                       ^
+                                    
+                                    −
+                                    
+                                       U
+                                       ^
+                                    
+                                    
+                                       
+                                          v
+                                          ∥
+                                       
+                                       
+                                          F
+                                       
+                                       2
+                                    
+                                    +
+                                    
+                                       β
+                                       1
+                                    
+                                    
+                                       ∥
+                                    
+                                    
+                                       U
+                                       ^
+                                    
+                                    
+                                       
+                                          ∥
+                                       
+                                       
+                                          F
+                                       
+                                       2
+                                    
+                                    +
+                                    
+                                       β
+                                       1
+                                    
+                                    
+                                       
+                                          ∥
+                                          v
+                                          ∥
+                                       
+                                       
+                                          2
+                                       
+                                       2
+                                    
+                                    
+                                    
+                                    
+                                    
+                                    
+                                 
+                              
+                           
+                        where 
+                           
+                              
+                                 U
+                                 ^
+                              
+                              =
+                              
+                                 P
+                                 
+                                    S
+                                    ,
+                                    :
+                                 
+                              
+                              
+                                 (
+                                 U
+                                 )
+                              
+                           
+                         and 
+                           
+                              
+                                 X
+                                 ^
+                              
+                              =
+                              
+                                 P
+                                 S
+                              
+                              
+                                 (
+                                 X
+                                 )
+                              
+                           
+                        .
+
+
+                        Initialization step: With a small number of images at the beginning of a sequence no fewer than the rank of the background model, we initialize U with a batch method. This enables us to estimate the rank r roughly for the images in the rest of the sequence. Since this step is performed only once, the complexity of using a batch formulation is not an issue. After the initialization of U, for each input sample X, we use an incremental approach to solve (7) by the following two parts, repeatedly. These two parts update 
+                           
+                              v
+                              ,
+                           
+                         and then U (by updating the subspace of 
+                           
+                              U
+                              ^
+                           
+                        ) for each sample to build the background model incrementally as follows:
+
+
+                        Part 1: Because every two consecutive images in a sequence are similar, we can update coefficient vector 
+                           v
+                         (or U) for the current image via background model U (or 
+                           v
+                        ) computed for the previous image. To update 
+                           v
+                         with the fixed U, (6) becomes:
+
+                           
+                              (8)
+                              
+                                 
+                                    
+                                       v
+                                       ^
+                                    
+                                    =
+                                    
+                                       
+                                          argmin
+                                       
+                                       v
+                                    
+                                    
+                                    
+                                       1
+                                       2
+                                    
+                                    
+                                       ∥
+                                    
+                                    
+                                       X
+                                       ^
+                                    
+                                    −
+                                    
+                                       U
+                                       ^
+                                    
+                                    
+                                       
+                                          v
+                                          )
+                                          ∥
+                                       
+                                       
+                                          F
+                                       
+                                       2
+                                    
+                                    +
+                                    
+                                       β
+                                       1
+                                    
+                                    
+                                       
+                                          ∥
+                                          v
+                                          ∥
+                                       
+                                       
+                                          2
+                                       
+                                       2
+                                    
+                                 
+                              
+                           
+                        where X ∈ Rm
+                         is the current image and 
+                           
+                              
+                                 X
+                                 ^
+                              
+                              =
+                              
+                                 P
+                                 S
+                              
+                              
+                                 (
+                                 X
+                                 )
+                              
+                           
+                        . By fixing 
+                           
+                              
+                                 U
+                                 ^
+                              
+                              ,
+                           
+                         
+                        (8) is a least squares problem and can be solved by
+
+                           
+                              (9)
+                              
+                                 
+                                    
+                                       v
+                                       ^
+                                    
+                                    =
+                                    
+                                       
+                                          (
+                                          
+                                             
+                                                U
+                                                ^
+                                             
+                                             T
+                                          
+                                          
+                                             U
+                                             ^
+                                          
+                                          )
+                                       
+                                       †
+                                    
+                                    
+                                       
+                                          U
+                                          ^
+                                       
+                                       T
+                                    
+                                    
+                                       X
+                                       ^
+                                    
+                                    
+                                    
+                                    
+                                    
+                                    
+                                 
+                              
+                           
+                        where (.)† is the Moore Penrose pseudoinverse [22].
+
+
+                        Part 2: To update 
+                           
+                              
+                                 U
+                                 ^
+                              
+                              ,
+                           
+                         
+                        (6) can be rewritten as:
+
+                           
+                              (10)
+                              
+                                 
+                                    
+                                       
+                                          min
+                                       
+                                       
+                                          U
+                                          ^
+                                       
+                                    
+                                    
+                                    
+                                       1
+                                       2
+                                    
+                                    
+                                       ∥
+                                    
+                                    
+                                       X
+                                       ^
+                                    
+                                    −
+                                    
+                                       U
+                                       ^
+                                    
+                                    
+                                       
+                                          v
+                                          ∥
+                                       
+                                       
+                                          F
+                                       
+                                       2
+                                    
+                                    +
+                                    
+                                       β
+                                       1
+                                    
+                                    
+                                       
+                                          ∥
+                                          
+                                             U
+                                             ^
+                                          
+                                          ∥
+                                       
+                                       
+                                          F
+                                       
+                                       2
+                                    
+                                    
+                                    
+                                    
+                                    
+                                    
+                                 
+                              
+                           
+                        and, according to Frobenius norm properties, (10) can be solved by:
+
+                           
+                              (11)
+                              
+                                 
+                                    
+                                       U
+                                       ^
+                                    
+                                    =
+                                    
+                                       
+                                          argmin
+                                       
+                                       
+                                          U
+                                          ^
+                                       
+                                    
+                                    
+                                    
+                                       1
+                                       2
+                                    
+                                    T
+                                    r
+                                    
+                                       [
+                                       
+                                          U
+                                          ^
+                                       
+                                       
+                                          (
+                                          A
+                                          +
+                                          
+                                             β
+                                             1
+                                          
+                                          I
+                                          )
+                                       
+                                       
+                                          
+                                             U
+                                             ^
+                                          
+                                          T
+                                       
+                                       ]
+                                    
+                                    −
+                                    T
+                                    r
+                                    
+                                       (
+                                       
+                                          
+                                             U
+                                             ^
+                                          
+                                          T
+                                       
+                                       
+                                          B
+                                          ^
+                                       
+                                       )
+                                    
+                                 
+                              
+                           
+                        where 
+                           
+                              A
+                              =
+                              
+                                 v
+                                 ^
+                              
+                              
+                                 
+                                    v
+                                    ^
+                                 
+                                 T
+                              
+                           
+                         and 
+                           
+                              
+                                 B
+                                 ^
+                              
+                              =
+                              
+                                 X
+                                 ^
+                              
+                              
+                                 
+                                    v
+                                    ^
+                                 
+                                 T
+                              
+                           
+                        . 
+                           
+                              U
+                              ^
+                           
+                         means we update U for those pixels that have foreground mask 
+                           
+                              
+                                 s
+                                 i
+                              
+                              =
+                              1
+                           
+                        . Since U is the basis of background for all images, it cannot be computed independently. This constraint of updating for A and B has been dealt with in [35], where the basis U minimizes a cumulative loss with respect to the previously estimated coefficients 
+                           v
+                        . Therefore, we use the following cumulative form to update A and B, before computing 
+                           
+                              U
+                              ^
+                           
+                         for the first iteration.
+
+                           
+                              (12)
+                              
+                                 
+                                    
+                                       
+                                          A
+                                       
+                                       
+                                          =
+                                       
+                                       
+                                          
+                                             A
+                                             +
+                                             
+                                                v
+                                                ^
+                                             
+                                             
+                                                
+                                                   v
+                                                   ^
+                                                
+                                                T
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             B
+                                             ^
+                                          
+                                       
+                                       
+                                          =
+                                       
+                                       
+                                          
+                                             
+                                                B
+                                                ^
+                                             
+                                             +
+                                             
+                                                X
+                                                ^
+                                             
+                                             
+                                                
+                                                   v
+                                                   ^
+                                                
+                                                T
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        These accumulative forms enable us to use the previous background models to compute the current U and keep the background model more stable against unexpected changes by increasing the number of images through time. In contrast to [35] we update B, only for those pixels that have foreground support 
+                           
+                              
+                                 s
+                                 i
+                              
+                              =
+                              1
+                           
+                        . Therefore, the number of rows in 
+                           
+                              B
+                              ^
+                           
+                         is variable and equal to 
+                           
+                              
+                                 |
+                                 s
+                                 |
+                              
+                              0
+                           
+                         in each iteration. In this part additive A and B save all previous information of U and 
+                           v
+                         and are updated for the current image. By increasing the values of A and B, the obtained background model becomes stable.
+
+For the first iteration, 
+                           
+                              
+                                 s
+                                 i
+                              
+                              =
+                              1
+                           
+                         for all pixels of the current image and so the number of rows in 
+                           
+                              B
+                              ^
+                           
+                         and 
+                           
+                              U
+                              ^
+                           
+                         is the same as that in the input image; subsequently, the number of rows in 
+                           
+                              B
+                              ^
+                           
+                         and 
+                           
+                              U
+                              ^
+                           
+                         decreases in succeeding iterations as the foreground area is decreased. Eq. (11) can be solved with a simple iterative algorithm presented in [35]. Since COROLA is an iterative algorithm based on (5) and the size of 
+                           
+                              U
+                              ^
+                           
+                         and 
+                           
+                              B
+                              ^
+                           
+                         changes in each iteration, in this implementation we save their values of 
+                           
+                              
+                                 
+                                 1
+                              
+                              
+                                 U
+                                 ^
+                              
+                              ,
+                           
+                        
+                        
+                           
+                              
+                                 
+                                 1
+                              
+                              
+                                 v
+                                 ^
+                              
+                              ,
+                           
+                         
+                        1
+                        A, and 
+                           
+                              
+                                 
+                                 1
+                              
+                              
+                                 B
+                                 ^
+                              
+                           
+                         after the first iteration. We use these values in the first iteration of the next input image. Also these variables have the most information for building the background model of the current image, which is computed by 
+                           
+                              L
+                              =
+                           
+                        
+                        
+                           
+                              
+                                 
+                                 1
+                              
+                              
+                                 U
+                                 ^
+                              
+                           
+                        
+                        
+                           
+                              
+                                 
+                                 1
+                              
+                              
+                                 v
+                                 ^
+                              
+                           
+                        . However, foreground detection depends on the obtained mask 
+                           s
+                         from the second step of solving (5), and the algorithm continues to iterate until the convergence criteria are met. Because for dynamic backgrounds, outliers are a combination of the foreground object and moving parts of the background as noise (e.g., waving trees). These moving parts do not affect background model, but they create false positives in the foreground mask 
+                           s
+                        . We will explain the convergence criteria after solving the second step of (5).
+
+Let current X and its corresponding L be Xj
+                         and Lj
+                        , respectively. Also Sj
+                         is the indicator vector 
+                           s
+                         for the jth image. Now we investigate how to compute the foreground mask 
+                           s
+                         given the residual 
+                           
+                              
+                                 E
+                                 j
+                              
+                              =
+                              
+                                 X
+                                 j
+                              
+                              −
+                              
+                                 L
+                                 j
+                              
+                           
+                         (Lj
+                         is computed in background modeling in the previous section for the jth observed image). The goal now is to find the indicator vector Sj
+                         on Ej
+                        . Assuming that the foreground objects are relatively small connected components, we can model the foreground mask Sj
+                         by an MRF [38] . Specifically, let graph 
+                           
+                              G
+                              =
+                              (
+                              V
+                              ,
+                              E
+                              )
+                           
+                         where 
+                           V
+                         is the set of vertices that correspond to the pixels of an image and 
+                           E
+                         is the set of edges that connect neighboring pixels. Then, by defining an energy function of Sj
+                        
+                        
+                           
+                              (13)
+                              
+                                 
+                                    
+                                       ∑
+                                       
+                                          i
+                                          ∈
+                                          V
+                                       
+                                    
+                                    
+                                       β
+                                       2
+                                    
+                                    
+                                       (
+                                       
+                                          s
+                                          i
+                                       
+                                       )
+                                    
+                                    +
+                                    
+                                       ∑
+                                       
+                                          (
+                                          i
+                                          ,
+                                          k
+                                          )
+                                          ∈
+                                          E
+                                       
+                                    
+                                    
+                                       γ
+                                       
+                                          i
+                                          ,
+                                          k
+                                       
+                                    
+                                    
+                                       |
+                                       
+                                          s
+                                          i
+                                       
+                                       −
+                                       
+                                          s
+                                          k
+                                       
+                                       |
+                                    
+                                 
+                              
+                           
+                        which is called “Icing model” in the literature and an example of MRF, we can derive the foreground mask Sj
+                        . The first and the second terms impose sparsity and continuity on Sj
+                        , in a way that is similar to the last two terms of (5) and shows that Sj
+                         can be modeled using MRF [38]. However, extracting foreground objects from E, which is combination of outliers and noise, would not be accurate especially in noisy environment like dynamic backgrounds or with a moving camera. In most cases we need to separate reliable outliers representing true foreground from noise in estimating foreground support Sj
+                        . In most applications, noise comes from a complicated and dynamic background such as waving trees or sea waves, which should be classified as background.
+
+Here, we describe outliers with a Gaussian model 
+                           
+                              N
+                              (
+                              μ
+                              ,
+                              
+                                 σ
+                                 2
+                              
+                              )
+                           
+                        . Using this model of the outliers enables us to control the complexity of the background variations and also recognize true outliers in the presence of noise using (14). In our study, adaptive GMM [39] is used for each component of E to separate the outliers from noise. As in most cases, three Gaussian components are sufficient in modeling E to separate foreground F from noise [39]. Fig. 1
+                         shows the effect of using GMM on E for dynamic backgrounds. The middle figure shows the obtained residual E. After obtaining E, we normalize it and extract outliers F from noise using Gaussian model (right figure). So, to solve the second step of (5), we construct 
+                           
+                              E
+                              ^
+                           
+                         with a simple update rule as follows:
+
+                           
+                              (14)
+                              
+                                 
+                                    
+                                       
+                                          E
+                                          ^
+                                       
+                                       j
+                                    
+                                    =
+                                    α
+                                    
+                                       E
+                                       j
+                                    
+                                    +
+                                    
+                                       (
+                                       1
+                                       −
+                                       α
+                                       )
+                                    
+                                    
+                                       F
+                                       j
+                                    
+                                 
+                              
+                           
+                        where 
+                           
+                              
+                                 E
+                                 j
+                              
+                              =
+                              
+                                 X
+                                 j
+                              
+                              −
+                              
+                                 L
+                                 j
+                              
+                           
+                         and Fj
+                         is the outliers using GMM on the current image (jth image of the sequence). α ∈ [0, 1] is a constant that controls the magnitude of noise so that a small α would be used for noisy data (i.e. for moving cameras). In all of our experiments 
+                           
+                              α
+                              =
+                              0.1
+                           
+                        .
+
+Now we can solve the second step of our optimization problem that extracts moving objects from outliers, and (5) can be rewritten as the following objective function to minimize the energy over Sj
+                         via obtained outliers 
+                           
+                              E
+                              ^
+                           
+                        .
+
+                           
+                              (15)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   min
+                                                
+                                                S
+                                             
+                                             
+                                             
+                                                1
+                                                2
+                                             
+                                             
+                                                ∥
+                                             
+                                             
+                                                P
+                                                S
+                                             
+                                             
+                                                (
+                                                
+                                                   E
+                                                   ^
+                                                
+                                                )
+                                             
+                                             
+                                                
+                                                   ∥
+                                                
+                                                
+                                                   F
+                                                
+                                                2
+                                             
+                                             +
+                                             
+                                                β
+                                                2
+                                             
+                                             
+                                                ∥
+                                             
+                                             
+                                                S
+                                                j
+                                             
+                                             
+                                                
+                                                   ∥
+                                                
+                                                1
+                                             
+                                             +
+                                             γ
+                                             
+                                                
+                                                   ∥
+                                                   Φ
+                                                   
+                                                      (
+                                                      
+                                                         S
+                                                         j
+                                                      
+                                                      )
+                                                   
+                                                   ∥
+                                                
+                                                1
+                                             
+                                             +
+                                             C
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             
+                                             =
+                                             
+                                                ∑
+                                                
+                                                   i
+                                                   :
+                                                   
+                                                      s
+                                                      i
+                                                   
+                                                   =
+                                                   1
+                                                
+                                             
+                                             
+                                                
+                                                   E
+                                                   ^
+                                                
+                                                
+                                                   i
+                                                
+                                                2
+                                             
+                                             +
+                                             
+                                                β
+                                                2
+                                             
+                                             
+                                                ∑
+                                                i
+                                             
+                                             
+                                                s
+                                                i
+                                             
+                                             +
+                                             γ
+                                             
+                                                
+                                                   ∥
+                                                   Φ
+                                                   
+                                                      (
+                                                      
+                                                         S
+                                                         j
+                                                      
+                                                      )
+                                                   
+                                                   ∥
+                                                
+                                                1
+                                             
+                                             +
+                                             C
+                                             
+                                             
+                                             
+                                             
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        where C is a constant. The first term of (15) is constant and therefore (15) is the first order MRF with binary labels (the same as (13)), which can be solved using graph-cut [40,41]. The result of (15) is the binary mask Sj
+                        , which indicates the foreground pixels of Xj
+                        . So far, the first iteration of (5) is completed and, based on mask Sj
+                        , the next iteration starts from (8). In our experiments, COROLA converges in approximately r iterations where r is the rank of data in the sequence. Our convergence criterion is similar to [29] and we use 
+                           
+                              
+                                 (
+                                 e
+                                 n
+                                 e
+                                 r
+                                 g
+                                 
+                                    y
+                                    
+                                       p
+                                       r
+                                       e
+                                       v
+                                    
+                                 
+                                 −
+                                 e
+                                 n
+                                 e
+                                 r
+                                 g
+                                 y
+                                 )
+                              
+                              /
+                              e
+                              n
+                              e
+                              r
+                              g
+                              y
+                              <
+                              
+                                 10
+                                 
+                                    −
+                                    4
+                                 
+                              
+                              ,
+                           
+                         where 
+                           
+                              e
+                              n
+                              e
+                              r
+                              g
+                              y
+                              =
+                              
+                                 1
+                                 2
+                              
+                              
+                                 ∥
+                              
+                              
+                                 (
+                                 
+                                    X
+                                    j
+                                 
+                                 −
+                                 U
+                                 v
+                                 )
+                              
+                              
+                                 
+                                    ∥
+                                 
+                                 
+                                    F
+                                 
+                                 2
+                              
+                              +
+                              
+                                 β
+                                 2
+                              
+                              
+                                 
+                                    ∥
+                                    
+                                       S
+                                       j
+                                    
+                                    ∥
+                                 
+                                 1
+                              
+                           
+                        . In this formulation, the first and the second terms show the error of background model, and the foreground object size. The algorithm is considered to have converged if the error of background model and the size of the foreground object stabilize. In Algorithm 1
+                        , we summarize all steps of COROLA.
+
+In this section, we explain the convergence criteria of COROLA. In general, our main objective function (5) is non-convex and we solve it by alternating between two steps. In step one for low-rank approximation, we always minimize a single lower-bounded energy function using OR-PCA. The convergence propoerty of OR-PCA has been proved in [35]. In the second step for outlier detection, we use MRF and its convergence has been discussed in [40]. Using these two steps, the algorithm must converge to a local minimum; furthermore, Zhou et al. [29] showed that this combinatorial optimization decreases the energy monotonically through iterations and can converge to acceptable results in background modeling and moving object applications.
+
+In this part, we extend our moving object detection method to the case of a moving camera. As we mentioned in Section 1, due to the dissimilarity between the first and the last images in a sequence, a batch method is not able to deal with continuous processing using a moving camera. However, in online methods the background model evolves with time and similarity between the first and the current image is not required. In our method, we build the background model for the current image and based on a transformation function between the current and the new image, the model is transformed to be matched with the new image. Then we can update it for the new image to detect the foreground objects. Note that the background model is transformed through time. So the key in foreground detection using a moving camera is the transformation of the low-rank structure to the new input image.
+
+Let τj
+                         be a transformation that maps 
+                           
+                              X
+                              
+                                 j
+                                 −
+                                 1
+                              
+                           
+                         to Xj
+                        . This transformation is obtained from an affine transformation estimated from the two 2D images. We also assume 
+                           
+                              
+                                 X
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                              =
+                              
+                                 U
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                              
+                                 v
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                           
+                         and there is no changes into both images except for affine transformation so that 
+                           
+                              
+                                 X
+                                 j
+                              
+                              =
+                              τ
+                              ∘
+                              
+                                 X
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                           
+                        . For the sake of brevity, we state without proof that the following equation allows us to reconstruct the current view Xj
+                         from the background model and the registration transform τj
+                        .
+
+                           
+                              (16)
+                              
+                                 
+                                    
+                                       X
+                                       j
+                                    
+                                    =
+                                    
+                                       τ
+                                       j
+                                    
+                                    ∘
+                                    
+                                       X
+                                       
+                                          j
+                                          −
+                                          1
+                                       
+                                    
+                                    =
+                                    
+                                       (
+                                       
+                                          τ
+                                          j
+                                       
+                                       ∘
+                                       
+                                          U
+                                          
+                                             j
+                                             −
+                                             1
+                                          
+                                       
+                                       )
+                                    
+                                    
+                                       v
+                                       
+                                          j
+                                          −
+                                          1
+                                       
+                                    
+                                 
+                              
+                           
+                        From (16) the transformation only changes U. In fact, we need to transform B via τ only once for the first iteration of each input image where 
+                           
+                              
+                                 
+                                    U
+                                    ¯
+                                 
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                              =
+                              τ
+                              ∘
+                              
+                                 U
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                           
+                         and 
+                           
+                              
+                                 
+                                    B
+                                    ¯
+                                 
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                              =
+                              τ
+                              ∘
+                              
+                                 B
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                           
+                        . In (12), A remains unchanged, because 
+                           
+                              v
+                              ^
+                           
+                         is independent from τ. Based on the above assumptions and (16), 
+                           
+                              
+                                 U
+                                 j
+                              
+                              =
+                              
+                                 
+                                    U
+                                    ¯
+                                 
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                           
+                         and 
+                           
+                              
+                                 v
+                                 j
+                              
+                              =
+                              
+                                 v
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                           
+                        . After the transformation, some elements of 
+                           
+                              
+                                 U
+                                 ¯
+                              
+                              
+                                 j
+                                 −
+                                 1
+                              
+                           
+                         and 
+                           
+                              
+                                 
+                                    B
+                                    ¯
+                                 
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                              ,
+                           
+                         which are related to the pixels on the border of the current image, have no corresponding pixels and we have to estimate them using other pixels. To solve the problem, first we normalize both 
+                           
+                              
+                                 U
+                                 ¯
+                              
+                              
+                                 j
+                                 −
+                                 1
+                              
+                           
+                         and the current image to [0,1]. Then, using Xj
+                         and 
+                           
+                              v
+                              
+                                 j
+                                 −
+                                 1
+                              
+                           
+                         (or 
+                           
+                              v
+                              j
+                           
+                        ) we estimate missing pixels of 
+                           
+                              
+                                 U
+                                 ¯
+                              
+                              
+                                 j
+                                 −
+                                 1
+                              
+                           
+                         by replacing them by the corresponding values obtained from [22] and ensure they lie in the correct range, as follows.
+
+                           
+                              (17)
+                              
+                                 
+                                    
+                                       
+                                          U
+                                          ¯
+                                       
+                                       
+                                          j
+                                          −
+                                          1
+                                       
+                                    
+                                    =
+                                    
+                                       X
+                                       j
+                                    
+                                    
+                                       v
+                                       
+                                          j
+                                          −
+                                          1
+                                       
+                                       T
+                                    
+                                    
+                                       
+                                          (
+                                          
+                                             v
+                                             
+                                                j
+                                                −
+                                                1
+                                             
+                                          
+                                          
+                                             v
+                                             
+                                                j
+                                                −
+                                                1
+                                             
+                                             T
+                                          
+                                          )
+                                       
+                                       †
+                                    
+                                    
+                                    
+                                    
+                                    
+                                    
+                                 
+                              
+                           
+                        Similarly, for estimating missing pixels of transformed 
+                           
+                              
+                                 
+                                    B
+                                    ¯
+                                 
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                              ,
+                           
+                         we normalize both 
+                           
+                              
+                                 B
+                                 ¯
+                              
+                              
+                                 j
+                                 −
+                                 1
+                              
+                           
+                         and 
+                           
+                              
+                                 
+                                    U
+                                    ¯
+                                 
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                              
+                                 v
+                                 j
+                              
+                              
+                                 v
+                                 
+                                    j
+                                 
+                                 T
+                              
+                           
+                         and we replace those missing values of 
+                           
+                              
+                                 B
+                                 ¯
+                              
+                              
+                                 j
+                                 −
+                                 1
+                              
+                           
+                         with 
+                           
+                              
+                                 
+                                    U
+                                    ¯
+                                 
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                              
+                                 v
+                                 j
+                              
+                              
+                                 v
+                                 
+                                    j
+                                 
+                                 T
+                              
+                           
+                         (from (12)) and ensure they lie in the correct range.
+
+Based on the experimental results, this approach can estimate missing pixels of U and B after transformation. In addition, the GMM for the previous 
+                           
+                              E
+                              
+                                 j
+                                 −
+                                 1
+                              
+                           
+                         should be transformed via τ to match with the current Ej
+                        . After transforming U, B, we can apply the COROLA method for a static camera to build the background model and detect the foreground objects. Fig. 2 shows a sample image, its computed background model and extracted moving object via COROLA, together with the intermediate results.
+
+The complexity of our sequential low-rank approximation by COROLA consists of contributions from two major parts. The computational complexity of the first part is O(mr). The second part of the low-rank approximation in our model are 
+                           
+                              O
+                              
+                                 (
+                                 
+                                    r
+                                    2
+                                 
+                                 +
+                                 m
+                                 r
+                                 )
+                              
+                              +
+                              O
+                              
+                                 (
+                                 m
+                                 
+                                    r
+                                    2
+                                 
+                                 )
+                              
+                           
+                        . Therefore, the overall complexity of COROLA for the low-rank approximation step is 
+                           
+                              O
+                              (
+                              
+                                 r
+                                 2
+                              
+                              +
+                              m
+                              
+                                 r
+                                 2
+                              
+                              )
+                           
+                        .
+
+@&#EXPERIMENTAL RESULTS@&#
+
+In this section, we compare COROLA with competing algorithms in the literature. We perform two sets of experiments on synthetic data and real benchmark datasets and show quantitative and qualitative results. For quantitative evaluation where ground truth is available, we use pixel-level precision and recall, defined as follows:
+
+                        
+                           (18)
+                           
+                              
+                                 p
+                                 r
+                                 e
+                                 c
+                                 i
+                                 s
+                                 i
+                                 o
+                                 n
+                                 =
+                                 
+                                    
+                                       T
+                                       P
+                                    
+                                    
+                                       T
+                                       P
+                                       +
+                                       F
+                                       P
+                                    
+                                 
+                                 ,
+                                 
+                                 
+                                 
+                                 
+                                 
+                                 r
+                                 e
+                                 c
+                                 a
+                                 l
+                                 l
+                                 =
+                                 
+                                    
+                                       T
+                                       P
+                                    
+                                    
+                                       T
+                                       P
+                                       +
+                                       F
+                                       N
+                                    
+                                 
+                              
+                           
+                        
+                     where TP, FP, TN, and FN are the numbers of true positives, false positives, true negatives and false negatives, in pixels, respectively. Also, instead of using precision-recall curves, we use F-measure to show the overall accuracy.
+
+                        
+                           (19)
+                           
+                              
+                                 F-measure
+                                 =
+                                 2
+                                 
+                                 
+                                    
+                                       p
+                                       r
+                                       e
+                                       c
+                                       i
+                                       s
+                                       i
+                                       o
+                                       n
+                                       ×
+                                       r
+                                       e
+                                       c
+                                       a
+                                       l
+                                       l
+                                    
+                                    
+                                       p
+                                       r
+                                       e
+                                       c
+                                       i
+                                       s
+                                       i
+                                       o
+                                       n
+                                       +
+                                       r
+                                       e
+                                       c
+                                       a
+                                       l
+                                       l
+                                    
+                                 
+                              
+                           
+                        
+                     
+                  
+
+In this set of experiments, we use synthetic data to control noise and to show the capability of COROLA. The synthesized images are 30 × 100 pixels (
+                           
+                              m
+                              =
+                              3000
+                           
+                        ). We use 
+                           
+                              n
+                              =
+                              200
+                           
+                         images. Zhou et. al. [29] used the similar scheme to investigate the robustness of their method against outliers.
+
+To visualize the results we show all images in a 2D matrix where each column shows one image of the sequence. We generate the input data D by adding a foreground to a background matrix B. For generating the foreground and background we use the same approach as DECOLOR. The background matrix 
+                           
+                              B
+                              =
+                              U
+                              V
+                           
+                         is generated via U ∈ R
+                        
+                           m × r
+                         and V ∈ R
+                        
+                           r × n
+                         with random samples from a standard normal distribution. An object with a small size is superimposed on each image in matrix B, and shifts from left to right of the images by one pixel per image, until the right border of the image. The motion direction of the object is then reversed, and the process repeats. Fig. 3
+                        
+                        (b) shows some selected images. The intensity of this object is independently sampled from a uniform distribution. Also, we add i.i.d. Gaussian noise ϵ to D with the corresponding signal-to-noise ratio defined as
+
+                           
+                              (20)
+                              
+                                 
+                                    SNR
+                                    =
+                                    
+                                       
+                                          
+                                             var
+                                             (
+                                             B
+                                             )
+                                          
+                                          
+                                             var
+                                             (
+                                             ϵ
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        Fig. 3(a)–(c) shows an example of generated B, the movement of generated foregrounds and the obtained matrix D.
+
+We test the COROLA method and compare it with leading online methods such as GRASTA, OPRMF, ORPCA and DECOLOR, one of the best batch methods, in terms of different SNR ratios, different ranks of matrix, and different sizes of the foreground object. One sample of our experiments with different SNR ratios between COROLA and all mentioned methods is shown in Fig. 4. In the first row of Fig. 4, with 
+                           
+                              SNR
+                              =
+                              10
+                              ,
+                           
+                         COROLA, OPRMF and DECOLOR methods have roughly the same results for extracting the foreground object, but when we increase noise in the second row (
+                           
+                              SNR
+                              =
+                              1
+                           
+                        ), COROLA method works better than all other methods including DECOLOR in extracting the moving object. That is mainly attributed to using GMM to compute the coefficients of outliers to separate the foreground object from noise. Tuning up the outliers coefficient via GMM enables us to separate noise and outliers especially in a noisy environment and the result becomes more and more accurate over time.
+
+To evaluate COROLA in comparison with GRASTA, OPRMF, ORPCA, and DECOLOR methods, we tested the effects of some scene parameters such as SNR, rank of matrix D, and size of the object. The quantitative results of this comparison in terms of F-measure are provided in Fig. 5
+                        . The first column of Fig. 5 illustrates the effect of noise in all methods, when we change the SNR ratio from 8 to 1 in different ranks. The rows from top to bottom show our experiments in different ranks of 1, 3, and 5. Since one of the advantages of DECOLOR method is high accuracy of object detection with different sizes, the second column of Fig. 5 shows the accuracy of COROLA in comparison with DECOLOR to extract the moving object of different sizes. This result demonstrates that the capability of our method is comparable with DECOLOR in terms of average F-measure. Although, the result of DECOLOR method is slightly more accurate than COROLA for large objects, by reducing the size of object, COROLA generates a better result than DECOLOR even when we increase the rank of matrix D from 1 to 5.
+
+To evaluate the rank sensitivity of the COLORA method, we tested the effects of changing the rank of our method against other online methods. Fig. 6
+                         demonstrates F-measure of these methods, when we set the rank of the methods from 1 to 50. The columns from left to right show our experiments in different SNR 2, 4, and 8 on the synthetic data with the true rank 3. In this experiment, when we set the rank of methods less than the true rank of the data, ORPCA, OPRMF, and GRASTA failed. This is because when the rank of data is higher than the predefined rank, these methods consider some of background variations as positive foreground pixels, incorrectly. In contrast, COROLA can extract foreground objects even with a lower rank than the true rank. It is because GMM allows COROLA to remove false positive pixels. In Fig. 6 by increasing the predefined rank of the methods, GRASTA, OR-PCA, and COROLA are robust although COROLA still shows the highest F-measure against all other methods.
+
+In this section, we use real benchmark datasets to conduct quantitative and qualitative evaluation of COROLA and compare it with DECOLOR, MOG, SSGoDec, and ORPCA+MRF. The real datasets used are popular in moving object detection and publicly available,
+                           1
+                        
+                        
+                           1
+                           
+                              https://sites.google.com/site/backgroundsubtraction/test-sequences
+                           
+                         and they include “2014 Change Detection” [42], “Perception or I2R” [43], and “Wallflower” [44] test images sequences. Table 1
+                         provides the length and image size of these datasets.
+
+
+                           Figs. 7
+                           –9
+                           
+                            show the qualitative results of COROLA for background estimation and foreground detection for all sequences of Table 1 from three datasets I2R, Change Detection, and Wallflower, respectively. Figs. 7–9 also show the role of GMM to separate outliers from noise. These results are shown in columns (d) and (e) as E, and 
+                              
+                                 
+                                    E
+                                    ^
+                                 
+                                 ,
+                              
+                            respectively. The results in Figs. 7–9 demonstrate the capability of COROLA to detect moving objects and background modeling accurately. The estimated background in the first row of Fig. 7 has some ghost because the input image is the 23rd of the sequence and the parameters have not been learned well enough to build an accurate background. In general, for short sequences the computed background model by a batch method such as DECOLOR is more accurate than COROLA because online methods need sufficient samples for training to be stable. However, for long sequences COROLA can provide comparable results with batch methods.
+
+We also compare COROLA quantitatively with competing online and batch methods. Table 2
+                            compares COROLA with MOG, GRASTA, OPRMF, and ORPCA in terms of F-measure. In most of the cases COROLA works much better than all other online methods, specifically in very noisy and dynamic scenes such as Fountain, Campus, Canoe, Fall, and Fountain02 sequences. Because in these sequences moving parts of background are often classified as foreground in other online methods. In contrast, COROLA is able to deal with the difficult background conditions. By using GMM and (14) the difference between outliers and the rest of pixels is boosted and this allows COROLA to detect intermittently moving objects better than other competing online methods.
+
+To show the capability of COROLA, we have also included “OR-PCA+MRF” [36] in our evaluation. Even though this method sets manually all parameters for each sequence, since this approach does not use an optimization framework, it does not perform as well as COROLA in most of the sequences.
+
+
+                           Table 3
+                            compares COROLA with IALM, FPCP, GoDec, SSGODec, APG, and DECOLOR, which are fast and accurate batch methods in the literature, in terms of F-measure. For some sequences such as Fountain, Campus, Canoe, Fountain02, Overpass, and TimeOfDay COROLA works much better than other methods. Because in some of these sequences, background is very noisy (i.e. Campus and Fountain02), the constraints of connectedness and sparseness on the subspace of images prove to be useful, which both DECOLOR and COROLA methods exploit leading to much better results than other methods. Further, in some cases the objects move very slowly (i.e. Canoe) or stop for a long time (Overpass, Fountain, and TimeOfDay) none of the competing methods can produce accurate results. In contrast, COROLA produces acceptable results for these challenging sequences for the same reasons as for the results of Table 2, i.e., using GMM and (14) the difference between outliers and the rest of pixels is boosted and so COROLA can detect intermittently moving objects better than other methods. In summary, Tables 2 and 3 convincingly demonstrate that our method outperforms the state-of-the-art in terms of F-measure.
+
+COROLA is implemented in Matlab and C++. We run all experiments on a PC with a 3.4 GHz Intel i7 CPU and 16 GB RAM. To show the importance of online methods in continuous operation we compare the scalability of COROLA with DECOLOR under varying spatial resolution and the number of images.
+
+Unlike DECOLOR, the computational cost of COROLA is independent of the number of images because the dominant cost of DECOLOR comes from the computation of SVD in each iteration. By increasing the size of the matrix D, the computation time of DECOLOR grows at least linearly with respect to the number of images. We compare the computation time of COROLA with DECOLOR after convergence of both methods in Table 4
+                           . In this table, the average time for processing of each frame by DECOLOR increases where it is an order of magnitude slower than COROLA for sequences longer than 1000 images.
+
+Scalability in spatial resolution is another advantage of online method against batch processing methods. Increasing the resolution of images significantly affects DECOLOR method. Using high resolution images results in a huge matrix D so that decomposing D becomes very expensive. On the other hand, COROLA is an online method and is independent from the number of images, i.e., we do not have to deal with a large D and its computation time grows only with the image resolution.
+
+In this section, we test our method on real public sequences for moving cameras namely “Berkeley motion segmentation dataset” [45]. Table 5
+                         shows the details of five challenging sequences that we use in our experiments.
+
+We compare our method with DECOLOR as the leading method based on low-rank approximation that can handle the problem of object detection with a moving camera in a short sequence. Although recently, He et al. [31] have proposed transformed-GRASTA, it only works well for camera jitter and it is not appropriate for moving camera. Fig. 10
+                         shows the qualitative results of COROLA in comparison with DECOLOR method for moving object detection using a moving camera. First three experiments have been performed on short sequences “cars6”, “cars7”, “people1” and the results from COROLA are comparable with those from DECOLOR method. For the last two sequences “marple13” and “Tennis”, DECOLOR has a problem to align images when the last images are not similar with the first images of these sequences. This is common in continuous processing and all of batch methods have problem with this. To show the result of DECOLOR on marple13 and tennis sequences (in the last two rows of Fig. 10), we used last 30 images of the sequences, which have less camera motion. Since the last images in the sequence are no longer similar to the initial ones in the matrix, DECOLOR failed, as expected. In contrast, since COROLA works online and only considers the last two images it can process the last two sequences of Table 5 without any problems and provides acceptable results in comparison with DECOLOR. For completeness, we have also included in our comparative study another online registration based method in [9].
+
+
+                        Table 6
+                         shows the quantitative evaluation of COROLA in comparison with DECOLOR and the method in [9]. Experiments over all five sequences show that the results of COROLA is comparable with DECOLOR for the last 30 images of a sequence but has the advantage in terms of its ability for real-time continuous processing. With more than 30 images in a sequence, DECOLOR can no longer produce a valid result due to the significant dissimilarity of the images later in the sequence from the initial ones. In contrast, our sequential method is always able to produce a valid result often with higher accuracy.
+
+@&#CONCLUSIONS@&#
+
+In this paper, we have proposed a novel online method named COROLA to detect moving objects in a video using the framework of low-rank matrix approximation. Our online framework works iteratively on each image of the video to extract foreground objects accurately. The key to our online formulation is to exploit the sequential nature of a continuous video of a scene where the background model does not change discontinuously and can therefore be obtained by updating the background model learned from preceding images. We have applied COROLA to the case of a moving camera. Since our method works online and is independent of the number of images, it is suitable for real-time object detection in continuous monitoring tasks. Our method overcomes the problems of batch methods in terms of memory storage, time complexity, and camera motion. Also important to the success of COROLA is using Gaussian model to separate noise from outliers and also to tune the costs of assigning labels in MRF via σ and weights of Gaussian parameters, dynamically and automatically especially when the object moves very slow or stops for some frames. Based on our extensive experiments on synthetic data and real data sequences, we are able to establish that COROLA archives the best performance in comparison with all evaluated methods including the state-of-the-art batch and online methods.
+
+Despite its satisfactory performance in all of our experiments, COROLA shares one disadvantage with DECOLOR. Since both methods have non-convex formulations, they might converge to a local minimum with results depending on initialization of parameters; however, for the case of background modeling, images are roughly similar and parameters do not change significantly. Therefore, the issue of local minimum has not affected successful object detection in our experiments. A challenge facing COROLA is severe illumination changes and this is a problem of all online methods. In the future, we plan to develop a version of COROLA that can work under severe illumination changes.
+
+@&#ACKNOWLEDGMENTS@&#
+
+This work was supported in part by the Natural Sciences and Engineering Research Council (NSERC) through the NSERC Canadian Field Robotics Network (NCFRN) and by Alberta Innovates Technology Future (AITF).
+
+@&#REFERENCES@&#
+

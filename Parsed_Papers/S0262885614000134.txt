@@ -1,0 +1,1365 @@
+@&#MAIN-TITLE@&#Fast stereo matching using adaptive guided filtering
+
+@&#HIGHLIGHTS@&#
+
+
+               Hghlights
+               
+                  
+                     
+                        
+                           
+                           A novel local stereo matching algorithm with linear complexity is proposed.
+
+
+                        
+                        
+                           
+                           The overall algorithm generates the state-of-the-art results.
+
+
+                        
+                        
+                           
+                           “Two-level local adaptation” is introduced to guide the adaptive guided filtering.
+
+
+                        
+                        
+                           
+                           The novel post-processing method handles both occlusions and textureless regions.
+
+
+                        
+                        
+                           
+                           A parallel algorithm is proposed to speed up the algorithm on GPU.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Stereo vision
+
+Local method
+
+Adaptive guided filtering
+
+Parallel integral image
+
+Weighted propagation
+
+@&#ABSTRACT@&#
+
+
+               Graphical abstract
+               
+                  
+                     
+                        
+                           
+                        
+                     
+                  
+               
+            
+
+@&#INTRODUCTION@&#
+
+Stereo matching is one of the key problems in computer vision, and it plays a significant role in many 3D applications. However, the binocular stereo correspondence problem itself is ill-posed. The captured stereo scenes are disturbed by noise from the surrounding environment, e.g. light variations and sensor noise in image formation. Some inherent ambiguities in stereo scenes, such as textureless region and occlusion, also make the problem much more challenging. Various methods have been proposed, but the problem is still not fully solved.
+
+Many methods are proposed under certain assumptions and constraints, among which, the local smoothness assumption is the most widely used. According to the exhaustive review [1], most stereo matching algorithms can be categorized into two major classes: global methods and local methods. Global methods explicitly incorporate smoothness assumption into an energy function and formulate the problem in an energy-minimization framework, and the disparity map is determined by finding a solution that minimizes the global energy. Although global optimization techniques currently produce the best results, almost all the state-of-the-art global methods utilize image segmentation to ensure sharp depth edges [2]. In addition, iteration is inevitable in these algorithms, so they are relatively slow and do no scale well to high-resolution images.
+
+In local methods, data term plays a dominant role, and cost aggregation is performed in local support windows. One implicit assumption embedded in cost aggregation is that, pixels in the support window are of the same disparity. An alternative view of cost aggregation in local methods is to regard it as filtering on the cost-volume. Data costs are locally smoothed by some specific filtering approaches [3,4]. Well performed edge preserving filters [5,6] (and their variations) can perform proper cost filtering as well as keep fine edges. It is believed that local stereo matching will play a more significant role in the future, since with the development of cameras, it will be much easier to obtain high-quality images with high resolution. Nevertheless, existing cost filtering based local algorithms usually utilize fixed-size kernel windows, which are not scalable to objects with different sizes in the same scene. They perform even worse in textureless regions due to the restriction of the fixed kernel size. Moreover, many cost filtering approaches are time-consuming [7].
+
+In this paper, we propose a new cost-volume filtering method, whose weight kernel is a more general form of the one proposed in [6]. A novel concept named “two-level local adaptation” is introduced to guide the proposed filtering approach. Not only are the assigned support weights locally adaptive to the local patches, the sizes of local patches are also adjusted adaptively. A novel post-processing method is also proposed to handle occlusions and textureless regions. The proposed stereo matching algorithm ranks the 10th among about 152 algorithms on the Middlebury stereo evaluation benchmark, and takes the 1st place in all local methods. Moreover, a novel algorithm based on parallel scan is proposed to efficiently calculate an integral image on GPU. And the overall stereo matching algorithm can achieve over 30million disparity estimates per second (MDE/s).
+                        1
+                     
+                     
+                        1
+                        The measurement of million disparity estimates per second (MDE/s) corresponds to the product of the number of pixels times the disparity range times the obtained frame-rate.
+                     
+                  
+
+The rest of this paper is organized as follows. In Section 2, related works on local stereo methods are reviewed. In Section 3, we present the proposed adaptive guided filtering approach and the overall stereo matching algorithm proposed in this paper is described in Section 4. At the end of each section, the computational complexity is analyzed. In Section 5, a hardware implementation of the cost filtering with CUDA is introduced. We report experimental results and give some discussions in Section 6, and conclusions are drawn in Section 7.
+
+@&#RELATED WORKS@&#
+
+In local stereo matching algorithms, the disparity map is determined by selecting the value with the smallest matching cost from disparity candidates, which is also well known as winner-take-all (WTA) optimization. Thus, cost aggregation becomes the most important step in local stereo algorithms. However, it is not a trivial task as it appears to be. The most straightforward aggregation scheme is through simple low-pass filtering in the square support region. Filters with fixed-size convolution kernel, e.g. uniform (box filters), binomial or Gaussian, can be used. However, these simple methods result in poor disparity maps with fattened edges. Fixed-size kernel windows will easily overlap object boundaries, and matching costs in different regions are incorrectly aggregated. To overcome the edge fattening effect, various algorithms are proposed. Efforts on improving cost aggregation can be classified into two categories: variable support window (VSW) based approaches and adaptive support weight (ASW) based approaches.
+
+Methods in the first category try to find support windows that fit the region size and/or shape, while preventing them from crossing object boundaries. In these methods, the piecewise smoothness assumption is utilized more explicitly, since all pixels in the support window are assumed to have the same weight. The simplest way is to filter the cost volume with a set of support windows of different sizes [1]. Its modification is shiftable windows schemes [8,9], whose window centers are anchored at different points in a set of fixed-size windows. A proper window with the most appropriate displacement is selected, which is useful at discontinuity jumps.
+
+An alternative idea is to build a support window with variable size and/or shape tailored to the image content [10–12]. Variable window approach proposed by Veksler [12] performs well when only rectangular support windows are used. For every pixel in the reference image, a square support window is determined by minimizing the local window cost. Although the cost aggregation can be sped up by utilizing the integral image technique [13], the window adjustment step is quite time-consuming. Zhang et al. [14] proposed a fast algorithm in which non-regular support windows are used. A non-regular support window is first decomposed into horizontal and vertical slices, and cost aggregation is then performed in two directions separately.
+
+One advantage of variable support window based approaches is that integral image technique can be utilized to speed up the aggregation procedure, which makes these cost aggregation schemes relatively efficient. However, a rectangular support window is inappropriate for pixels near object boundaries with arbitrary shapes, and a simple discontinuity reasoning method is also not strict enough to conserve edges.
+
+Adaptive support weight based local methods, which are first introduced by Yoon and Kweon [7], adjust support weights for pixels in a local support window. In [7], the local smoothness assumption is constrained under the rules of similarity and proximity. Variations were also proposed to improve the accuracy. In [15], the authors explicitly deployed a smoothness constraint within local objects. Pixels inside the same segment in which the center pixel lies have the full weight 1, and the weights for pixels outside the segment are measured by the proximity term. Hosni et al. [16] proposed to compute the support weights by the geodesic distances, which enforce the foreground connectivity and prevent high weights from being wrongly assigned to background objects. Despite their outstanding performance, one common shortage is the high complexity. Some fast approximations [17,18] were proposed, but at the price of performance degradation. Recently, Yang [19] proposed a non-local approach, in which the cost values are aggregated adaptively on a minimum spanning tree. The support weight between two vertices is determined by their shortest distance on the tree. This literature reported better results than existing ASW based algorithms while offering extremely low computational complexity.
+
+Few or no work tried to combine both VSW and ASW. The main reason may be: the combination of both VSW and ASW is computationally expensive with incommensurate result improvement. Readers are encouraged to refer to [20,21] for more performance study and evaluation of recent aggregation algorithms.
+
+In recent years, cost aggregation is conducted by filtering on the cost-volume. In local stereo matching algorithms, edge preserving filters are frequently used, among which the bilateral filter [5] is the most widely used. But the brute force implementations are of high computational complexity when the kernel window is large. Many approximations [22–25] were proposed for fast implementation, but the accuracy are sacrificed due to quantization. Recently, Yang [26] proposed a recursive implementation of bilateral filtering by confining the range kernel and spatial kernel. The implementation demonstrated better accuracy than traditional bilateral filter with low complexity. But the performance of recursive bilateral filtering is still affected by the kernel confinements, this is reflected from the performance comparison with top-ranking local stereo methods. To overcome the shortages of bilateral filtering, He et al. [6] introduced the concept of guided image filtering, which has better behavior near edges. More importantly, it can be implemented exactly under linear complexity. Local methods that deployed it directly reported excellent results [3,4,27]. Based on the same filtering technique, the proposed method improves the performance by remodeling the weight kernel, following the novel concept “two-level local adaptation”.
+
+In stereo matching, the cost volume C is built in the cost computation stage. It is a three dimensional array which stores the matching costs for all possible disparity candidates. Let Ci,d
+                         represent the cost value when pixel at i
+                        =(x,y) is assigned to disparity d. Given the cost volume C and the reference image I, for each disparity candidate d, we apply filtering to the dth cost slice Cd
+                        . The output of filtering can be expressed as a normalized weighted sum of the input cost slice
+                           
+                              (1)
+                              
+                                 
+                                    
+                                       C
+                                       
+                                          i
+                                          ,
+                                          d
+                                       
+                                       ′
+                                    
+                                    =
+                                    
+                                       
+                                          ∑
+                                          j
+                                       
+                                       
+                                    
+                                    
+                                       W
+                                       
+                                          i
+                                          ,
+                                          j
+                                       
+                                    
+                                    
+                                       I
+                                    
+                                    
+                                       C
+                                       
+                                          j
+                                          ,
+                                          d
+                                       
+                                    
+                                    ,
+                                 
+                              
+                           
+                        where C′ is the filtered cost volume. Wi.j
+                        (I) is the normalized weight of pixel pair (i,j), and depends on the guidance image I.
+
+By applying the guided image filtering [6], the weight kernel can be expressed by
+                           
+                              (2)
+                              
+                                 
+                                    
+                                       W
+                                       
+                                          i
+                                          ,
+                                          j
+                                       
+                                    
+                                    =
+                                    
+                                       1
+                                       
+                                          
+                                             
+                                                w
+                                             
+                                             2
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          ∑
+                                          
+                                             k
+                                             :
+                                             
+                                                i
+                                                j
+                                             
+                                             ∈
+                                             
+                                                w
+                                                k
+                                             
+                                          
+                                       
+                                       
+                                    
+                                    
+                                       
+                                          1
+                                          +
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         I
+                                                         i
+                                                      
+                                                      −
+                                                      
+                                                         μ
+                                                         k
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         I
+                                                         j
+                                                      
+                                                      −
+                                                      
+                                                         μ
+                                                         k
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   σ
+                                                   k
+                                                   2
+                                                
+                                                +
+                                                ϵ
+                                             
+                                          
+                                       
+                                    
+                                    .
+                                 
+                              
+                           
+                        
+                     
+
+Here, μk
+                         and σ
+                        
+                           k
+                        
+                        2 are the mean and variance of kernel window ωk
+                         in I. ϵ is a smooth parameter, which plays an equivalent role as similarity parameter in bilateral filtering. And |w| is the number of pixels in window w with fixed dimension r
+                        ×
+                        r.
+
+We remodel the weight kernel by varying the kernel size. Kernel windows are adjusted adaptively for local patches. When variable kernel size is applied, the remodeled weight kernel can be expressed by the following expression:
+                           
+                              (3)
+                              
+                                 
+                                    
+                                       W
+                                       
+                                          i
+                                          ,
+                                          j
+                                       
+                                    
+                                    =
+                                    
+                                       1
+                                       
+                                          
+                                             w
+                                             i
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          ∑
+                                          
+                                             k
+                                             ∈
+                                             
+                                                w
+                                                i
+                                             
+                                          
+                                       
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             1
+                                             
+                                                
+                                                   w
+                                                   k
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                ∑
+                                                
+                                                   j
+                                                   ∈
+                                                   
+                                                      w
+                                                      k
+                                                   
+                                                
+                                             
+                                             
+                                          
+                                          
+                                             
+                                                1
+                                                +
+                                                
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               I
+                                                               i
+                                                            
+                                                            −
+                                                            
+                                                               μ
+                                                               k
+                                                            
+                                                         
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               I
+                                                               j
+                                                            
+                                                            −
+                                                            
+                                                               μ
+                                                               k
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      
+                                                         σ
+                                                         k
+                                                         2
+                                                      
+                                                      +
+                                                      ϵ
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    ,
+                                 
+                              
+                           
+                        where |w
+                        
+                           i
+                        | and |w
+                        
+                           k
+                        | are the pixel numbers in kernel window wi
+                         and wk
+                         respectively. This is a general form of the original weight kernel expressed by Eq. (2), while Eq. (2) is a special case when all the kernel windows have the same size, i.e. |w
+                        
+                           i
+                        |=|w
+                        
+                           k
+                        |=|w|.
+
+With the adaptive kernel size introduced in Eq. (3), a hierarchy of two-level local adaptation is expected: the pixel level adaptation and the patch level adaptation. The pixel level adaptation is achieved as in existing ASW based algorithms: support weights assigned to the surrounding pixels are adaptive to the property of the local patch wherein the center pixel lies. The patch level adaptation ensures that the property of local patches are adaptive to the content of the guidance image.
+
+To figure out why this additional adaptation level is meaningful in guided filtering, it is necessary to explain the characteristics of the above weight function. The numerator (Ii
+                        
+                        −
+                        μk
+                        )(Ij
+                        
+                        −
+                        μk
+                        ) in Eq. (3) is positive if Ii
+                         and Ij
+                         are located on the same side of the average value μk
+                        , and is negative otherwise. The value of term 
+                           
+                              1
+                              +
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                I
+                                                i
+                                             
+                                             −
+                                             
+                                                μ
+                                                k
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                I
+                                                j
+                                             
+                                             −
+                                             
+                                                μ
+                                                k
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          σ
+                                          k
+                                          2
+                                       
+                                       +
+                                       ϵ
+                                    
+                                 
+                              
+                           
+                         will change accordingly, so that pixel pairs on the same side are assigned large support weights and those on the different sides will be suppressed. This property ensures that sharp edges can be preserved after filtering.
+
+The weight kernel heavily relies on two terms: mean (μ) and variance (σ2), which represent the statistical characteristics of a local patch. To improve the accuracy of the assigned support weights, it is meaningful to make the mean and variance represent the property of local patches more properly. As will be explained in Section 4.2 in detail, the support region (used in Eq. (3)) is now built on the skeleton stretching in four directions with four arms, which are truncated on the border of two different regions, while the original guided image filtering (expressed by Eq. (2)) utilizes square kernel windows with fixed size, resulting in much more outliers. To be more explicit, we can refer to Fig. 1
+                        . The patch-level adaptation makes the support weights assignment be performed in a more reasonable manner.
+
+One advantage of the linear model is, the weight function expressed by Eq. (3) does not need to be calculated explicitly. The output can be achieved from the definition of the filter. According to the definition of the linear model, the filtered output can be expressed by
+                           
+                              (4)
+                              
+                                 
+                                    
+                                       C
+                                       
+                                          i
+                                          ,
+                                          d
+                                       
+                                       ′
+                                    
+                                    =
+                                    
+                                       a
+                                       k
+                                       T
+                                    
+                                    
+                                       I
+                                       i
+                                    
+                                    +
+                                    
+                                       b
+                                       k
+                                    
+                                    ,
+                                    ∀
+                                    i
+                                    ∈
+                                    
+                                       w
+                                       k
+                                    
+                                    .
+                                 
+                              
+                           
+                        
+                     
+
+In this paper, we assume color guide images are used. Then, I
+                        
+                           i
+                         is a 3×1 vector containing color values. a
+                        
+                           k
+                         is a 3×1 coefficient vector, and bk
+                         is a scalar.
+
+The coefficients in each kernel window are determined by minimizing the difference between the input and output. According to the cost function defined in [6], the solution given by linear regression is
+                           
+                              (5)
+                              
+                                 
+                                    
+                                       a
+                                       k
+                                    
+                                    =
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   ∑
+                                                   k
+                                                
+                                                
+                                             
+                                             +
+                                             ϵ
+                                             U
+                                          
+                                       
+                                       
+                                          −
+                                          1
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             1
+                                             
+                                                
+                                                   w
+                                                   k
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                ∑
+                                                
+                                                   i
+                                                   ∈
+                                                   
+                                                      w
+                                                      k
+                                                   
+                                                
+                                             
+                                             
+                                          
+                                          
+                                             I
+                                             i
+                                          
+                                          
+                                             C
+                                             
+                                                i
+                                                ,
+                                                d
+                                             
+                                          
+                                          −
+                                          
+                                             μ
+                                             k
+                                          
+                                          
+                                             
+                                                
+                                                   C
+                                                   ¯
+                                                
+                                                
+                                                   k
+                                                   ,
+                                                   d
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    ,
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (6)
+                              
+                                 
+                                    
+                                       b
+                                       k
+                                    
+                                    =
+                                    
+                                       
+                                          C
+                                          ¯
+                                       
+                                       
+                                          k
+                                          ,
+                                          d
+                                       
+                                    
+                                    −
+                                    
+                                       a
+                                       k
+                                       T
+                                    
+                                    
+                                       μ
+                                       k
+                                    
+                                    ,
+                                 
+                              
+                           
+                        where μk
+                         is the mean, and ∑
+                        
+                           k
+                         is a 3×3 covariance matrix of I in kernel window ωk
+                         respectively. U is a 3×3 identity matrix. |w
+                        
+                           k
+                        | is the number of pixels in ωk
+                        , which varies according to the size of the kernel window. 
+                           
+                              
+                                 C
+                                 ¯
+                              
+                              
+                                 k
+                                 ,
+                                 d
+                              
+                           
+                         is the mean of the input cost slice Cd
+                         in ωk
+                        . ϵ is a regularization parameter preventing a
+                           k
+                         from being too large, which is explained in the previous subsection. By averaging all the output values generated by all the local kernel windows w
+                        
+                           k
+                        (k : i
+                        ∈
+                        w
+                        
+                           k
+                        ), we have
+                           
+                              (7)
+                              
+                                 
+                                    
+                                       C
+                                       
+                                          i
+                                          ,
+                                          d
+                                       
+                                       ′
+                                    
+                                    =
+                                    
+                                       
+                                          a
+                                          ¯
+                                       
+                                       i
+                                       T
+                                    
+                                    
+                                       I
+                                       i
+                                    
+                                    +
+                                    
+                                       
+                                          b
+                                          ¯
+                                       
+                                       i
+                                    
+                                    ,
+                                 
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    a
+                                    ¯
+                                 
+                                 i
+                                 T
+                              
+                              =
+                              
+                                 
+                                    1
+                                    
+                                       
+                                          w
+                                          k
+                                       
+                                    
+                                 
+                              
+                              
+                                 
+                                    ∑
+                                    
+                                       k
+                                       ∈
+                                       
+                                          w
+                                          i
+                                       
+                                    
+                                 
+                                 
+                              
+                              
+                                 a
+                                 k
+                                 T
+                              
+                           
+                         and 
+                           
+                              
+                                 
+                                    b
+                                    ¯
+                                 
+                                 i
+                              
+                              =
+                              
+                                 
+                                    1
+                                    
+                                       
+                                          w
+                                          k
+                                       
+                                    
+                                 
+                              
+                              
+                                 
+                                    ∑
+                                    
+                                       k
+                                       ∈
+                                       
+                                          w
+                                          i
+                                       
+                                    
+                                 
+                                 
+                              
+                              
+                                 b
+                                 k
+                              
+                           
+                        . The size of support window varies with the kernel size of the local patch wk
+                        .
+
+To obtain the filtered output, only Eqs. (5)–(7) should be calculated. By applying the integral image technique [13], these calculations can be carried out with a sequence of box filtering operations. In the proposed adaptive guided filtering, once the anchor points (the upper-left corner and bottom-right corner) are determined, integral image technique can be applied directly. This is an extended implementation of the original linear time algorithm [6]. The complexity of the guided image filtering is not only independent of the overall kernel size, but also independent of the size varying of the kernel window (rectangular kernel window with arbitrary size can be used). Let S be the resolution of the guidance image and R be the range of disparity candidates, then the complexity of the proposed adaptive guided filtering is O(S). During the cost-volume filtering process, adaptive guided filtering should be performed once for each disparity candidate. Thus the complexity of cost-volume filtering is O(RS). In the rest of this paper, we will use these symbols to analyze the complexity of each subalgorithm of our stereo matching method.
+
+In this section, we present the overall stereo matching algorithm. Stereo pairs are assumed to be pre-rectified. Five steps are carried out to generate the final disparity map. They are: cost computation, local kernel window adjusting, cost-volume filtering, winner-take-all (WTA) disparity selecting and post-processing. Occlusions are detected and handled explicitly. A novel post-processing method is proposed to process the texureless regions, which cannot be handled well in most local algorithms.
+
+Cost volume is built by computing per-pixel matching cost at given disparity values. We combine a truncated version of Birchfield and Tomasi's sampling-insensitive measure (BT) [28] and the truncated absolute difference on the gradient map. To be precise, the matching cost of pixel at i
+                        =(x,y), when being assigned disparity d, can be expressed by
+                           
+                              (8)
+                              
+                                 
+                                    
+                                       C
+                                       
+                                          i
+                                          ,
+                                          d
+                                       
+                                    
+                                    =
+                                    
+                                       
+                                          1
+                                          −
+                                          α
+                                       
+                                    
+                                    min
+                                    
+                                       
+                                          C
+                                          
+                                             i
+                                             ,
+                                             d
+                                          
+                                          BT
+                                       
+                                       
+                                          τ
+                                          1
+                                       
+                                    
+                                    +
+                                    α
+                                    min
+                                    
+                                       
+                                          C
+                                          
+                                             i
+                                             ,
+                                             d
+                                          
+                                          GD
+                                       
+                                       
+                                          τ
+                                          2
+                                       
+                                    
+                                    .
+                                 
+                              
+                           
+                        
+                     
+
+Here, parameter α balances two sub cost terms, while τ
+                        1 and τ
+                        2 are truncation values. CBT
+                         represents the cost of BT measure, and CGD
+                         is the absolute difference of the reference gradient image ∇I and the target gradient image ∇I′ shifted by d
+                        
+                           
+                              (9)
+                              
+                                 
+                                    
+                                       C
+                                       
+                                          i
+                                          ,
+                                          d
+                                       
+                                       GD
+                                    
+                                    =
+                                    
+                                       
+                                          ∇
+                                          
+                                             I
+                                             
+                                                i
+                                                −
+                                                d
+                                             
+                                             ′
+                                          
+                                          −
+                                          ∇
+                                          
+                                             I
+                                             i
+                                          
+                                       
+                                    
+                                    .
+                                 
+                              
+                           
+                        
+                     
+
+Computed cost volume is then filtered according to the filtering approach described in Section 3. Finally, per-pixel disparity Di
+                         is selected by simple WTA optimization
+                           
+                              (10)
+                              
+                                 
+                                    
+                                       D
+                                       i
+                                    
+                                    =
+                                    arg
+                                    
+                                       min
+                                       
+                                          d
+                                          ∈
+                                          R
+                                       
+                                    
+                                    
+                                       C
+                                       
+                                          i
+                                          ,
+                                          d
+                                       
+                                       ′
+                                    
+                                    ,
+                                 
+                              
+                           
+                        where C′ is the filtered cost volume, and R is the range of candidate disparity values. Both the cost computation step and WTA optimization have the complexity of O(RS).
+
+As expressed in Eq. (3), the mean (μk
+                        ) and variance (σ2) values represent the property of local patch wk
+                        . We adjust the sizes of kernel windows aiming at excluding pixels that do not belong to the same region. A moderate percent of external pixels are allowed. Since the edge conservation mainly relies on the adaptive guided filter, the window adjusting policy is not as strict as the one used in VSW based algorithms.
+
+In the proposed method, a support window is built upon the skeleton with four arms stretching in four directions. Four borders of the rectangular window are determined directly by the endpoints of four arms. This strategy ensures that most pixels in the local window are similar to the center pixel, and others are tolerable outliers. Arm stretching is performed in horizontal and vertical directions separately. Given a specific direction, we search the nearest pixel whose color difference exceeds the threshold τ
+                        
+                           a
+                         to the center pixel. The endpoint of the arm in this direction is determined by it. The color difference ∆Ci,j
+                         is computed by
+                           
+                              (11)
+                              
+                                 
+                                    Δ
+                                    
+                                       C
+                                       
+                                          i
+                                          ,
+                                          j
+                                       
+                                    
+                                    =
+                                    
+                                       min
+                                       
+                                          c
+                                          ∈
+                                          R
+                                          ,
+                                          G
+                                          ,
+                                          B
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             I
+                                             
+                                                i
+                                                ,
+                                                c
+                                             
+                                          
+                                          −
+                                          
+                                             I
+                                             
+                                                j
+                                                ,
+                                                c
+                                             
+                                          
+                                       
+                                    
+                                    ,
+                                    
+                                       L
+                                       min
+                                    
+                                    ≤
+                                    
+                                       
+                                          i
+                                          −
+                                          j
+                                       
+                                    
+                                    ≤
+                                    
+                                       L
+                                       max
+                                    
+                                    ,
+                                 
+                              
+                           
+                        where c is one of the R, G, B color channels. L
+                        min and L
+                        max are truncation values that prevent arm lengths being neither too short nor too long. Fig. 2
+                         illustrates the kernel window adjusting strategy near boundaries. In the worst case, this step needs 4L
+                        max
+                        S comparing operations. In most cases, only about half of this amount is required. So the complexity of the kernel window adjusting step is O(L
+                        max
+                        S).
+
+Despite the excellent performance of many cost-volume filtering approaches, occlusions must be handled in most local stereo matching algorithms. Many post-processing methods have been proposed in these years, especially for local algorithms. In [29] and [27], image segmentation was utilized to refine the disparity map. Rhemann et al. [3] proposed to use scanline background filling followed by bilateral weighted median filtering. It performs well in many stereo scenes. However, bilateral weighted median filtering is a local process, so it cannot handle large textureless regions even for high-quality stereo images, as shown in Fig. 3(c).
+
+In this paper, a novel post-processing algorithm is proposed to handle occlusions as well as refine textureless regions. In the rest of this section, we describe the proposed scheme in detail.
+
+For each pixel in the reference image, a simple tree graph is constructed as shown in Fig. 4(a). Each node represents a pixel and the root node is the target pixel that is to be processed. Tree branches that connect nodes are weighted by the similarity function
+                              
+                                 (12)
+                                 
+                                    
+                                       
+                                          T
+                                          
+                                             p
+                                             ,
+                                             q
+                                          
+                                       
+                                       =
+                                       exp
+                                       
+                                          
+                                             −
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            I
+                                                            p
+                                                         
+                                                         −
+                                                         
+                                                            I
+                                                            q
+                                                         
+                                                      
+                                                   
+                                                   2
+                                                
+                                                
+                                                   σ
+                                                   2
+                                                
+                                             
+                                          
+                                       
+                                       ,
+                                    
+                                 
+                              
+                           where Tp,q
+                            defines the transport capacity between two linking nodes p and q. I represents the pixel intensity, and σ adjusts the color similarity. Then, the reformulated costs are aggregated through the weighted branches from the peripheral nodes to the root.
+
+It is work-inefficient to carry out above operations for each pixel. The complexity of the straightforward implementation is O(RS
+                           2), which is unsatisfactory for many time-constrained applications. We further simplify the approach by utilizing a two-pass model, which is widely used in many fast approximations of 2-D filters. Some dynamic-programming optimization algorithms also utilize this model to enhance inter-scanline coherence [30,31]. Weighted propagation is first carried out in the horizontal direction in separate rows. Intermediate results are then propagated in the vertical direction in separate columns in the same way. As an example, Fig. 4(b) shows how to obtain the propagated cost for the pixel p during the horizontal weighted propagation. Propagation is carried out twice. One pass is carried out from left to right, and the other is performed from right to left. The propagated result is the sum of the intermediate results from both two passes.
+
+Occlusions are first detected by a left–right consistency check, which is also well known as cross-check. Pixels that fail to pass the consistency check are marked as occluded pixels.
+                              2
+                           
+                           
+                              2
+                              In fact, these pixels include both occluded pixels and mismatched pixels. We utilize a uniform post-processing method to refine these pixels, so they are not taken apart from each other.
+                            The cross-check may fail to detect many mismatched pixels, especially in low-texture regions. These pixels are further detected by peak-ratio measuring, which is expressed by
+                              
+                                 (13)
+                                 
+                                    
+                                       
+                                          M
+                                          p
+                                          PKR
+                                       
+                                       =
+                                       
+                                          
+                                             
+                                                
+                                                   C
+                                                   
+                                                      p
+                                                      ,
+                                                      1
+                                                   
+                                                
+                                                −
+                                                
+                                                   C
+                                                   
+                                                      p
+                                                      ,
+                                                      2
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             C
+                                             
+                                                p
+                                                ,
+                                                2
+                                             
+                                          
+                                       
+                                       ,
+                                    
+                                 
+                              
+                           where M
+                           
+                              p
+                           
+                           
+                              PKR
+                            is the calculated peak-ratio of pixel p. C
+                           
+                              p,1 is the best local minimum cost, and C
+                           
+                              p,2 is the second best local minimum cost. Pixels with peak-ratio below a specified threshold η
+                           
+                              PKR
+                            are marked as unstable pixels. The cost volume Cp
+                            is then reconstructed by the following formulation:
+                              
+                                 (14)
+                                 
+                                    
+                                       
+                                          C
+                                          
+                                             p
+                                             ,
+                                             d
+                                          
+                                          P
+                                       
+                                       =
+                                       
+                                          
+                                             
+                                                
+                                                   0
+                                                   ,
+                                                
+                                                
+                                                   p
+                                                   
+                                                   is
+                                                   
+                                                   occluded
+                                                   ,
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            C
+                                                            
+                                                               p
+                                                               ,
+                                                               d
+                                                            
+                                                            ′
+                                                         
+                                                         −
+                                                         
+                                                            C
+                                                            p
+                                                            best
+                                                         
+                                                      
+                                                   
+                                                   ,
+                                                
+                                                
+                                                   otherwise
+                                                   .
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+Here, C
+                           
+                              p,d
+                           
+                           
+                              P
+                            is the reformulated cost value of pixel p at disparity candidate d. C′ is the filtered cost volume, and C
+                           
+                              p
+                           
+                           
+                              best
+                            is the best cost value of pixel p after the WTA operation. Then, the reconstructed cost-volume is filtered (aggregated) by the proposed weighted propagation method, and a refined disparity map can be determined by performing another WTA operation. The final disparity map is obtained by replacing the disparity values of pixels that are marked occluded and unstable with the refined disparity values.
+
+Many stereo scenes contain large regions with low texture content. For post-processing methods relying only on local processing, it is hard to recover accurate disparity for these regions. Streak-line filling will also fail if mismatches are not correctly detected, especially when only cross-check is utilized. Fig. 3(c) presents the result when the post-processing method in [3] is used. A large mismatched area occurs in the textureless region indicated by the red rectangular. The proposed method overcomes this problem by performing weighted propagation over the whole image, and mismatched pixels in textureless regions are also detected using peak-ratio measuring. As shown in Fig. 3(d), disparity in foreground textureless region can be recovered accurately.
+
+During the two-pass weighted propagation step, two rounds of traverse are needed for each row and each column. It is carried out for each disparity candidate. Thus, the complexity of this step is O(4RS), and the complexity of the final WTA operation is again O(RS). Then, the complexity of post-processing is O(RS), which is extremely low.
+
+In the cost volume filtering step, every cost slice for possible disparity levels should be filtered by the adaptive guided filter. As pointed out in Section 3.2, by applying the integral image technique [13], the adaptive guided filtering can be carried out with a sequence of box filtering operations. The efficiency of the integral image operation will make a strong impact on the performance.
+
+Since the integral image formulation is a parallelizable task, the algorithm can be further accelerated by parallel computing devices such as GPU. In our implementation, NVIDIA's CUDA GPU computing environment is adopted. CUDA is a general-purpose parallel computing architecture and provides a C language programming interface, which makes it much more flexible and efficient.
+
+Straightforward parallel implementation will introduce a lot of redundant computing. In this paper, the parallel implementation of integral image is further divided into prefix-sums operations in separate rows (columns).
+
+Prefix-sums on an array of data, commonly known as scan, was first proposed as part of the APL programming language and popularized by Blelloch [32]. Given an array of data [a
+                     0,a
+                     1, …,a
+                     
+                        n
+                        −1] and a binary associative operator ⊕ with identity element i,
+                        3
+                     
+                     
+                        3
+                        Typical binary operators are plus, min, max, logical AND, logical OR etc.
+                      the output of exclusive scan operation is [i,a
+                     0,(a
+                     0
+                     ⊕
+                     a
+                     1), …,(a
+                     0
+                     ⊕
+                     a
+                     1
+                     ⊕
+                     a
+                     2 …⊕
+                     a
+                     
+                        n
+                        −2)], while an inclusive scan operator outputs [a
+                     0,(a
+                     0
+                     ⊕
+                     a
+                     1), …,(a
+                     0
+                     ⊕
+                     a
+                     1
+                     ⊕
+                     a
+                     2 …⊕
+                     a
+                     
+                        n
+                        −1)], which can be generated by adding the input array with the output of the exclusive scan.
+
+The proposed three-step parallel integral image formulation is based on the work-efficient parallel scan [33], which can further speed up the basic scan operation. Thanks to the thread hierarchy provided by CUDA, it is possible to design the algorithm using the multi-level parallel programming model. Rows of the input matrix are first decomposed into separate arrays, which are scanned in parallel in their respective allocation of thread blocks. This is the block level parallelism. Thread level parallelism is distributed in each thread block, where elements in each input array are processed by threads as described in [33]. After the first step, an partially accumulated matrix is obtained.
+
+Rather than performing scan on separate columns immediately, a parallel matrix transposition is added. After the matrix transposition, columns in the original matrix become rows in the transposed matrix. In the final step, parallel scan is performed on separate rows in the transposed matrix again. The only difference is that, the input array size and the number of thread blocks used are swapped. Fig. 5
+                      presents all these three steps.
+
+It seems that the complexity is increased by introducing an additional step. In fact, the proposed solution is much more efficient in CUDA implementation. The memory hierarchy defined by CUDA determines that it is much faster to fetch successive data from the global memory. In the global memory, multidimensional arrays are stored as one-dimensional arrays, row-by-row. Parallel data transmission along matrix columns should be avoided, since it will cause noncontinuous memory access and degrade the efficiency. A matrix transposing operation avoids such memory access at a low cost.
+
+@&#EXPERIMENTAL RESULTS@&#
+
+The performance of the proposed stereo matching algorithm is evaluated on the Middlebury stereo evaluation website [34]. Constant parameter settings are used for all four benchmark stereo pairs: Tsukuba, Venus, Teddy and Cones. We set parameters {α,τ
+                        1,τ
+                        2}={0.11,0.027,0.008} for cost computation, {τ
+                        
+                           a
+                        ,L
+                        min,L
+                        max}={0.018,4,10} for support window adjusting, ϵ=5×10−5 for cost-volume filtering and {σ,η
+                        
+                           PKR
+                        }={0.8,0.3} for post-processing. The evaluation result is summarized in Table 1
+                        . Fig. 6
+                         presents the disparity maps of these benchmark stereo pairs. Our method ranks 10th out of all 152 algorithms as of April 22th, 2013, and is the best local stereo matching method without iterative refinement. The average percent of bad pixel is 4.98% according to the evaluation website.
+
+Apart from benchmark images, we also tested the proposed method on both synthesized and real-world stereo pairs. Fig. 7
+                         presents the results of the proposed algorithm on two synthesized stereo pairs, tanks and temple [17]. High-quality disparity maps are generated, which is compared with the ground truth in the third column. It is clear that our algorithm performs well in both details, e.g. the gun barrels of the tanks, and large background regions.
+
+The results of some representative data on the Middlebury website are presented in Fig. 8
+                        . They are: Dolls, Cloth2, Baby3 and Wood1 [35,36]. These stereo pairs are captured by high-end cameras in a controlled lab environment. The obtained disparity maps are quite close to the ground truth. Data Dolls presents indoor scene with many stacking objects. The proposed method can calculate accurate disparity values for most parts of the scene, and the disparity of small toys on the floor is correctly recovered. For data Cloth2, a smooth disparity map is generated for continuous cloth with repeated texture. In Baby3, objects with curved surfaces are presented, e.g. ball and cylinder. Disparity of these objects are both accurate and smooth. The disparity of the background (map) is also obtained with few mismatches. In Wood1, the texture information is much weaker, nevertheless, our method can still generate accurate and smooth disparity map that is close to the ground truth. In fact, high-definition stereo sequences are much easier to be obtained, and accurate disparity maps can be generated by the proposed method.
+
+Our algorithm also performs well on low-definition stereo sequences, which is presented by Fig. 9
+                        . The test stereo sequences are captured by a set of low-resolution industrial video cameras without controlled lighting in our laboratory. No pre-processing, e.g. color correction, is performed after geometric rectification. Thus, it is challenging to process such stereo images. Observing the generated disparity map, sharp edges are well preserved. In textureless background like the green curtains, smooth disparity map is accurately recovered. It is proved that our algorithm is robust in such rigorous conditions. Although there are some mismatched regions on the static objects, they can be removed with proper temporal constraints, which is not discussed in this paper.
+
+To evaluate the performance of the proposed adaptive guided filtering, we make an additional comparison by implementing two other filtering kernels proposed in the literatures: the bilateral filtering kernel [5], and the original guided image filtering kernel [6]. Disparity maps without post-processing are compared on the Middlebury evaluation platform. We name these two methods as BF_Raw and GF_Raw. No symmetrical weight adjusting is deployed. Parameters used in this comparison are set as follows: for BF_Raw, a fixed kernel size 35×35 is used, and the spatial and color similarity terms are set to {γ
+                        
+                           s
+                        ,γ
+                        
+                           c
+                        }={17.5,0.2}. In our implementation, color values are handled by floating point numbers, so we adjust the color similarity term to gain a relatively good result. For GF_Raw, we set {ϵ,r}={0.012,9}, which was declared in [3]. The same cost computation method, which is explained in Section 4, is used to build the initial cost volume. The comparison results are reported in Table 2
+                        .
+
+The proposed method performs better than GF_Raw and BF_Raw in most terms, especially in nonoccluded and discontinuity regions, which is gained by kernel size adjusting near discontinuities. The average percent of bad pixels (APBP) is decreased by0.87% comparing with GF_Raw and 0.21% comparing with BF_Raw. In Table 2, BF_Raw outperforms the proposed method in four ‘all’ columns. Since only the ‘all’ column counts bad pixels in the occluded regions, the improvements in these columns are gained from the occluded regions. In fact, this reflects the worse performance of BF_Raw during the cost volume filtering. The kernel of bilateral filter shows a stronger diffusion effect than the proposed method. More pixels in occluded regions are given the right values after cost filtering. This also influences foreground boundaries, which are affected by the background [16]. It is reflected by the worse performance at ‘disc’. The proposed method overcomes this problem and performs better in ‘disc’, which is one of the most difficult regions to be handled in the stereo matching problem.
+
+We have also tested the robustness of the proposed method by varying the maximum allowable arm length L
+                        max. All other parameters are kept constant, and only L
+                        max is adjusted. Bad pixels in ‘all’ regions of four benchmark images are evaluated in this test. The test result is reported in Fig. 10
+                        . To investigate the overall performance, we also include the average percentage of bad pixels. The test result demonstrates that the proposed method is insensitive to the change of arm length truncation. Our approach performs steadily even if the arm length truncation is set to considerable large values. The size of variable kernel window is also influenced by the minimum allowable arm length L
+                        min. It should not be set to large values, since this will cover the detected edges and enlarge the kernel size at discontinuities, which runs counter to the principle of the proposed method: statistical characteristics of a local patch should be modeled with a proper patch size. Otherwise, the overall performance will be degraded. In fact, according to our experiments, L
+                        min can be set to a constant value (4 in this paper) in most cases.
+
+To compare with the performance of the original guided image filtering, we evaluated its performance by varying the overall kernel radius r. We assigned this value to the parameter L
+                        max to make such comparison. L
+                        max is the maximum allowed arm length, and the real kernel size in our approach is determined adaptively. Fig. 11
+                         shows the average percentage of bad pixels for all four benchmark images. The performance of guided image filtering deteriorates significantly when r
+                        >15, while the proposed filtering method shows its robustness in this condition. Though it seems unfair to compare the performance by directly assigning r to L
+                        max, we compared the overall performance. The experiment results also showed that the proposed filtering method outperforms the original guided image filtering when L
+                        max varies in a wide range, even when it is set to considerable large values.
+
+The complexity of the overall method can be computed by analyzing each subalgorithm, which is done at the end of previous subsections. The complexity of these five steps are: O(RS) for cost computation, O(L
+                        maxS) for kernel window adjusting, O(RS) for cost-volume filtering, O(RS) for WTA and O(RS) for post-processing. Thus, the complexity of the proposed stereo matching algorithm is O(RS), which only depends on the range of disparity candidates (textitR) and the resolution of the stereo pairs (S).
+
+Both CPU implementation and GPU implementation are deployed. The CPU implementation is written in C++ and uses the OpenCV core library for basic matrix operations. The runtime is measured on a desktop with Core Duo 3.16GHz CPU and 2GB 800MHz RAM, and no parallelism technique is utilized. All operations are carried out with floating point precision. The time consumed by the benchmark stereo pairs are: Tsukuba (2.12s), Venus (2.96s), Teddy (8.78s) and Cones (8.76s). The measured time is the average of 20 separate runs. The reported runtime is competitive among the state-of-the-art algorithms, which usually need several minutes. Compared to the original guided filtering, the proposed variable kernel version needs an additional kernel window adjusting step, which takes about 16ms for all stereo pairs when L
+                        max
+                        =10. Considering the precision of time measurement, the running time is negligible compared to the time consumed by the cost-volume filtering step (about 0.44s for Tsukuba, 1.47s for Venus, and 2.76s for Teddy and Cones).
+
+For the GPU implementation, the whole stereo matching algorithm is implemented on a NVIDIA Tesla C2050 GPU, whose computing capability is 2.3. The runtime is reported in Table 3
+                        . In comparison with the CPU time, the GPU code is about 28 times faster in average for benchmark stereo images. The GPU implementation can achieve over 30million disparity estimates per second (MDE/s). For typical stereo images with disparity range 59, the average runtime of the proposed method is about 300ms on our NVIDIA Tesla C2050 GPU.
+
+@&#CONCLUSIONS@&#
+
+In this paper, a new local stereo matching algorithm was introduced. The algorithm used the proposed adaptive guided filtering method, which is designed following the novel concept “two-level local adaptation”. A parallel algorithm was designed to speed up the basic computing element of adaptive guided filtering, which improved the efficiency of disparity estimation significantly. We also presented a novel post-processing algorithm based on weighted propagation, which could handle both occlusions and textureless regions efficiently. The experimental results demonstrated that the proposed local algorithm can generate state-of-the-art results while preserving linear complexity.
+
+@&#ACKNOWLEDGMENTS@&#
+
+This work was supported in part by the National Natural Science Foundation of China (Grant Nos. 60802013, 61072081, 61271338), the National High Technology Research and Development Program (863) of China (Grant No. 2012AA011505), the National Science and Technology Major Project of the Ministry of Science and Technology of China (Grant No. 2009ZX01033-001-007), the Key Science and Technology Innovation Team of Zhejiang Province, China (Grant No. 2009R50003), and the China Postdoctoral Science Foundation (Grant Nos. 20110491804, 2012T50545).
+
+@&#REFERENCES@&#
+

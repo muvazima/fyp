@@ -1,0 +1,2705 @@
+@&#MAIN-TITLE@&#Cooperative estimation of human motion and surfaces using multiview videos
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We capture human motion and recover the details of surfaces by image based system.
+
+
+                        
+                        
+                           
+                           Our method is efficient for motion tracking in a high dimensional search space.
+
+
+                        
+                        
+                           
+                           Local memorization guides to search for the optimal solution that avoids local minima.
+
+
+                        
+                        
+                           
+                           Self-intersection detection and voxel sampling reduce the computing time.
+
+
+                        
+                        
+                           
+                           A refinement method is presented to adjust captured motion and surfaces cooperatively.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Articulated human motion
+
+Annealed particle filter
+
+Surface estimation
+
+Model segmentation
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  We propose a human motion tracking method that not only captures the motion of the skeleton model but also generates a sequence of surfaces using images acquired by multiple synchronized cameras. Our method extracts articulated postures with 42 degrees of freedom through a sequence of visual hulls. We seek a globally optimized solution for likelihood using local memorization of the “fitness” of each body segment. Our method efficiently avoids problems of local minima by using a mean combination and an articulated combination of particles selected according to the weights of the different body segments. The surface is produced by deforming the template and the details are recovered by fitting the deformed surface to 2D silhouette rims. The extracted posture and estimated surface are cooperatively refined by registering the corresponding body segments. In our experiments, the mean error between the samples of the deformed reference model and the target is about 2cm and the mean matching difference between the images projected by the estimated surfaces and the original images is about 6%.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Kinematic human body motion capture and 3D spatiotemporal surface reconstruction, in particular for fast-motion clips, from synchronous multicamera or multiview video sequences, are challenging and fundamental problems for many applications, including 3D animation, movies and games, medical diagnostic motion analysis, and robot motion simulation. Unlike marker-based motion capture systems, which require people to wear skintight clothing with markers, the multiple images in a markerless system can be utilized to generate not only the human motion data, but also realistically complex surfaces, even if loose apparel is worn.
+
+Markerless human motion tracking has been studied recently in the context of computer graphics and computer vision. Features such as texture and depth information are generally utilized to calculate correspondences between neighboring frames. It is intuitive to represent human motion in terms of articulated skeleton models by angle rotations of joints and global translation. A sequence of surfaces can then be recovered easily via a skinning method such as linear blend skinning (LBS) or quaternion blend skinning (QBS).
+
+In this paper, we employ a volumetric model [1] for 3D pose estimation that is generated directly from multiview images. There are typically about 80,000 voxels for each model, of which about 5% are chosen for motion tracking to reduce the computational cost. The segmented volumetric model of the previous frame is assigned 42 degrees of freedom (DOFs) as a reference volumetric model. It is deformed to discover the corresponding segments in the target model and, simultaneously, to label it for local-matching calculations. A segmented template surface with an underlying skeleton of the first frame is used for surface reconstruction while the articulated posture is extracted.
+
+Our method captures the motion of the skeleton model and estimates the 3D surface in a temporal sequence by revealing the correspondences between a presegmented volumetric model and the current frame. The detail in the final surface is recovered using the estimated motion data and silhouette constraints. The contributions of this paper can be summarized as follows:
+                        
+                           •
+                           The template mesh is decomposed into 15 body parts for skin attachment estimation and visual hull segmentation; then, the human motion data can be calculated by revealing the correspondences between a segmented volumetric model and that in the current frame. Our approach is also efficient even when there is no texture information.
+
+Aiming to avoid the problem of local minima, we propose a global optimization approach to track human motion. Although global optimization approaches can avoid the local-misalignment problem, it is usually time-consuming and still hard to obtain an optimal solution for tracking, in particular in a high-dimensional search space. Therefore, we propose a modified particle filter method for faster convergence by memorizing the mean squared distance between the samples in the reference and in the current frame for each body segment, and combining them to produce new particles to track the posture of the target. A sampling method for voxel selection is provided to reduce the computational cost, while ensuring that the selected voxels are spread across all the human segments. In addition, a self-collision detection method is utilized to search for real particles in the tracking process.
+
+It is reasonable to generate the surface in terms of the previous one, as it will provide a good approximation to the current frame. However, this can cause an error accumulation problem, making it difficult to recover from an error originating in the previous surface. We reduce the accumulation error by simultaneously refining the posture and surface detail in terms of comparison with the posture and surface detail of the first frame using a registration method.
+
+This paper is organized as follows. Section 2 explains the related work in this field. Section 3 outlines our method for motion tracking and surface reconstruction. The segmentation methods for the template mesh surface and volumetric models are described in Section 4. The sampling method is described in Section 5. In Section 6, a motion tracking method that aims to generate particles with global optimization and local memorization is introduced. Section 7 introduces the Laplacian deformation framework used to recover the surface details, which forces the reverted 2D images obtained by the estimated surface to match the silhouettes. We propose a cooperative method of refining the captured human motion and generating the reference surface for the next frame in Section 8. We present our experimental results, summarize them and discuss future work in Sections 9 and 10.
+
+@&#RELATED WORK@&#
+
+In recent years, markerless motion capture has received increasing attention and has been used in commercial fields varying from surveillance to character animation and 3D movie display. The main approach has been to track a reference articulated model by deforming it to match with 2D images or 3D representations.
+
+The most intuitive idea for representing the human body is the use of a hierarchical skeleton with joints and bones that is a simplified and direct representation of the human body. Plänkers et al. [2] developed a method to reconstruct articulated deformable objects based on metaballs and estimated human motion using the Levenberg–Marquart least-squares estimator.
+
+A more sophisticated representation named “subject-specific model” was proposed in [3]. They proposed an automatic generation method for a subject-specific model using joint-center locations instead of simplified models. A training set is used to locate optimal joint positions in the model, and they generate appropriate human models utilizing a space of human shape database as described in [4]. An articulated iterative closest point method was proposed in [5] using visual hulls and subject-specific models. Unfortunately, it is still not easy to generate subject-specific models for different kinds of human bodies.
+
+In addition, time-varying meshes having time-varying topologies (vertices, faces, and colors) were utilized directly to extract kinematic chains, as described in [6–8]. They used principal component analysis to define the cutting ring to separate the human body into two parts. The motion extraction method was based on Reeb graphs, and a geodesic function from the ring. Lee et al. [7,8] used extracted skeleton chains to segment time-varying mesh surfaces based on skeleton models by distance calculations, and refined the 3D pose using the decomposition results.
+
+Vlasic et al. [9] presented a method that distorted a template skeleton to fit the visual hull by minimizing the energy function. The optimal solution would be obtained by solving the weighting function with four kinds of constraints. The author showed that the misalignment problem was likely to occur, and they would adjust the error manually by user intersection. Gall et al. [10] also extracted a 3D articulated model, which registered the contour and texture correspondences by solving the energy minimization problem in the first stage. A skeleton-based pose estimation method was proposed for locating the articulated model at the right place by matching texture correspondences obtained by the SIFT features. Then, they detected misaligned limbs and refined the pose by using a particle filter method to search for a global optimization in a lower dimensional search space. In brief, they obtained the motion by local optimization in the high dimensional search space and global refinement in a lower dimensional search space. In the surface estimation stage, both Vlasic and Gall used the skinning method to generate a surface model and then recovered the details by deforming it to match the silhouette rims.
+
+Deutscher et al. [11,12] constructed an articulated body simplified into cones with elliptical cross-sections and assigned 29 DOFs to the model. They estimated the 3D posture by deforming the model to match 2D images using a stochastic method for obtaining a globally optimized solution. They predicted the latent values of human motion based on the idea of annealing to guide the particles to the optimal solution of the likelihood, but their oversimplified models made it difficult to recover complicated shapes and motion precisely, in particular for the movement of hands and feet. In addition, this method was still prone to settling into local minima instead of achieving global optimization of the likelihood, because the result relied on the quality of the initial particles, as mentioned in [13], in particular for a high-dimensional configuration space.
+
+The method proposed in this paper also captures the 3D posture of the human body by using annealing to generate a new posture according to the survival rate of the particles, but we use the global optimization method directly without local adjustment. The surface of the 
+                        
+                           t
+                           -
+                           1
+                        
+                      frame is deformed by the LBS method and skin attachment is estimated based on surface labeling and heat equilibrium, as described in [14]. The detail of the target is recovered via silhouette constraints. To avoid the error accumulation problem, the reference surface for the next frame should only rely on an initial template model similar to that shown in Fig. 1
+                     (a). The rigid transformation between the template surface of the initial frame and the deformed mesh surface is obtained by solving the least-squares problem. In addition, the motion is refined by matching the segmented volumetric models using the iterative closest points (ICP) method [15] to refine the tracking results.
+
+@&#OVERVIEW@&#
+
+In our case, eight cameras were arranged around a human body to capture images. The entire framework is shown in Fig. 2
+                     .
+                        
+                           •
+                           
+                              Model generation. At first, we take images from different viewpoints at the same time, estimate silhouettes, and generate 3D models. We segment the images by background extraction and the GrowCut method. Then, the visual hulls are constructed by the volume intersection method. The template mesh model can be generated directly from multiple images by marching cubes [16] for the first frame or by using a scanner [10].
+
+
+                              Model segmentation. We proposed a method to extract the underlying skeleton and segment the mesh surface hierarchically. The segmented surface is used to generate a sequence of surfaces with the same vertices and faces. The corresponding visual hull is then split into 15 parts based on the labeled mesh model.
+
+
+                              Motion tracking. The third step is to capture human motion by comparing neighboring visual hulls. A sampling method is proposed for selecting maximally dispersed voxels to ensure that there are sufficient voxels for each body segment. A distance function with penalty coefficients is provided to measure the fitness of each body segment in the annealing process. The motion estimation method captures human motion effectively using 42 DOFs, even though only 5% of the voxels are used.
+
+
+                              Surface estimation. Finally, a sequence of coherent surfaces can be generated by deforming the template using the captured data. We recover the details of the reconstructed models with silhouette constraints. In addition, we refine the reconstructed surfaces and the captured motion data by cooperatively registering the template to the deformed surface. This refinement generates a more appropriate reference surface for the human motion tracking of the next frame.
+
+The challenge in human motion tracking is to avoid local misalignment while seeking global matching in a high-dimensional configuration space. A segmented model is provided to guide the “fitness” of each body segment. In addition, the reference model is labeled by identifying correspondences between the deformed segments, which enforces the local registration for each body segment.
+
+Before decomposing a mesh surface, the underlying skeleton needs to be estimated. Baran et al. [14] proposed a skeleton embedding method to specify the internal skeletal structure for the static character mesh. A template skeleton was given and the final embedding skeleton was calculated by deforming the template to match with the 3D surface. The joint positions of the skeleton inside the surface were calculated by minimizing an objective function. Tadano et al. [6] defined an objective function based on geodesic distance for the mesh surface to generate a Reeb graph [17,18]. A Reeb skeleton is then deformed to match with a structured one. Fig. 3
+                         shows comparisons between three skeleton extraction methods. We can see from Fig. 3(a) that Baran’s approach does not work well, as the bone of the right lower arm is not located in the correct position. The skeleton depicted in Fig. 3(b) was obtained by Tadano’s method. It does not match with the upper arms, and it seems to be harder to locate the positions of toe tips or fingertips.
+
+We modified Tadano’s method to obtain accurate positions of all joints by a hierarchical search approach. Our embedding skeleton is depicted in Fig. 3(c). The first step is also to segment the human body into two parts by the middle ring C, as discussed in [6], and define the center of C as the center of the berry joint. One of the toe tips is detected by searching for the farthest vertex by geodesic distance from C of the lower segment. Assuming that the lengths of bones or the ratios of body segments are known, we calculate the geodesic distances from the remaining vertices to the detected joint. The vertex belongs to the same body segment when the distance is not larger than the defined length. A new ring is obtained. The position of the following joint is the center of the ring. We can estimate the joints of the ankle, knee, and hip in this way. Then, the position of another toe tip is obtained by searching for the farthest vertex from the estimated toe tip. The corresponding ankle, knee, and hip joints can be computed in a similar way, after which we extract the positions of joints for the upper body segment. We search for the fingertip, wrist, elbow, and shoulder joints and label each corresponding segment in turn. The remaining parts are the head and middle body. The point at the top of the head is the farthest vertex in geodesic distance from C to the remaining vertices. Finally, we locate the root joint: the chest center.
+
+The vertices can be labeled hierarchically according to the geodesic distance from the corresponding joint. Our result is shown in Fig. 4
+                        . In addition, we can smooth the segmentation result for the adjacent body parts. We tend to assign a plane that passes through the joint of two articulated bones and splits them into two parts. One constraint is that the cutting plane should be orthogonal to the plane composed by the three joints of the two neighboring bones. Another constraint is that it should be located between neighboring bones. We consider two kinds of conditions. For the joints of the ankle, knee, wrist, and elbow, we required the plane to halve the intersection angle of the bones. For the joints of the shoulder and hip, the cutting plane is determined not only by the intersection angle but also by related bones. Fig. 5
+                         shows the experimental results of some mesh surfaces. The segmented results can be used for mesh deformation and motion tracking. It should be noted that our method also works for the self-collision surface.
+
+The visual hull can be labeled by searching for the nearest vertex in the corresponding mesh surface, but this is still time consuming. We use a fast search algorithm to obtain the correspondences between the points in the volumetric model and the mesh surface. At first, we integer the positions of the vertices of the mesh surface by replacing them with the nearest volume data. Then, the k-neighboring data for each volume are detected in turn until they meet with the surface data. This is faster than calculating the distances between the voxel and all the vertices in the surface. In addition, we represent the volume data by binary values to speed up the evaluation.
+
+We can deform the segmented volumetric model by the motion data and then decompose the next model by comparing with it. However, the rigid transformation is likely to separate the neighboring body segments, and noise exists in the models. Thus, we deform the labeled mesh surface by the skinning method instead of the visual hull and decompose the corresponding model again by using the deformed mesh surface.
+
+Human motion consists of rigid transformation and nonrigid movements, so that error exists, whereas decomposing the visual hull depends on the rigid movements only. A number of constraints for body segments is provided for refining the segmentation results. It is intuitive that the number of voxels in each of the body segments of the models in different frames should be close. We constrain the number of body segments to refine the segmentation. We first find out the positions of the hands, feet, and head, then relabel these parts according to the bone length and volume, then locate the bone joints and label the parent segments again. This is a simple and effective method for avoiding the error accumulation problem. It is always harder to locate the correct positions for the hands and feet, and we can see from Fig. 7(b) that parts of the hands appear to occupy parts of the forearms because of errors in motion estimation, and this will, in turn, cause misalignment problems in motion extraction. The error can be removed by refining the segmentation based on the skeleton and volume, as shown in Fig. 7(c). Note that the noise in front of the chest causes errors because the volume intersection method does not split the body part of the chest accurately. This type of noise can be removed during the surface reconstruction process using the template surface.
+
+In the process of human motion tracking, the segmented volumetric model is significant for the tracking result of the next frame. Intuitively, we can use the reconstructed surface to decompose the volumetric model, but the surface generated by the motion tracking data usually contains noise. If we do not remove the noise, the segmentation result will affect the results of motion tracking and worsen the segmentation for the next frame. Using the motion-based segmentation method will cause error accumulation. Fig. 6
+                        
+                         shows the segmentation results of a sequence of visual hulls. Although error still exists because of the noise of the volumetric model in the generation process, it provides efficient segmented body information for discovering body part correspondences.
+
+The voxel size is set to 1cm in this paper. There are usually more than 80,000 voxels in the visual hulls for an adult, and it would be time consuming to use all these data to estimate the 3D posture sequence during tracking. Therefore, it is essential to provide a method to select voxels from the model. One of the criteria for choosing samples is that the sampling scheme should cover all body segments. It is also important that the segments belonging to the hands, feet, and head should be sampled as much as possible. We propose a sampling method that maintains these features and by which the selected data are randomly spread around the human body segments, giving fewer than 4000 voxels in the sampling model. It is shown that the number of sampled models is less than 5% of the original volumetric models, and the distribution is close to the original.
+
+Our sampling method was an effective and simple sampling algorithm aimed at providing good and reduced features for motion tracking. Our sampling method was as follows. First, we obtained the bounding box of a volumetric model Z. It was required that this be the smallest cube that contained all the voxels in Z. The cube was further divided into eight subcubes. For any cube C, we defined the intersection S by selecting the voxels in 
+                        
+                           C
+                           ∩
+                           Z
+                        
+                      and the subset 
+                        
+                           
+                              
+                                 S
+                              
+                              
+                                 i
+                              
+                           
+                           =
+                           
+                              
+                                 C
+                              
+                              
+                                 i
+                              
+                           
+                           ∩
+                           Z
+                        
+                     , where 
+                        
+                           
+                              
+                                 C
+                              
+                              
+                                 i
+                              
+                           
+                        
+                      is the subcube of C. We calculated the ratio between the volumes of S and 
+                        
+                           
+                              
+                                 S
+                              
+                              
+                                 i
+                              
+                           
+                        
+                     . The process of subdivision was repeated until the ratio was greater than 75%. We selected about 5% of the voxels at the intersection of Z and the cube C when the division of the cube was stopped. The experimental results are shown in Fig. 8
+                     . It can be seen that the sampled voxels were well distributed over all segments.
+
+In this section, we describe our human motion tracking method, which searches for 3D optimal kinematic chains based on model segmentation in a high configuration space. The rotation angles of joints and the global translation were used to represent the rigid movements of a human body. A self-intersection detection method is proposed to remove the unnatural motion in the tracking process. Various particles were produced, seeking the optimum via global optimization and local matching.
+
+Twist representation and the exponential coordinates given in [19,20] were employed to express the rigid motion of the sample model. The motion of the model was then restricted to movement with articulated constraints in a high dimensional configuration space of 42 DOFs. The root joint
+                           1
+                           For interpretation of color in Figs. 9 and 17, the reader is referred to the web version of this article.
+                        
+                        
+                           1
+                        , the bigger red point shown in Fig. 9
+                        , has six DOFs of three global translations and three rotation angles. The smaller red points, the shoulder, elbow, hip, neck, and upper body joints, were given three DOFs. The wrist, knee, and ankle joints were assigned two DOFs each. We then defined the state of the sample by the vector 
+                           
+                              χ
+                              =
+                              (
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    1
+                                 
+                              
+                              ,
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    2
+                                 
+                              
+                              ,
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    3
+                                 
+                              
+                              ,
+                              
+                                 
+                                    θ
+                                 
+                                 
+                                    1
+                                 
+                              
+                              ,
+                              
+                                 
+                                    θ
+                                 
+                                 
+                                    2
+                                 
+                              
+                              ,
+                              …
+                              ,
+                              
+                                 
+                                    θ
+                                 
+                                 
+                                    39
+                                 
+                              
+                              )
+                           
+                        , which comprised the three parameters of the global translation and the 39 rotation angles. The global translation is expressed by the following 4
+                        
+                           
+                              ×
+                           
+                        
+                        4 matrix.
+                           
+                              (1)
+                              
+                                 
+                                    
+                                       T
+                                    
+                                    
+                                       G
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   0
+                                                
+                                                
+                                                   0
+                                                
+                                                
+                                                   0
+                                                
+                                                
+                                                   
+                                                      
+                                                         t
+                                                      
+                                                      
+                                                         1
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   0
+                                                
+                                                
+                                                   0
+                                                
+                                                
+                                                   0
+                                                
+                                                
+                                                   
+                                                      
+                                                         t
+                                                      
+                                                      
+                                                         2
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   0
+                                                
+                                                
+                                                   0
+                                                
+                                                
+                                                   0
+                                                
+                                                
+                                                   
+                                                      
+                                                         t
+                                                      
+                                                      
+                                                         3
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   0
+                                                
+                                                
+                                                   0
+                                                
+                                                
+                                                   0
+                                                
+                                                
+                                                   0
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 .
+                              
+                           
+                        
+                     
+
+For a joint angle 
+                           
+                              
+                                 
+                                    θ
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                        , the rotation axis 
+                           
+                              
+                                 
+                                    ω
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                         and corresponding joint 
+                           
+                              
+                                 
+                                    J
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                         are known from the skeleton model. The rotation 
+                           
+                              R
+                              (
+                              
+                                 
+                                    θ
+                                 
+                                 
+                                    i
+                                 
+                              
+                              )
+                           
+                         is given by:
+                           
+                              (2)
+                              
+                                 R
+                                 (
+                                 
+                                    
+                                       θ
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 )
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         e
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               
+                                                                  
+                                                                     ω
+                                                                  
+                                                                  
+                                                                     i
+                                                                  
+                                                               
+                                                            
+                                                            
+                                                               ^
+                                                            
+                                                         
+                                                         
+                                                            
+                                                               θ
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                                
+                                                   (
+                                                   I
+                                                   -
+                                                   
+                                                      
+                                                         e
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               
+                                                                  
+                                                                     ω
+                                                                  
+                                                                  
+                                                                     i
+                                                                  
+                                                               
+                                                            
+                                                            
+                                                               ^
+                                                            
+                                                         
+                                                         
+                                                            
+                                                               θ
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   )
+                                                   
+                                                      
+                                                         J
+                                                      
+                                                      
+                                                         i
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   0
+                                                
+                                                
+                                                   1
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    
+                                       
+                                          ω
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                 
+                                 
+                                    ^
+                                 
+                              
+                           
+                         is the matrix representation of 
+                           
+                              
+                                 
+                                    ω
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                         described in [21]. The rigid transformation of the body segment i is represented by:
+                           
+                              (3)
+                              
+                                 
+                                    
+                                       T
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          ∏
+                                       
+                                       
+                                          j
+                                          ∈
+                                          k
+                                          (
+                                          i
+                                          )
+                                       
+                                    
+                                 
+                                 R
+                                 (
+                                 
+                                    
+                                       θ
+                                    
+                                    
+                                       j
+                                    
+                                 
+                                 )
+                                 +
+                                 
+                                    
+                                       T
+                                    
+                                    
+                                       G
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where 
+                           
+                              k
+                              (
+                              i
+                              )
+                           
+                         is the order of the joint angles, which affects the transformation of the segment i. Then, the new position of the vertex 
+                           
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    j
+                                 
+                              
+                           
+                         that is associated with body segment i is 
+                           
+                              
+                                 
+                                    T
+                                 
+                                 
+                                    i
+                                 
+                              
+                              (
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    j
+                                 
+                              
+                              )
+                           
+                        . A corresponding deformed model of the sample can be constructed if the value of 
+                           
+                              χ
+                           
+                         is given.
+
+When a segmented mesh surface with an underlying skeleton model is given, any human motion can be represented by a configuration vector 
+                           
+                              χ
+                              =
+                              {
+                              t
+                              ;
+                              θ
+                              }
+                           
+                         that is comprised of the three parameters of the global translation t and the rotation angles for all human body segments. The human pose could be decided if the value of 
+                           
+                              χ
+                           
+                         is given. It is theoretically correct that any randomly chosen 
+                           
+                              χ
+                           
+                         corresponds to a 3D posture, but it may not always be a “real” human motion because self-intersection constraints are not taken into account. In this section, a human self-intersection detection method is presented to remove “bad” particles that have body segments in collision with each other.
+
+In our detection method, the sample template volumetric model and the skeleton were used to remove these undesired particles. We took the cylinder 
+                           
+                              
+                                 
+                                    C
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                         to represent each body segment i based on the skeleton. The self-intersection weight was defined as:
+                           
+                              (4)
+                              
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       self
+                                       -
+                                       inter
+                                    
+                                 
+                                 (
+                                 S
+                                 (
+                                 χ
+                                 )
+                                 )
+                                 =
+                                 
+                                    
+                                       
+                                          max
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                 
+                                 
+                                    
+                                       1
+                                    
+                                    
+                                       N
+                                    
+                                 
+                                 
+                                    
+                                       
+                                          ∑
+                                       
+                                       
+                                          
+                                             
+                                                vox
+                                             
+                                             
+                                                j
+                                             
+                                          
+                                          ∉
+                                          
+                                             
+                                                S
+                                             
+                                             
+                                                i
+                                             
+                                          
+                                          (
+                                          χ
+                                          )
+                                       
+                                    
+                                 
+                                 p
+                                 (
+                                 
+                                    
+                                       vox
+                                    
+                                    
+                                       j
+                                    
+                                 
+                                 ,
+                                 
+                                    
+                                       C
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 )
+                                 ,
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    S
+                                 
+                                 
+                                    i
+                                 
+                              
+                              (
+                              χ
+                              )
+                           
+                         is the body segment i and N is their number in the volumetric model 
+                           
+                              S
+                              (
+                              χ
+                              )
+                              ;
+                              
+                                 
+                                    vox
+                                 
+                                 
+                                    j
+                                 
+                              
+                           
+                         is the jth voxel in 
+                           
+                              S
+                              (
+                              χ
+                              )
+                           
+                        . The value of 
+                           
+                              p
+                              (
+                              
+                                 
+                                    vox
+                                 
+                                 
+                                    j
+                                 
+                              
+                              ,
+                              
+                                 
+                                    C
+                                 
+                                 
+                                    i
+                                 
+                              
+                              )
+                           
+                         is 1 if 
+                           
+                              
+                                 
+                                    vox
+                                 
+                                 
+                                    j
+                                 
+                              
+                           
+                         is in the cylinder 
+                           
+                              
+                                 
+                                    C
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                        , and 0 otherwise. In the process of producing new particles, we removed the self-intersecting ones according to 
+                           
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    self
+                                    -
+                                    inter
+                                 
+                              
+                           
+                        . If the maximum value of the weight factor was small enough, the particle was considered meaningful. In our experiments, we empirically assumed that if 
+                           
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    self
+                                    -
+                                    inter
+                                 
+                              
+                           
+                         is less than 0.08, the segment does not have self-intersection. Fig. 10
+                         shows a self-intersecting particle and the weight factors for the 15 body segments. We can see from the model that the lower legs (segment indices 8 and 9) intersect with each other and the respective weight factors are above the 0.08 threshold.
+
+The sampled voxels in the target volumetric model were labeled by searching for the index of the nearest one in the voxels of the template model. The reliability of the correspondences depends on the similarity between the two models. Here, a distance function was provided to measure the “fitness” of each body segment. The self-intersection problem has been avoided, as described in Section 6.2. The problem now is to find the body segment i of the reference model corresponding to the same part in the target, although they are not always close to each other. Therefore, we use a “punitive” method for calculating the distance. Assuming that 
+                           
+                              
+                                 
+                                    Vox
+                                 
+                                 
+                                    1
+                                 
+                              
+                           
+                         and 
+                           
+                              
+                                 
+                                    Vox
+                                 
+                                 
+                                    2
+                                 
+                              
+                           
+                         are the same body segment in the reference and target, respectively, 
+                           
+                              
+                                 
+                                    Vox
+                                 
+                                 
+                                    1
+                                 
+                              
+                              =
+                              {
+                              
+                                 
+                                    vox
+                                 
+                                 
+                                    1
+                                    ,
+                                    1
+                                 
+                              
+                              ,
+                              
+                                 
+                                    vox
+                                 
+                                 
+                                    1
+                                    ,
+                                    2
+                                 
+                              
+                              ,
+                              …
+                              ,
+                              
+                                 
+                                    vox
+                                 
+                                 
+                                    1
+                                    ,
+                                    
+                                       
+                                          n
+                                       
+                                       
+                                          1
+                                       
+                                    
+                                 
+                              
+                              }
+                           
+                         and 
+                           
+                              
+                                 
+                                    Vox
+                                 
+                                 
+                                    2
+                                 
+                              
+                              =
+                              {
+                              
+                                 
+                                    vox
+                                 
+                                 
+                                    2
+                                    ,
+                                    1
+                                 
+                              
+                              ,
+                              
+                                 
+                                    vox
+                                 
+                                 
+                                    2
+                                    ,
+                                    2
+                                 
+                              
+                              ,
+                              …
+                              ,
+                              
+                                 
+                                    vox
+                                 
+                                 
+                                    2
+                                    ,
+                                    
+                                       
+                                          n
+                                       
+                                       
+                                          2
+                                       
+                                    
+                                 
+                              
+                              }
+                           
+                         are the punitive values given in the function:
+                           
+                              (5)
+                              
+                                 Dst
+                                 (
+                                 
+                                    
+                                       Vox
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 ,
+                                 
+                                    
+                                       Vox
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 )
+                                 =
+                                 α
+                                 +
+                                 
+                                    
+                                       1
+                                    
+                                    
+                                       
+                                          
+                                             n
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                    
+                                 
+                                 
+                                    
+                                       
+                                          ∑
+                                       
+                                       
+                                          i
+                                          =
+                                          1
+                                       
+                                       
+                                          
+                                             
+                                                n
+                                             
+                                             
+                                                1
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 
+                                    
+                                       
+                                          min
+                                       
+                                       
+                                          j
+                                       
+                                    
+                                 
+                                 ‖
+                                 
+                                    
+                                       vox
+                                    
+                                    
+                                       1
+                                       ,
+                                       i
+                                    
+                                 
+                                 -
+                                 
+                                    
+                                       vox
+                                    
+                                    
+                                       2
+                                       ,
+                                       j
+                                    
+                                 
+                                 ‖
+                                 ,
+                              
+                           
+                        
+                        
+                           
+                              (6)
+                              
+                                 α
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         c
+                                                      
+                                                      
+                                                         1
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         n
+                                                      
+                                                      
+                                                         2
+                                                      
+                                                   
+                                                   =
+                                                   0
+                                                   ,
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      
+                                                         c
+                                                      
+                                                      
+                                                         2
+                                                      
+                                                   
+                                                   
+                                                      
+                                                         ‖
+                                                         
+                                                            
+                                                               n
+                                                            
+                                                            
+                                                               1
+                                                            
+                                                         
+                                                         -
+                                                         
+                                                            
+                                                               n
+                                                            
+                                                            
+                                                               2
+                                                            
+                                                         
+                                                         ‖
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               n
+                                                            
+                                                            
+                                                               1
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      
+                                                         1
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               n
+                                                            
+                                                            
+                                                               2
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            ∑
+                                                         
+                                                         
+                                                            j
+                                                            =
+                                                            1
+                                                         
+                                                         
+                                                            
+                                                               
+                                                                  n
+                                                               
+                                                               
+                                                                  2
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            min
+                                                         
+                                                         
+                                                            i
+                                                         
+                                                      
+                                                   
+                                                   ‖
+                                                   
+                                                      
+                                                         vox
+                                                      
+                                                      
+                                                         1
+                                                         ,
+                                                         i
+                                                      
+                                                   
+                                                   -
+                                                   
+                                                      
+                                                         vox
+                                                      
+                                                      
+                                                         2
+                                                         ,
+                                                         j
+                                                      
+                                                   
+                                                   ‖
+                                                
+                                                
+                                                   otherwise
+                                                   .
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+In our method, we chose 
+                           
+                              
+                                 
+                                    c
+                                 
+                                 
+                                    1
+                                 
+                              
+                              =
+                              30
+                              
+                              cm
+                           
+                         and 
+                           
+                              
+                                 
+                                    c
+                                 
+                                 
+                                    2
+                                 
+                              
+                              =
+                              2
+                              
+                              cm
+                           
+                         as “punishment” for incorrect labeling. Then, we deformed the samples of the reference model to match the target using the difference function 
+                           
+                              D
+                              (
+                              S
+                              (
+                              χ
+                              )
+                              ,
+                              
+                                 
+                                    S
+                                 
+                                 
+                                    ∗
+                                 
+                              
+                              )
+                           
+                         between the deformed samples 
+                           
+                              S
+                              (
+                              χ
+                              )
+                           
+                        , as shown in Fig. 11
+                        (c) and the target model 
+                           
+                              
+                                 
+                                    S
+                                 
+                                 
+                                    ∗
+                                 
+                              
+                           
+                        (a), where:
+                           
+                              (7)
+                              
+                                 D
+                                 (
+                                 S
+                                 (
+                                 χ
+                                 )
+                                 ,
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       ∗
+                                    
+                                 
+                                 )
+                                 =
+                                 
+                                    
+                                       1
+                                    
+                                    
+                                       15
+                                    
+                                 
+                                 
+                                    
+                                       
+                                          ∑
+                                       
+                                       
+                                          j
+                                          =
+                                          1
+                                       
+                                       
+                                          15
+                                       
+                                    
+                                 
+                                 Dst
+                                 (
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       j
+                                    
+                                 
+                                 (
+                                 χ
+                                 )
+                                 ,
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       j
+                                    
+                                    
+                                       ∗
+                                    
+                                 
+                                 )
+                                 ,
+                              
+                           
+                        and where 
+                           
+                              
+                                 
+                                    S
+                                 
+                                 
+                                    j
+                                 
+                              
+                              (
+                              χ
+                              )
+                           
+                         is the body segment j.
+
+A measurement of particles is obtained by the exponential function:
+                           
+                              (8)
+                              
+                                 w
+                                 (
+                                 X
+                                 ,
+                                 Z
+                                 )
+                                 =
+                                 
+                                    
+                                       e
+                                    
+                                    
+                                       -
+                                       D
+                                       (
+                                       S
+                                       (
+                                       χ
+                                       )
+                                       ,
+                                       
+                                          
+                                             S
+                                          
+                                          
+                                             ∗
+                                          
+                                       
+                                       )
+                                    
+                                 
+                                 .
+                              
+                           
+                        
+                     
+
+As discussed in Section 1, searching is easily trapped in local minima while tracking human motion in high-dimensional spaces, particularly for fast-moving clips. There are two main reasons for the local-minimum problem. One is that the solution relies on the domain of the possible postures and the distribution of the selected particles. The other is that tracking methods usually measure fitness according to the fitness of the whole human body, not by considering the fitness of all body segments. We propose an approach that not only uses annealing to generate new particles according to their distribution, but also combines some particles with local optimization for the various limbs, which effectively prevents the problems of local minima.
+
+We also adopted the idea of an annealing particle filter to guarantee that the particles converge to the global optimized solution of the likelihood according to the distribution of the weight function. The modification here is that we produce new particles by considering the local fitness. We used 
+                           
+                              Dst
+                              (
+                              
+                                 
+                                    S
+                                 
+                                 
+                                    j
+                                 
+                              
+                              (
+                              χ
+                              )
+                              ,
+                              
+                                 
+                                    S
+                                 
+                                 
+                                    j
+                                 
+                                 
+                                    ∗
+                                 
+                              
+                              )
+                           
+                         in Eq. (7) as the value of local fitness for each body segment, and produced new particles by the method described below.
+                           
+                              •
+                              
+                                 The mean combination. Assume that 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             
+                                                
+                                                   n
+                                                
+                                                
+                                                   j
+                                                
+                                             
+                                          
+                                       
+                                       =
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      t
+                                                   
+                                                   
+                                                      1
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            n
+                                                         
+                                                         
+                                                            j
+                                                         
+                                                      
+                                                   
+                                                
+                                                ,
+                                                
+                                                   
+                                                      t
+                                                   
+                                                   
+                                                      2
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            n
+                                                         
+                                                         
+                                                            j
+                                                         
+                                                      
+                                                   
+                                                
+                                                ,
+                                                
+                                                   
+                                                      t
+                                                   
+                                                   
+                                                      3
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            n
+                                                         
+                                                         
+                                                            j
+                                                         
+                                                      
+                                                   
+                                                
+                                                ,
+                                                
+                                                   
+                                                      θ
+                                                   
+                                                   
+                                                      1
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            n
+                                                         
+                                                         
+                                                            j
+                                                         
+                                                      
+                                                   
+                                                
+                                                ,
+                                                
+                                                   
+                                                      θ
+                                                   
+                                                   
+                                                      2
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            n
+                                                         
+                                                         
+                                                            j
+                                                         
+                                                      
+                                                   
+                                                
+                                                ,
+                                                …
+                                                ,
+                                                
+                                                   
+                                                      θ
+                                                   
+                                                   
+                                                      39
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            n
+                                                         
+                                                         
+                                                            j
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       ,
+                                       
+                                       j
+                                       =
+                                       1
+                                       ,
+                                       2
+                                       ,
+                                       …
+                                       ,
+                                       15
+                                    
+                                  matches well to body segment j, and we construct a new particle 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             
+                                                
+                                                   n
+                                                
+                                                
+                                                   j
+                                                
+                                             
+                                             ,
+                                             j
+                                          
+                                       
+                                    
+                                 , which keeps the values that affect the movement of segment j and sets others as 0. Define 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             ∗
+                                          
+                                       
+                                       =
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      t
+                                                   
+                                                   
+                                                      1
+                                                   
+                                                   
+                                                      ∗
+                                                   
+                                                
+                                                ,
+                                                
+                                                   
+                                                      t
+                                                   
+                                                   
+                                                      2
+                                                   
+                                                   
+                                                      ∗
+                                                   
+                                                
+                                                ,
+                                                
+                                                   
+                                                      t
+                                                   
+                                                   
+                                                      3
+                                                   
+                                                   
+                                                      ∗
+                                                   
+                                                
+                                                ,
+                                                
+                                                   
+                                                      θ
+                                                   
+                                                   
+                                                      1
+                                                   
+                                                   
+                                                      ∗
+                                                   
+                                                
+                                                ,
+                                                
+                                                   
+                                                      θ
+                                                   
+                                                   
+                                                      2
+                                                   
+                                                   
+                                                      ∗
+                                                   
+                                                
+                                                ,
+                                                …
+                                                ,
+                                                
+                                                   
+                                                      θ
+                                                   
+                                                   
+                                                      39
+                                                   
+                                                   
+                                                      ∗
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                  to be the summary of 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             
+                                                
+                                                   n
+                                                
+                                                
+                                                   j
+                                                
+                                             
+                                             ,
+                                             j
+                                          
+                                       
+                                    
+                                 , and we set 
+                                    
+                                       
+                                          
+                                             n
+                                          
+                                          
+                                             k
+                                          
+                                       
+                                       =
+                                       0
+                                       ,
+                                       
+                                       k
+                                       =
+                                       1
+                                       ,
+                                       2
+                                       ,
+                                       …
+                                       ,
+                                       42
+                                    
+                                 . If the kth data in 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             
+                                                
+                                                   n
+                                                
+                                                
+                                                   j
+                                                
+                                             
+                                          
+                                       
+                                       ,
+                                       
+                                       j
+                                    
+                                  is nonzero, 
+                                    
+                                       
+                                          
+                                             n
+                                          
+                                          
+                                             k
+                                          
+                                       
+                                       =
+                                       
+                                          
+                                             n
+                                          
+                                          
+                                             k
+                                          
+                                       
+                                       +
+                                       1
+                                    
+                                 , then the 15 selected particles are combined to form the new particle 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             new
+                                          
+                                       
+                                    
+                                 , where
+                                    
+                                       (9)
+                                       
+                                          
+                                             
+                                                χ
+                                             
+                                             
+                                                new
+                                             
+                                          
+                                          =
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         t
+                                                      
+                                                      
+                                                         1
+                                                      
+                                                      
+                                                         ∗
+                                                      
+                                                   
+                                                   /
+                                                   
+                                                      
+                                                         n
+                                                      
+                                                      
+                                                         1
+                                                      
+                                                   
+                                                   ,
+                                                   
+                                                      
+                                                         t
+                                                      
+                                                      
+                                                         2
+                                                      
+                                                      
+                                                         ∗
+                                                      
+                                                   
+                                                   /
+                                                   
+                                                      
+                                                         n
+                                                      
+                                                      
+                                                         2
+                                                      
+                                                   
+                                                   ,
+                                                   
+                                                      
+                                                         t
+                                                      
+                                                      
+                                                         3
+                                                      
+                                                      
+                                                         ∗
+                                                      
+                                                   
+                                                   /
+                                                   
+                                                      
+                                                         n
+                                                      
+                                                      
+                                                         3
+                                                      
+                                                   
+                                                   ,
+                                                   
+                                                      
+                                                         θ
+                                                      
+                                                      
+                                                         1
+                                                      
+                                                      
+                                                         ∗
+                                                      
+                                                   
+                                                   /
+                                                   
+                                                      
+                                                         n
+                                                      
+                                                      
+                                                         4
+                                                      
+                                                   
+                                                   ,
+                                                   
+                                                      
+                                                         θ
+                                                      
+                                                      
+                                                         2
+                                                      
+                                                      
+                                                         ∗
+                                                      
+                                                   
+                                                   /
+                                                   
+                                                      
+                                                         n
+                                                      
+                                                      
+                                                         5
+                                                      
+                                                   
+                                                   ,
+                                                   …
+                                                   ,
+                                                   
+                                                      
+                                                         θ
+                                                      
+                                                      
+                                                         39
+                                                      
+                                                      
+                                                         ∗
+                                                      
+                                                   
+                                                   /
+                                                   
+                                                      
+                                                         n
+                                                      
+                                                      
+                                                         42
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          .
+                                       
+                                    
+                                 
+                              
+
+
+                                 The articulated combination. Since 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             
+                                                
+                                                   n
+                                                
+                                                
+                                                   j
+                                                
+                                             
+                                          
+                                       
+                                    
+                                  captures the body segment j, the rigid transformation 
+                                    
+                                       
+                                          
+                                             T
+                                          
+                                          
+                                             j
+                                          
+                                          
+                                             ∗
+                                          
+                                       
+                                    
+                                  can be calculated. The mean combination method is simple and intuitive; however, the generated particle may not represent the part movement of all selected particles. An articulated combination method is proposed to ensure the constraint of 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             
+                                                
+                                                   n
+                                                
+                                                
+                                                   j
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 . We aim to obtain the configuration vector 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             new
+                                          
+                                       
+                                    
+                                  subject to:
+                                    
+                                       (10)
+                                       
+                                          
+                                             
+                                                
+                                                   min
+                                                
+                                                
+                                                   χ
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   ∑
+                                                
+                                                
+                                                   j
+                                                   =
+                                                   1
+                                                
+                                                
+                                                   15
+                                                
+                                             
+                                          
+                                          ‖
+                                          
+                                             
+                                                S
+                                             
+                                             
+                                                j
+                                             
+                                          
+                                          (
+                                          χ
+                                          )
+                                          -
+                                          
+                                             
+                                                S
+                                             
+                                             
+                                                j
+                                             
+                                          
+                                          (
+                                          
+                                             
+                                                χ
+                                             
+                                             
+                                                
+                                                   
+                                                      n
+                                                   
+                                                   
+                                                      j
+                                                   
+                                                
+                                             
+                                          
+                                          )
+                                          ‖
+                                          .
+                                       
+                                    
+                                 
+                              
+
+Obtaining the solution directly is difficult, and therefore we simplify the problem by taking only the joints into account. We can obtain a new skeleton in which the joint belongs to the body segment j based on the value of 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             
+                                                
+                                                   n
+                                                
+                                                
+                                                   j
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 , with 
+                                    
+                                       
+                                          
+                                             χ
+                                          
+                                          
+                                             ∗
+                                          
+                                       
+                                    
+                                  being obtained by approximating the skeleton.
+
+These two combination methods make searching for the correct position of each body part both fast and efficient. We deform the segmented template model to match to the target. We can see that the deformed model as shown in Fig. 11(c) was similar to (a), so that the posture of the target was calculated as shown in Fig. 11(b). The volumetric model shown in Fig. 11(d) was labeled using the motion tracking data and was used in the tracking for the next frame. In our experiments, it was found that setting a layer count of 
+                           
+                              M
+                              =
+                              10
+                           
+                         with a particle count of 
+                           
+                              N
+                              =
+                              100
+                           
+                         worked well for human motion tracking.
+
+
+                        Fig. 12
+                         depicts the mean error between the particles and the target for the final six layers, demonstrating the convergence of our tracking process. The disturbances in the first four layers, which are not shown in this plot, were very large. The global error became smoother and was good enough to represent the motion of the current frame. Fig. 15 shows the mean distances of the head, feet, hands, and the human body for three motion sequences. The results show the efficiency of the motion tracking algorithm, as the mean error was about 2cm on average.
+
+We compared our method with the mean combination to the annealed particle filter implemented by Balan et al. [22] on the walking sequence. The experimental results shown in Fig. 13
+                         were obtained using 100 particles and 5 layers of annealing. The mean 3D error was reduced from 57.23 to 40.5mm, and from Fig. 14
+                        
+                         we can learn that the postures captured by our method were more natural. We could see from the last two frames that the APF method could not locate the left arm accurately, while the number of frames was larger.
+
+Blend skinning methods such as linear blend skinning (LBS) are widely used in shape reconstruction when 3D skeleton poses are provided. We also used the method proposed by Baran et al. [14] to estimate the skin weights for the vertices of the surface.
+
+LBS, also known as skeleton subspace deformation, matrix palette skinning, vertex blending, enveloping, or simply skinning, as described in [23], is widely used because it is very fast and advantageous to graphics hardware. The relationship between the vertices and the underlying skeleton model is clear because the template surface has been segmented into 15 body parts. We replaced the heat contribution weight of the nearest bone to the vertex i belonging to body limb j by the nearest distance from the vertex to the nearest joint in the body segment j. The weight factors are given by solutions to the equation:
+                           
+                              (11)
+                              
+                                 (
+                                 H
+                                 -
+                                 L
+                                 )
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       Hp
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                         is a vector with 
+                           
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    j
+                                 
+                                 
+                                    i
+                                 
+                              
+                              =
+                              1
+                           
+                         if the vertex j is in the body segment i, and 
+                           
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    j
+                                 
+                                 
+                                    i
+                                 
+                              
+                              =
+                              0
+                           
+                         otherwise. H is a diagonal matrix with 
+                           
+                              
+                                 
+                                    H
+                                 
+                                 
+                                    jj
+                                 
+                              
+                              =
+                              1
+                              /
+                              d
+                              
+                                 
+                                    (
+                                    j
+                                    )
+                                 
+                                 
+                                    2
+                                 
+                              
+                           
+                        , where 
+                           
+                              d
+                              (
+                              j
+                              )
+                           
+                         is the nearest distance from the vertex j to the bone in the body segment i. The vertex j can be updated via:
+                           
+                              (12)
+                              
+                                 
+                                    
+                                       v
+                                    
+                                    
+                                       j
+                                    
+                                    
+                                       ∗
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          ∑
+                                       
+                                       
+                                          i
+                                          =
+                                          1
+                                       
+                                       
+                                          15
+                                       
+                                    
+                                 
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       j
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 
+                                    
+                                       T
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 
+                                    
+                                       v
+                                    
+                                    
+                                       j
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    T
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                         is a rigid transformation of the body segment i.
+
+Vlasic et al. [9] and Gall et al. [10] took a 3D model generated by skinning methods as their initial model and iteratively deformed it to recover the surface details. Our process of surface estimation is similar to theirs. In addition, we cooperatively refine the captured and estimated human motion by a registration method. We deform the template surface by LBS. The nonrigid transformation should also be taken into consideration to recover the surface details. Intuitively, we take the surface points from the visual hulls as constraints. Unfortunately, the visual hull can suffer from noise caused not only by the quality of the silhouette but also by the reconstruction method. We therefore deform the mesh surface to match the 2D silhouette instead of the visual hull. We project the reconstructed model onto the original images from different views, estimating the corresponding vertices by the silhouette constraints. Given a mesh model and the projection matrix of a camera, the corresponding image by projecting the model can be calculated. The silhouette rim is then obtained as shown in Fig. 16
+                        . We compared it with the silhouette of the target, searched for the corresponding pixels in the normal direction, calculated the corresponding 3D vertices, and refined the surface by solving the following least-squares optimization problem:
+                           
+                              (13)
+                              
+                                 
+                                    
+                                       argmin
+                                    
+                                    
+                                       v
+                                    
+                                 
+                                 {
+                                 ‖
+                                 LV
+                                 -
+                                 δ
+                                 ‖
+                                 +
+                                 α
+                                 ‖
+                                 
+                                    
+                                       C
+                                    
+                                    
+                                       sil
+                                    
+                                 
+                                 V
+                                 -
+                                 
+                                    
+                                       q
+                                    
+                                    
+                                       sil
+                                    
+                                 
+                                 ‖
+                                 ,
+                              
+                           
+                        where L is the Laplacian matrix and the 
+                           
+                              δ
+                           
+                         values are the differential values of the deformed mesh surface with vertices V. 
+                           
+                              
+                                 
+                                    C
+                                 
+                                 
+                                    sil
+                                 
+                              
+                           
+                         is a parameter matrix to express the constraints of the silhouette rims and 
+                           
+                              
+                                 
+                                    q
+                                 
+                                 
+                                    sil
+                                 
+                              
+                           
+                         are the corresponding confined points, as described in [9,10]. In our work, we iterated eight times to refine the mesh surface and set the parameter value 
+                           
+                              α
+                              =
+                              0.01
+                           
+                        . We used the deformed surface generated by LBS for 3D motion estimation in the next frame. The process was repeated, and the time-varying sequence with its underlying skeleton chains was able to be reconstructed.
+
+Ensuring the accuracy of the extracted human posture in each frame is difficult, for three reasons. First, noise exists in the visual hull that was reconstructed by the volume intersection method. Second, only 5% of the voxels in the visual hull were selected, meaning that the result of the extracted motion would depend on the quality of the selected sample models. Finally, the extracted motion will be utilized for the next frame. It is therefore important to remove the errors.
+
+The initial template surface G was used to estimate the reference surface 
+                        
+                           
+                              
+                                 G
+                              
+                              
+                                 t
+                              
+                           
+                        
+                      of the frame t to avoid the error accumulation problem. In the first step, we calculated the transformation between G and the deformed model 
+                        
+                           
+                              
+                                 G
+                              
+                              
+                                 t
+                              
+                              
+                                 ∗
+                              
+                           
+                        
+                     . For each body segment i, the problem is getting an optimal solution 
+                        
+                           
+                              
+                                 T
+                              
+                              
+                                 i
+                              
+                           
+                        
+                      between the template body segment 
+                        
+                           
+                              
+                                 G
+                              
+                              
+                                 i
+                              
+                           
+                        
+                      and 
+                        
+                           
+                              
+                                 G
+                              
+                              
+                                 t
+                              
+                              
+                                 *
+                                 i
+                              
+                           
+                        
+                      that minimizes the least-squares criterion in [24,25]:
+                        
+                           (14)
+                           
+                              
+                                 
+                                    
+                                       ∑
+                                    
+                                    
+                                       
+                                          
+                                             v
+                                          
+                                          
+                                             j
+                                          
+                                          
+                                             i
+                                          
+                                       
+                                       ∈
+                                       
+                                          
+                                             G
+                                          
+                                          
+                                             i
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             v
+                                          
+                                          
+                                             j
+                                          
+                                          
+                                             *
+                                             i
+                                          
+                                       
+                                       ∈
+                                       
+                                          
+                                             G
+                                          
+                                          
+                                             t
+                                          
+                                          
+                                             *
+                                             i
+                                          
+                                       
+                                    
+                                 
+                              
+                              ‖
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    j
+                                 
+                                 
+                                    *
+                                    i
+                                 
+                              
+                              -
+                              
+                                 
+                                    T
+                                 
+                                 
+                                    i
+                                 
+                              
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    j
+                                 
+                                 
+                                    i
+                                 
+                              
+                              
+                                 
+                                    ‖
+                                 
+                                 
+                                    2
+                                 
+                              
+                              .
+                           
+                        
+                     
+                  
+
+We took samples of the segmented volumetric model to match the target, using ICP registration to smooth the errors caused by the mesh deformation. The extracted transformation for each body limb provided a good initial estimation for the ICP algorithm. The template surface was deformed to generate the reference surface for the frame t using LBS. The cooperative estimation of human motion and surfaces could locate the human postures accurately and reduce the noise caused by model reconstruction and segmentation.
+
+@&#EXPERIMENTAL RESULTS@&#
+
+We used the public datasets provided by Gall et al. [10] and the NHK lab to carry out our experiments. The purpose of our approach was to extract 3D articulated kinematic chains directly from a time-varying volume sequence and generate a sequence of surfaces with the same topology.
+
+The distance of each body segment and the mean value of the whole body between the deformed reference model and the target was estimated via Eqs. (5) and (7). Fig. 17
+                      focuses on the distance of the head, hands, and feet because it is harder to track the pose for these body segments than for others. All distances were less than 3cm and the global error, shown by the thick red line***, was about 2cm. This result shows the high accuracy of our proposed method for ensuring global optimization and local matching.
+
+We projected the reconstructed surfaces to generate 2D images and compared them with the original images to recover the surface details. To minimize the error accumulation problem, the reference surface that represents the model of the previous frame was generated by deforming the initial template surface and was made to satisfy the silhouette constraints. As is shown in Fig. 18
+                     , the matching errors in the deformed reference surface were generally less than those of the deformed template. The reason was that one sequence was generated by deforming the template of the initial frame and the other was obtained by deforming the reference model of the previous frame, which is more similar to the current model. Despite this, the differences with the nonrigid deformation results were very small, and the better surface was selected as the reconstructed surface of the current frame. The mean matching error was about 6% after nonrigid deformation and did not have an obvious increase, as shown in Fig. 18. Fig. 19
+                      shows that our method can estimate human postures accurately and also recover surface details.
+
+@&#CONCLUSION@&#
+
+We propose a model-based motion tracking method to estimate the articulated motion properties for a multiview sequence. Postures that matched well for different human body segments were selected to produce a new particle that tracks the whole human body. In addition, one can get mesh sequences that are topologically coherent throughout the frames. Our tracking method works well for rapid human motion tracking in high-dimensional configuration spaces when compared with other methods such as the APF algorithm. We generated a deformed surface by using the motion capture data with an LBS method and then matched it against 2D silhouette constraints to produce a sequence of surfaces with the same topology. The posture and surface were then refined again via a registration method.
+
+Supplementary data associated with this article can be found, in the online version, at http://dx.doi.org/10.1016/j.cviu.2013.07.006.
+
+
+                     
+                        
+                           
+                              Marker-less human pose estimation and surface reconstruction using a segmented model.
+                           
+                           
+                        
+                     
+                  
+
+
+                     
+                        
+                           
+                        
+                     
+                  
+
+
+                     
+                        
+                           
+                        
+                     
+                  
+
+@&#REFERENCES@&#
+

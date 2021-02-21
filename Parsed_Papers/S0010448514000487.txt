@@ -1,0 +1,1796 @@
+@&#MAIN-TITLE@&#Octree-based, automatic building façade generation from LiDAR data
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           Introducing a new automatic method to detect boundary points of façade features.
+
+
+                        
+                        
+                           
+                           Boundary points were extracted based on a local score of data points.
+
+
+                        
+                        
+                           
+                           The algorithm automatically detected all openings and filled non-openings.
+
+
+                        
+                        
+                           
+                           This was achieved without any supplemental datasets or user knowledge.
+
+
+                        
+                        
+                           
+                           Building models were generally more accurate and faster than previous works.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Light Detection and Ranging (LiDAR)
+
+Terrestrial laser scanning
+
+Masonry buildings
+
+Geometric modelling
+
+Computational modelling
+
+Finite element modelling
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  This paper introduces a new, octree-based algorithm to assist in the automated conversion of laser scanning point cloud data into solid models appropriate for computational analysis. The focus of the work is for typical, urban, vernacular structures to assist in better damage prediction prior to tunnelling. The proposed FaçadeVoxel algorithm automatically detects boundaries of building façades and their openings. Next, it checks and automatically fills unintentional occlusions. The proposed method produced robust and efficient reconstructions of building models from various data densities. When compared to measured drawings, the reconstructed building models were in good agreement, with only 1% relative errors in overall dimensions and 3% errors in openings. In addition, the proposed algorithm was significantly faster than other automatic approaches without compromising accuracy.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Laser scanning, also known as Light Detection and Ranging (LiDAR), rapidly and accurately acquires topography of object surfaces and generates a set of data known as a point cloud. Laser scanning is gaining popularity in reverse engineering [1–3] and visualization  [4,5], yet exploiting the data for structural analysis remains a topic for development [6,7]. Developing automatic, robust, and efficient methods to reconstruct geometric building models for computational modelling has the potential to save money and time for projects needing city-scale modelling.
+
+Computational models are especially important in structural engineering, when assessing the status of existing buildings or any risks related to adjacent construction works. For tunnelling projects this can be highly problematic, because the measured drawings used as the basis for the solid models needed for Finite Element Modelling (FEM) are rarely available for the vast majority of structures that comprise the architectural fabric of many historic cities. Overcoming this data gap has traditionally required the manual surveying of each structure. Along a single tunnel route, this may include hundreds of structures for each kilometre of tunnelling, thereby making the financial and temporal requirements of such surveying cost-prohibitive. For example, a study of the area along the first kilometre of the upcoming Dublin Metro which included 449 buildings potentially at risk [8]; mostly small (2–4 storey), slender, load-bearing, rectangular masonry buildings with regular features and little, if any, ornamentation  [9]. Of the 449 buildings, measured drawings of some type (not necessarily complete) were available for only 27.6% of the buildings. These types of buildings are extremely vulnerable to tunnel-induced subsidence damage. During Dublin’s last tunnelling project, 1 in 8 buildings along the route were damaged at the cost of nearly € 5 million [10]. As such, the aims of this paper are to introduce an efficient and reliable approach for reconstructing the accurate geometry from LiDAR data of the load-bearing masonry buildings in a form that is compatible with FEM analysis. The proposed method can automatically eliminate unrealistic holes due to incomplete data or occlusions. The derived building models were benchmarked against a selection of other currently available solutions.
+
+Reconstruction often involves two main steps: segmentation and feature reconstruction. Segmentation extracts point clouds on planar features or of the façade objects in order to remove irrelevant points. The remaining portion of the point cloud is then used to reconstruct building models. In this paper, the segmentation step was conducted by employing software associated with the LiDAR scanner, whereas the building reconstruction with the necessary feature detection is the focus of the contribution herein.
+
+@&#RELATED WORKS@&#
+
+To date, several approaches have been developed to semi-automatically (e.g.  [11]) or automatically (e.g.  [12,13]) reconstruct the building geometry from LiDAR data (both airborne (ALS) and terrestrial (TLS)) and is sometimes combined with photogrammetry. The processes can be divided into either a model-driven or a data-driven approach. In the former, geometric primitives are initially described and building features are subsequently fitted based on point cloud data  [14,15]. This technique has limited applicability to complex buildings and results in relatively low geometric accuracy, thereby preventing easy usage in computational models. With the data-driven technique, building boundaries and features are generated directly from the point cloud [13,16,17]. Such methods can be applied to arbitrary shapes by fitting polygons or surfaces, as is often done in reconstructing building roofs [11,18]; however, this approach is more sensitive to noise from the input data than the model-driven approach. Additionally, there are some interactive tools to support users in the fast reconstruction of building models (e.g.  [19,20]).
+
+Amongst data-driven techniques, outlines of buildings and their features (e.g. doors and windows) are commonly generated from points lying on a dataset’s boundaries. To assist in this end, Pu and Vosselman [21] identified points on boundaries of building features as the end points of triangles in triangulated irregular networks (TINs), which have lengths exceeding a specified threshold. The boundary points of each feature are categorized into upper, lower, left and right groups, and a minimum-bounding rectangle was subsequently fitted to each feature. However, for the overall façade, an upper boundary line was generated from upper contour points by least-squares fitting, and the extreme vertices of the upper line were projected onto the ground plane to create two vertical boundary lines [11]. In related research, Boulaassal et al. [22] segmented points on planes by the RANdom Sample Consensus (RANSAC) algorithm and extracted contour boundary points of openings from a two-dimensional (2D) Delaunay triangulation similar to the work by Pu and Vosselman [11]. Those boundary points were transformed into parametric objects [22]. While these efforts successfully extracted sufficient boundary points to generate outline polygons of major features, they were highly sensitive to user-defined length thresholds and generated varying levels of geometric accuracy.
+
+The quality of fitting polygons to building features has been improved by combining various data sources. For example, Becker and Haala [12] generated boundary lines derived from a photograph using a Sobel filter algorithm and from TLS data using a half-disc approach. These boundary lines were then combined together to improve accuracy, and airborne LiDAR and 2D ground plans provide the building’s outlines. The façade details were improved by integrating boundary lines of openings into the building models [12,23]. In that approach, reconstructing building models involved integrating the boundary lines for cell decomposition. Opening details were subsequently refined by integrating image data. Similarly, Pu and Vosselman [11] used a Canny extractor for detecting feature edge from a photograph and Delaunay triangulation for extracting boundary points from the TLS data. The quality of the resulting models depended on the accuracy in mapping the boundary lines and the availability of such data. Despite these significant advances, a fully automatic approach for reconstructing highly detailed and accurate building models strictly from LiDAR data still remains a challenge  [1].
+
+Alternatively, volumetric methods have been employed to reconstruct object surfaces. In such approaches, the object’s surfaces can be determined from a signal function distance (i.e. the distance from an arbitrary point to its oriented target plane  [24]), an oriented-charge (e.g. the linear local distance field and a normal field between a point and its neighbours [25]), or a radial basis function, which approximates multivariable functions by a linear combination of terms based on a single, univariate function [26].
+
+Using an altogether different method, Curless and Levoy [27] employed a volumetric method to reconstruct surfaces from range images by applying a cumulative, weighted, signed distance function. This method successfully filled gaps from curving spaces but could not, however, generate surfaces for arbitrary objects and required a voxel size smaller than any anticipated feature for reliable detection. Consequently, the method was rather computationally expensive. To overcome this, Pulli et al. [28] used an octree representation in which the whole input data set became the initial cubical volume and was recursively subdivided into eight smaller cubes until reaching a predefined sub-division depth (Fig. 1
+                     ). In that approach, each voxel was classified as “inside”, “boundary”, or “outside” by comparing the voxel’s location to the sensor and range data. Consequently, the mesh of the object’s surface was created as the interface shared between outside cubes and other ones. Notably the octree has been used for the storage and compression of huge TLS point clouds  [29], as well as for visualization  [30].
+
+In another approach to compute an approximate distance field, Wang et al. [25] used oriented charges of each voxel of an octree representation, which was determined by points within neighbour voxels. However, surface features smaller than the smallest voxel size risked going undetected. To help overcome this, Dalmasso and Nerino [31] used compact radial support functions to estimate a surface based on a multi-scale, volumetric approach. Child voxels were classified as surface, inner, or outer voxels based strictly on the voxel’s position with respect to the sensor. Surface voxels were continuously divided until reaching a specific scale or until the voxel contained only one data point. In an example of using octree representations in building reconstruction, Wang et al.  [32] extracted sample points on boundary openings by examining adjoining voxels of a selected voxel along the vertical and horizontal directions. Data points within the selected voxel were classified as boundary points, if at least one adjoining voxel was empty. This method was successful in consistently detecting all openings but with relatively low geometric accuracy.
+
+In summary, although many approaches have been developed to generate geometric models of building façades from LiDAR data, most are of limited use for computational modelling because of one or more of the following: (1) their primary aim is visualization; (2) they are largely manual or semi-automatic, and thereby rely on user experience and/or supplemental data; (3) they need extensive user interaction before being fully useable within a commercial FEM package; or (4) they lack the geometric accuracy for meaningful engineering applications [33]. In structural analysis, allowable error depends on various factors including structure type, analysis purpose, and cost. While the geometry for a structural analysis model is traditionally presumed to be completely accurate, a 5% deviation is generally considered acceptable  [34]. Therefore, a viable automated approach must be able to discern object boundaries, locate major features of structural interest, and overcome localized data occlusions. The FaçadeVoxel (FV) algorithm is proposed by the authors for such a purpose and benchmarked herein for load-bearing, unreinforced masonry building façades.
+
+The FV algorithm has three main steps: (1) use of a hierarchical data structure to build a volumetric representation of an object by employing an octree representation; (2) extraction of boundary points from data within the voxels on boundaries of holes and the façade, along with the generation of their boundary lines; and (3) re-determination of voxel properties by comparing a voxel’s position to a set of derived boundary lines (Fig. 2
+                     ). The geometric building model generated from this algorithm is subsequently imported directly into a finite element package for structural analysis. To achieve this, both topology and geometry of the building model are converted into suitable data formats by a Boundary-Representation (B-Rep) [6].
+
+Sample points are defined as a set of points, 
+                           
+                              
+                                 
+                                    P
+                                 
+                              
+                              
+                                 i
+                              
+                           
+                           
+                           
+                              (
+                              i
+                              =
+                              1
+                              ,
+                              …
+                              ,
+                              n
+                              )
+                           
+                        , which have three coordinates, 
+                           
+                              (
+                              
+                                 
+                                    x
+                                 
+                                 
+                                    i
+                                 
+                              
+                              ,
+                              
+                                 
+                                    y
+                                 
+                                 
+                                    i
+                                 
+                              
+                              ,
+                              
+                                 
+                                    z
+                                 
+                                 
+                                    i
+                                 
+                              
+                              )
+                           
+                           
+                           ∈
+                           
+                              
+                                 R
+                              
+                              
+                                 3
+                              
+                           
+                         in Cartesian coordinate system. Step one uses an octree representation as a volume initially bounding all sample points of the façade, where scanned data are projected onto a vertical fitting plane (Fig. 2). As a terrestrial laser scanner cannot collect the façade thickness from a single scan of a building’s exterior, a preselected voxel dimension along the depth direction of the façade is currently assigned. Thus, the subsequent subdivision mechanism of the octree representation is analogous to that of a quadtree [35], where a voxel is subdivided into four smaller voxels along the length and height directions of the façade. However, as the long-term goal of this work is for three-dimensional (3D) building reconstruction and for its application to highly articulated buildings, as well as those of limited decoration, the structure is herein described as an octree, even though the current appearance is that of a quadtree.
+
+Each voxel is described by its geometry, address, and status. Geometry is defined by coordinates of each voxel’s two opposite corners; for example the corners 
+                           O
+                         and 
+                           
+                              
+                                 O
+                              
+                              
+                                 ′
+                              
+                           
+                         at the octree depth of 0 (Fig. 1). Similar to Tang [36], each node in the octree structure in the proposed algorithm has an address that reflects the relationship between adjacent nodes and the path from a current node to the root, which is represented by a string of integers (Fig. 1). Finally, the voxel’s status is determined based on a number of sample points contained within the considered voxel. The voxel is classified as “full”, if the voxel contains at least one sample point. All others are classified as “empty”.
+
+Selecting an appropriate termination criterion of an octree is not a trivial task for automatic building reconstruction. Previously, several approaches have been employed. Ayala et al. [37] selected termination based on a minimal voxel size, while Pulli et al. [28] used a predefined maximum tree depth, and Wang et al. [25] adopted a maximum threshold of sample points contained within a voxel. In the proposed FV algorithm, the minimum voxel size is considered as the termination condition for recursively sub-dividing the octree representation, where the shortest side (either horizontal or vertical) of the voxel is less than half of the expected minimum opening size. The criterion is based on an assumption that the inside of an opening is represented either by an empty voxel or by a cluster of empty voxels. In the example presented in Fig. 3
+                        , when a voxel’s dimension is defined as greater than half of the minimum opening size of 0.4 m [38], no empty voxels appear, thereby incorrectly implying the presence of no openings (Fig. 3(b)). By applying the criterion, four empty voxels appear, thereby clearly indicating a potential opening (Fig. 3(c)). Thus, based on these premises, the required octree depth along the 
+                           x
+                        - and
+                           y
+                        -directions can be expressed as Eqs. (1) and (2).
+                           
+                              
+                                 (1)
+                                 
+                                    
+                                       
+                                          depth
+                                       
+                                       
+                                          x
+                                       
+                                    
+                                    =
+                                    
+                                       [
+                                       
+                                          
+                                             log
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                   x
+                                                
+                                                
+                                                   
+                                                      max
+                                                   
+                                                
+                                             
+                                             −
+                                             
+                                                
+                                                   x
+                                                
+                                                
+                                                   
+                                                      min
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             MinVoxelSize
+                                          
+                                       
+                                       ]
+                                    
+                                 
+                              
+                              
+                                 (2)
+                                 
+                                    
+                                       
+                                          depth
+                                       
+                                       
+                                          y
+                                       
+                                    
+                                    =
+                                    
+                                       [
+                                       
+                                          
+                                             log
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                   y
+                                                
+                                                
+                                                   
+                                                      max
+                                                   
+                                                
+                                             
+                                             −
+                                             
+                                                
+                                                   y
+                                                
+                                                
+                                                   
+                                                      min
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             MinVoxelSize
+                                          
+                                       
+                                       ]
+                                    
+                                 
+                              
+                           
+                         where 
+                           
+                              
+                                 x
+                              
+                              
+                                 max
+                              
+                           
+                           ,
+                           
+                              
+                                 x
+                              
+                              
+                                 min
+                              
+                           
+                           ,
+                           
+                              
+                                 y
+                              
+                              
+                                 max
+                              
+                           
+                           ,
+                           
+                              
+                                 y
+                              
+                              
+                                 min
+                              
+                           
+                         are the minimum and maximum coordinates of the sample input points. The term MinVoxelSize is set equal to half of the smallest façade feature expected to be detected, which in this case is a window; the sign [] means that the value is rounded up to the nearest integer. In these equations, 
+                           
+                              (
+                              
+                                 
+                                    x
+                                 
+                                 
+                                    max
+                                 
+                              
+                              −
+                              
+                                 
+                                    x
+                                 
+                                 
+                                    min
+                                 
+                              
+                              )
+                           
+                         and 
+                           
+                              (
+                              
+                                 
+                                    y
+                                 
+                                 
+                                    max
+                                 
+                              
+                              −
+                              
+                                 
+                                    y
+                                 
+                                 
+                                    min
+                                 
+                              
+                              )
+                           
+                         are, respectively, the length and height of the bounding box. The maximum octree depth is defined as being equal to the smaller value of 
+                           
+                              
+                                 depth
+                              
+                              
+                                 x
+                              
+                           
+                         or 
+                           
+                              
+                                 depth
+                              
+                              
+                                 y
+                              
+                           
+                        .
+
+Glass or highly reflective materials tend not to return a LiDAR signal. Thus, it was hypothesized that boundary points on openings could be extracted from data points within the point cloud that lie on the perimeter of any empty voxel and that boundary points of the building are on the outer perimeter of the given dataset. Specific boundary point detection strategies are presented below.
+
+The portion of the FV algorithm for detecting boundary points of realistic openings is comprised of three subparts: (1) extract candidate points, (2) determine boundary points and (3) remove unreal openings (Fig. 2). For extracting candidate points (step 2.1a), from point clouds (Fig. 4
+                           (a)), the voxelization model was generated, and then the full voxels along the entire perimeter of the hole that was represented by an empty voxel cluster are detected by a flood-filling technique  [39] (Fig. 4(b)). The sample points within these full voxels on the proximity boundaries of openings are identified as candidate points. However, if only a few candidate points lie on the voxel’s surfaces (for example see the dashed black line segments representing the surfaces projected onto a 2D plane in Fig. 4(b)), boundary points may be missed. To overcome this problem, other full voxels adjoining the full voxels on the opening’s boundaries are added to the set of full voxels containing candidate points (dark grey rectangles in Fig. 4(b)). The candidate points are then segregated from the set of full voxels (Fig. 4(c)).
+
+After a set of the candidate points are determined, in step 2.2a, boundary points are extracted one-by-one (result shown in Fig. 4(d)). In this process, the centre of the empty voxel group (which is the average of the centres of all voxels in the group) is considered as its rotational centre, called 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                           . From the candidate points, the closest point to 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                            in the Euclidean metric is defined as the initial reference point, 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                            (Fig. 5
+                           (a)). A point in the neighbouring points 
+                              
+                                 {
+                                 
+                                    
+                                       
+                                          P
+                                       
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 }
+                              
+                            of the reference point 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                            is the target point, if this point has the smallest score resulting from combining the angle at 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                            between two vectors 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                            and 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    2
+                                    i
+                                 
+                              
+                            and the perimeter of the triangle 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    2
+                                    i
+                                 
+                              
+                            (Fig. 5(b)) as accomplished through comparing other points in the neighbourhood. Details of searching boundary points are described below.
+
+To determine a target point, the neighbouring points of the reference point, 
+                              
+                                 
+                                    
+                                       P
+                                    
+                                 
+                                 
+                                    1
+                                 
+                              
+                            were extracted from the full voxels around the hole (Fig. 4(b)) by a k-nearest neighbour (kNN) technique  [40]. The vector 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                            rotates about the point 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                            to search the boundary points around the hole. Thus, only sample points within the neighbouring points lying on a hemisphere (the grey area with filled points-Fig. 5(b)), which called the sub-candidate points 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    2
+                                    i
+                                 
+                              
+                              
+                              ∈
+                              
+                                 {
+                                 
+                                    
+                                       
+                                          P
+                                       
+                                    
+                                    
+                                       
+                                          2
+                                       
+                                    
+                                 
+                                 }
+                              
+                           , were investigated (as expressed by Eq. (3)). As the target point was determined from the sub-candidate points of the reference point, the searching process required at least 3 points, thereby making 3 triangles 
+                              
+                                 (
+                                 
+                                    
+                                       P
+                                    
+                                    
+                                       0
+                                    
+                                 
+                                 
+                                    
+                                       P
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 
+                                    
+                                       P
+                                    
+                                    
+                                       2
+                                       i
+                                    
+                                 
+                                 )
+                              
+                           . This implies that with an arbitrary location of 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                            and a uniform regular distribution within the point cloud the neighbourhood size should be 8 kNNs. However, as uniform distribution cannot be assured due to variations in the environment, the quantity of neighbouring points for 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                            was experimentally chosen as 10 points (Fig. 5(a)).
+                              
+                                 (3)
+                                 
+                                    
+                                       
+                                          
+                                             C
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                   P
+                                                
+                                             
+                                             
+                                                2
+                                             
+                                          
+                                       
+                                    
+                                    =
+                                    
+                                       {
+                                       
+                                          
+                                             
+                                                P
+                                             
+                                          
+                                          
+                                             
+                                                2
+                                             
+                                          
+                                       
+                                       ∈
+                                       
+                                          P
+                                       
+                                       |
+                                       
+                                          
+                                             
+                                                P
+                                             
+                                          
+                                          
+                                             
+                                                2
+                                             
+                                          
+                                       
+                                       ∈
+                                       
+                                       a hemisphere defined by
+                                       
+                                       
+                                          
+                                             P
+                                          
+                                          
+                                             0
+                                          
+                                       
+                                       
+                                          
+                                             P
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                       }
+                                    
+                                 
+                              
+                            where 
+                              
+                                 P
+                              
+                            is the neighbourhood of the reference point, 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                           .
+
+The boundary score for the angle 
+                              ∠
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                            and a triangle perimeter of each triangle are given as Eqs. (4) and (5): 
+                              
+                                 
+                                    (4)
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             ∠
+                                             
+                                                
+                                                   
+                                                      P
+                                                   
+                                                
+                                                
+                                                   1
+                                                
+                                             
+                                          
+                                       
+                                       =
+                                       
+                                          
+                                             ∠
+                                             
+                                                
+                                                   
+                                                      P
+                                                   
+                                                
+                                                
+                                                   1
+                                                
+                                             
+                                          
+                                          
+                                             max
+                                             
+                                                (
+                                                ∠
+                                                
+                                                   
+                                                      
+                                                         P
+                                                      
+                                                   
+                                                   
+                                                      1
+                                                   
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 
+                                    (5)
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             Δ
+                                             
+                                                (
+                                                
+                                                   
+                                                      
+                                                         P
+                                                      
+                                                   
+                                                   
+                                                      2
+                                                   
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       =
+                                       
+                                          
+                                             Δ
+                                             
+                                                (
+                                                
+                                                   
+                                                      
+                                                         P
+                                                      
+                                                   
+                                                   
+                                                      2
+                                                   
+                                                
+                                                )
+                                             
+                                          
+                                          
+                                             max
+                                             
+                                                (
+                                                Δ
+                                                
+                                                   (
+                                                   
+                                                      
+                                                         
+                                                            P
+                                                         
+                                                      
+                                                      
+                                                         2
+                                                      
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                            where 
+                              ∠
+                              
+                                 
+                                    
+                                       P
+                                    
+                                 
+                                 
+                                    
+                                       1
+                                    
+                                 
+                              
+                            is the angle at 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                            made by the two vectors 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                            and 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    2
+                                    i
+                                 
+                              
+                           , and 
+                              
+                                 Δ
+                              
+                              
+                                 (
+                                 
+                                    
+                                       
+                                          P
+                                       
+                                    
+                                    
+                                       
+                                          2
+                                       
+                                    
+                                 
+                                 )
+                              
+                            is the perimeter of the triangle 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    2
+                                    i
+                                 
+                              
+                           , where 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    2
+                                    i
+                                 
+                              
+                            is the point in the sub-candidate points, 
+                              
+                                 {
+                                 
+                                    
+                                       
+                                          P
+                                       
+                                    
+                                    
+                                       
+                                          2
+                                       
+                                    
+                                 
+                                 }
+                              
+                            (Fig. 5(b)).
+
+To increase the robustness of determining the boundary points, these boundary scores are combined into a weighted sum using Eq. (6): 
+                              
+                                 (6)
+                                 
+                                    
+                                       
+                                          ∏
+                                       
+                                       
+                                          
+                                             (
+                                             
+                                                
+                                                   P
+                                                
+                                                
+                                                   2
+                                                
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                    =
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          ∠
+                                       
+                                    
+                                    
+                                       
+                                          ∏
+                                       
+                                       
+                                          ∠
+                                          
+                                             
+                                                P
+                                             
+                                             
+                                                1
+                                             
+                                          
+                                       
+                                    
+                                    +
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          Δ
+                                       
+                                    
+                                    
+                                       
+                                          ∏
+                                       
+                                       
+                                          Δ
+                                          
+                                             (
+                                             
+                                                
+                                                   P
+                                                
+                                                
+                                                   2
+                                                
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                            in which 
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    ∠
+                                 
+                              
+                            and 
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    Δ
+                                 
+                              
+                            are, respectively, the weights for a score of the angle at 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                            and the triangle perimeter, where 
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    ∠
+                                 
+                              
+                              +
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    Δ
+                                 
+                              
+                              =
+                              1
+                           . In the proposed algorithm, a uniform weighting was selected as the default value distribution. Once the target point is determined, it is assigned as the reference point for the next iterative detection cycle, and the process continues, until the cumulative angle 
+                              ∠
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                            equals 360°.
+
+Additionally, to eliminate unrealistic openings due to missing data or occlusions (step 2.3a), equivalent dimensions of openings are computed from boundary points of each building feature using a histogram. Employing the proposed approach outlined by Truong-Hong et al. [6], the pre-extracted boundary points of each opening are analysed by histograms along the 
+                              x
+                           - and 
+                              y
+                           -coordinates. For a window, the boundary points are visible as the two histogram peaks along the 
+                              x
+                           - and 
+                              y
+                           -directions corresponding to the vertical and horizontal boundary lines, respectively (Fig. 6
+                           ). However, for ground floor doors and floor-to-ceiling plate glass windows, only one peak (along the histogram’s 
+                              y
+                           -direction) appears. Subsequently, the equivalent dimensions of the opening can be calculated according to Eqs. (7) and (8).
+                              
+                                 
+                                    (7)
+                                    
+                                       
+                                          
+                                             H
+                                          
+                                          
+                                             o
+                                          
+                                       
+                                       =
+                                       
+                                          |
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                   
+                                                   
+                                                      i
+                                                      =
+                                                      1
+                                                   
+                                                   
+                                                      n
+                                                   
+                                                
+                                                
+                                                   
+                                                      y
+                                                   
+                                                   
+                                                      i
+                                                   
+                                                   
+                                                      u
+                                                      p
+                                                   
+                                                
+                                             
+                                             
+                                                n
+                                             
+                                          
+                                          −
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                   
+                                                   
+                                                      j
+                                                      =
+                                                      1
+                                                   
+                                                   
+                                                      m
+                                                   
+                                                
+                                                
+                                                   
+                                                      y
+                                                   
+                                                   
+                                                      j
+                                                   
+                                                   
+                                                      down
+                                                   
+                                                
+                                             
+                                             
+                                                m
+                                             
+                                          
+                                          |
+                                       
+                                    
+                                 
+                                 
+                                    (8)
+                                    
+                                       
+                                          
+                                             L
+                                          
+                                          
+                                             o
+                                          
+                                       
+                                       =
+                                       
+                                          |
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                   
+                                                   
+                                                      i
+                                                      =
+                                                      1
+                                                   
+                                                   
+                                                      l
+                                                   
+                                                
+                                                
+                                                   
+                                                      x
+                                                   
+                                                   
+                                                      i
+                                                   
+                                                   
+                                                      l
+                                                      e
+                                                      f
+                                                      t
+                                                   
+                                                
+                                             
+                                             
+                                                l
+                                             
+                                          
+                                          −
+                                          
+                                             
+                                                
+                                                   
+                                                      ∑
+                                                   
+                                                   
+                                                      j
+                                                      =
+                                                      1
+                                                   
+                                                   
+                                                      k
+                                                   
+                                                
+                                                
+                                                   
+                                                      x
+                                                   
+                                                   
+                                                      j
+                                                   
+                                                   
+                                                      right
+                                                   
+                                                
+                                             
+                                             
+                                                k
+                                             
+                                          
+                                          |
+                                       
+                                    
+                                 
+                              
+                            where 
+                              n
+                            and 
+                              m
+                           , and 
+                              k
+                            and 
+                              l
+                            are, respectively, the number of boundary points belonging to two peaks (“up” and “down”) along the 
+                              y
+                           -histogram, and to two peaks (“left” and “right”) along the
+                              x
+                           -histogram. Notably, for a hole along the ground surface, the down peak is the smallest column in the 
+                              y
+                           -histogram, with respect to
+                              y
+                           -coordinate boundary points.
+
+Finally, the holes are considered real openings (e.g. doors or windows), if their characteristics satisfy those of common openings in building façades involving minimum lengths and widths equal or greater than 0.4 m [6,7,12,21] and a height-to-length ratio between 0.25 and 5.0  [38,41], as per the function 
+                              f
+                              
+                                 (
+                                 
+                                    
+                                       H
+                                    
+                                    
+                                       o
+                                    
+                                 
+                                 ,
+                                 
+                                    
+                                       L
+                                    
+                                    
+                                       o
+                                    
+                                 
+                                 ,
+                                 
+                                    
+                                       H
+                                    
+                                    
+                                       o
+                                    
+                                 
+                                 /
+                                 
+                                    
+                                       L
+                                    
+                                    
+                                       o
+                                    
+                                 
+                                 )
+                              
+                           , where 
+                              
+                                 
+                                    H
+                                 
+                                 
+                                    o
+                                 
+                              
+                            and 
+                              
+                                 
+                                    L
+                                 
+                                 
+                                    o
+                                 
+                              
+                            are the height and length of the opening, respectively (Eq. (9)).
+                              
+                                 (9)
+                                 
+                                    f
+                                    
+                                       (
+                                       
+                                          
+                                             H
+                                          
+                                          
+                                             o
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             L
+                                          
+                                          
+                                             o
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             H
+                                          
+                                          
+                                             o
+                                          
+                                       
+                                       /
+                                       
+                                          
+                                             L
+                                          
+                                          
+                                             o
+                                          
+                                       
+                                       )
+                                    
+                                    =
+                                    
+                                       {
+                                       
+                                          
+                                             
+                                                if
+                                                
+                                                
+                                                   
+                                                      H
+                                                   
+                                                   
+                                                      o
+                                                   
+                                                
+                                                ≥
+                                                0.4
+                                                ;
+                                                
+                                                   
+                                                      L
+                                                   
+                                                   
+                                                      o
+                                                   
+                                                
+                                                ≥
+                                                0.4
+                                                ;
+                                                0.25
+                                                ≤
+                                                
+                                                   
+                                                      H
+                                                   
+                                                   
+                                                      o
+                                                   
+                                                
+                                                /
+                                                
+                                                   
+                                                      L
+                                                   
+                                                   
+                                                      o
+                                                   
+                                                
+                                                ≤
+                                                5.0
+                                                :
+                                                opening
+                                             
+                                          
+                                          
+                                             
+                                                Otherwise
+                                                :
+                                                non-opening .
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+Similar to boundary point extraction for openings, the façade boundary point detection process involves the following: extracting the candidate boundary points (Step 2.1b) and determining the target boundary points from the candidate points (Step 2.2b) (Fig. 2). As the boundary points of the façade are on the envelope of the input data (either a convex or concave hull) (Fig. 7
+                           (a)), the process initially extracts full voxels, either connected to the bounding box or those that are outermost along the vertical and horizontal grids (dark grey voxels in Fig. 7(b)). Subsequently, the sample points contained within full voxels are considered to be candidate points for the searching of boundary points (Fig. 7(c)). The results are shown in Fig. 7(d). Details of this process are provided below.
+
+Analogous to detecting boundary points of the openings, with the rotational centre, 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                           , is an average of all candidate sample points. The process starts with an initial reference point, 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                    ,
+                                 
+                              
+                            which is the closest point to the minimum 
+                              x
+                           -, 
+                              y
+                           -coordinates of the input data in the Euclidean metric. From the reference point 
+                              
+                                 (
+                                 
+                                    
+                                       P
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 )
+                              
+                           , the neighbouring points are determined by using kNN searching with 10 kNNs (Fig. 8
+                           (a)). However, only sample points in the neighbouring points lying on a hemisphere (as determined by the ray 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                           ) are considered for the searching of target points. These are shown as unfilled points in Fig. 8(b) and are called the sub-candidate points 
+                              
+                                 {
+                                 
+                                    
+                                       
+                                          P
+                                       
+                                    
+                                    
+                                       
+                                          2
+                                       
+                                    
+                                 
+                                 }
+                              
+                           . The point 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    2
+                                    i
+                                 
+                              
+                              
+                              ∈
+                              
+                                 {
+                                 
+                                    
+                                       
+                                          P
+                                       
+                                    
+                                    
+                                       
+                                          2
+                                       
+                                    
+                                 
+                                 }
+                              
+                            is the target point, if the angle 
+                              ∠
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                            of the triangle 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    2
+                                    i
+                                 
+                              
+                            is the greatest in a set of angles 
+                              ∠
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                            of triangles established by 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                           , 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    1
+                                 
+                              
+                           , and 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    2
+                                    i
+                                 
+                              
+                            (Fig. 8(b)). Next, the target point is assigned as the reference point for the next iterative detection, and the process is repeated, until the accumulated angle at 
+                              
+                                 
+                                    P
+                                 
+                                 
+                                    0
+                                 
+                              
+                            equals 360 degrees (Fig. 8(b)). The resulting detection is shown in Fig. 7(d).
+
+Since, an area of a convexhull of boundary points of each opening is always smaller than that of the façade, the group of the boundary points forming the largest area of the convexhull constitutes the façade’s boundary points. In the FV algorithm, boundary lines of a building façade and its openings, which are assumed to involve only vertical and horizontal lines (orthogonal to each other around boundaries and openings), are directly generated from boundary points detected in the previous sections (steps 2.2b and 2.3a). From those, the full voxels in the octree representation generated from the TLS data (Fig. 9
+                           (a)) that contained boundary points are extracted (dark grey rectangles in Fig. 9(b)).
+
+Next, the extracted full voxels of each building feature are divided into sub-clusters of full voxels corresponding to horizontal and vertical boundary lines by using a grid clustering technique. The voxels containing boundary points determined in a previous step are on the same horizontal or vertical grid to be extracted. From that the grid voxels are only considered in order to re-extract the boundary points possessed by these voxels for reconstructing boundary lines. However the boundary points in the grid must satisfy the following conditions: (1) the maximum distance between two boundary points in the grid is not less than the minimum opening size, and (2) the minimum distance between two adjacent boundary points belonging to adjoining full voxels is not greater than half of the opening size (herein 0.4 m is the adopted minimum opening size). As such, Fig. 10
+                           (a) illustrates the results of horizontal and vertical sub-clusters of full voxels for an opening. Finally, the boundary lines are determined from the boundary points within the full voxels of these voxel sub-clusters by using a least-squares method (Fig. 10(b)) [42]. Additionally, the boundary lines of each building feature are adjusted to ensure continuity by extending or trimming the boundary lines at their points of intersection (Fig. 9(c)).
+
+As only full voxels belonging to the solid wall are converted into the solid model for direct importation into FEM packages, voxel properties in the initial octree representation must be re-assessed. For that, a new voxelization model is generated by dividing the initial voxelization model by the boundary lines (Fig. 9(d)). The number of child voxels depends on the number of boundary lines intersecting the parent voxel. There are two child voxels, if one boundary line intersects the parent voxel, and four child voxels, if there are two intersections. However, no subdivision occurs, if no boundary lines intersect the voxel, or if the boundary lines are on the boundaries of the parent voxel.
+
+Subsequently, each voxel in the re-voxelization model is characterized by using the Flying Voxel method proposed by Truong-Hong et al. [6], in which voxels inside of openings or outside of the façade are labelled either as empty or as full. Fig. 9(e) shows the re-characterized voxels of the octree voxelization in Fig. 9(d). Subsequently, the full voxels in the octree nodes are stored in a neutral file (with the file extension .ANF), whereas the topology and geometry are described as a B-Rep scheme [6].
+
+In summary, the FV algorithm was designed as a novel approach to efficiently and accurately detect sample points on an object’s boundaries. In this, a sample point drawn from a voxel on an object’s boundaries can be declared as a boundary point, only if its score is higher than those of its neighbouring points. Therefore, the proposed approach does not trawl through all input data points to identify boundary points, as is done for the other fully automated, processes (e.g.  [6,7]). As such, the FV algorithm is proposed both to improve accuracy of the resulting building models, while significantly reducing the computational cost.
+
+To test the FV algorithm, three building façades in Dublin, Ireland were scanned with a terrestrial laser scanner. These buildings were selected for three reasons. Firstly, if the proposed algorithm cannot be shown to work reliably with relatively simple structures, there is no use trying them on more complicated ones; notably 2D façades have to date been preferable for use in structural analysis of masonry building rather than fully 3D ones. Secondly, this building type represents the vast majority of the architectural fabric of many urban centres. Thirdly, unlike most existing structures, independent measured drawings were readily available for these structures, which were used for ground truth verification.
+
+Point cloud data of the building façades were acquired by a Trimble GS200 unit [43]. The data collection processing was controlled by the affiliated propriety software RealWorks Survey Advanced (RWS) V6.3, which was installed on a laptop linked to the scanner [44]. Although the scanner can collect data across a wide range, typically two scanner positions were needed to acquire point clouds of each façade because of limitations caused by traffic, terrain, and footpath space. The maximum standoff distance was approximately 10 m for Building 1 (2 Anne St. South, Dublin City) and Building 2 (5 Anne St. South, Dublin City), and 30 m for Building 3 (2 Westmoreland St., Dublin city) (Figs. 11
+                        (a), 12
+                        (a) and 13
+                        (a)). The TLS data were acquired with a sampling step of 10 mm at a 100 m range for Buildings 1 and 2, and of 20 mm for Building 3. Additionally, in order to register the point clouds of each façade, there were three reference points defined for each scanner station. Geometries on the façade (e.g. corners of the windows or window ledges) were selected as the reference points, instead of using special targets or nails to mark the reference points. The reference regions were scanned with a sampling step of 2 mm at 100 m in Building 1 and 2, and with 10 mm sampling step at 100 m for Building 3. The acquired data included 
+                           x
+                        -, 
+                           y
+                        -, 
+                           z
+                        -coordinates, intensity, and RGB values. The intensity value varies according to the material surface reflectivity measured and the optical wavelength of the laser used; for more details of the data acquisition see Truong-Hong   [45].
+
+Pre-processing point clouds by the use of the RWS V6.3 involved two main steps: (1) merging the scans from the multiple scanner stations, and (2) removing all irrelevant data points. Point clouds from two scanner stations of each façade were manually merged by using reference points of both the source and target stations. A trial and error process was undertaken by selecting a pair of points from the source and target stations until the average error between a pair of data sets could be expressed in terms of a distance error less than 5 mm. As data from internal walls/objects or occluding elements (e.g. trees and buses) are often in different planes from the façade, those data points were removed subsequently using the in-built segmentation technique within the RWS V6.3 [44]. Details of the data pre-processing are fully available in Truong-Hong  [45]. Notably, processing time for this step done within the RWS V6.3 software was typically less than 5 min for each of the three data sets. Finally, in order to evaluate efficiency and robustness of the proposed algorithm and to validate reliability of reconstructed building models, four sampling densities data were tested for each building façade (Table 1
+                        ), in which NS00 was the point cloud data set obtained directly from the pre-processing step, and the other three data sets (NS20, NS50, NS75) were re-sampled from NS00 by using the random re-sampling data function built into the RWS V6.3 software [44].
+
+The proposed approach was implemented in MATLAB scripts [46], and experimental tests were run on a Dell Precision Workstation T5400 with a main system configurations as follows: Intel (R) Pentium (R) Xeon (8CPU) CPU speed 2 GHz with 24 GB RAM. Automatic generation of solid models for the three building façades are shown in Figs. 11–13 (each showing a distinct, sample data density).
+
+@&#RESULTS@&#
+
+The FV algorithm was successful in reconstructing the building façades and all openings, as well as automatically filling occlusion-based openings (Figs. 11–13). Auto-generated façade dimensions and opening areas were compared to CAD models obtained from on-site surveys in order to assess geometric accuracy of those building models (Table 2
+                        ). The algorithm slightly underestimated lengths and heights—generally less than 1.1% (<121 mm-B2S75) and 1.0% (<53 mm-B1NS00), respectively, (Fig. 14
+                        (a) and (b)). For Building 3, the relative errors of the length and height were only 0.6% (<117 mm-B3S75) and 0.7% (<116 mm-B3S75) (Fig. 14(a) and (b)). Additionally, the opening areas in the reconstructed models of Building 1 and 2 underestimated those apertures by 2.3% (<0.72 m2–B1NS00) and 4.8% (<1.67 m2–B2NS00) in terms of relative errors, respectively (Fig. 14(c)). The opposite trend was observed in Building 3, where the opening area in the reconstructed models was 3% greater (>2.91 m2–B3S75) (Fig. 14(c) and Table 2).
+
+@&#DISCUSSION@&#
+
+The boundary point detection approach proposed in the FV algorithm extracted sufficient boundary points to consistently reconstruct the three building façades and their actual openings (Figs. 11–13). The FV algorithm introduced a procedure to classify a hole as either a proper opening or an unrealistic hole due to missing or occluded data. The procedure succeeded in recognizing arbitrarily shaped holes (such as those produced by trees (Fig. 15
+                        (a)) and cars (Fig. 15(b))) and automatically removed them. Notably, segmentation also results in small holes.
+
+In the proposed algorithm, constrained conditions through a grid clustering technique are implemented to eliminate incorrect boundary points before generating boundary lines. The technique is based on the observation that voxels that possess incorrect boundary points lie on a different grid from voxels containing the correct boundary points. The proposed algorithm was evaluated against the use of an alpha shape with line fitting  [47]. For example, if the input data of Building 1 (2 Anne street South) contains several defects on the left boundary of the façade and lower and upper sides of the window in second storey, which as marked as circles (Fig. 16
+                        (a) and (b)). Obviously, boundary points from both FV algorithm and a comparative method contained unexpected boundary points (Fig. 16(a) and (b)) and the boundary lines were then generated based on the boundary points (Fig. 16(c) and (d)). Notably, a threshold radius (
+                           1
+                           /
+                           α
+                        ) of 75 mm implemented in the alpha shape method was selected experimentally to optimize output results.
+
+Clearly, the comparative method negatively impacted reconstructed boundary lines: the boundary lines at the left side of the façade and ones at lower and upper side of the window migrate from the actual boundaries (Fig. 16(d)). This problem does not occur in the FV algorithm (Fig. 16(c)). Furthermore, the relative error in the overall façade length of the comparative method is increased up to 1.88% (as compared to only 0.59% for the FV method (Table 3
+                        )). Additionally, the window dimensions from the FV method were also better than ones derived from the comparative method. Of which, the window length in the FV method generated relative errors of only 1.11% (the FV method) vs. 1.33% (the comparative method). For the window height, the difference in results was even more profound. The relative error for the FV method was 
+                           −
+                           7.97
+                           %
+                         vs. 
+                           −
+                           16.40
+                           %
+                         for the comparative method. In conclusion, the FV algorithm can eliminate incorrect boundary points during reconstructing boundary lines.
+
+The efficacy of the FV approach and its compatibility with computational modelling were benchmarked against the commercial program Kubit [19] and two automatic approaches developed by the authors (the FaçadeDelaunay (FD) algorithm [6] and the FaçadeAngle (FA)  [7]). The Kubit software allows users to use AutoCAD tools to create building models based on point clouds. The FD and FA approaches automatically reconstruct building, where the boundary points were extracted based on a length of triangle sides in triangulation mesh and an angle criterion, respectively. These algorithms are described elsewhere  [6,7].
+
+For evaluation, the S75 datasets with 175 pts/ m2 (Figs. 16(a), 17
+                        (a), and 18
+                        (a)) were selected to generate the building models to test robustness; denser datasets require longer acquisition times and are, thus, less economical.
+
+In Kubit, the building models were created within an AutoCAD program semi-automatically, by manually identifying boundaries of the building and its openings using various, in-built toolbox aids. For this, separate building photographs are needed to define openings realistically; see [33] for further details. The FD and FA algorithms are described previously elsewhere [6,7].
+
+With the Kubit program, realistic building models with smooth boundary lines were created rapidly (Figs. 16(b), 17(b), and 18(b)). While the resulting models were compatible for FEM importation, independent knowledge of the existing buildings’ façades (e.g. the number, size, and position of openings) was fully required. The other approaches did not need this information. Resulting building models of each approach are shown in Figs. 16(b)–(e), 17(b)–(e), 18(b)–(e). The reported dimensions were obtained by importing the solid models in AutoCAD. These dimensions were compared to ones from independently produced, on-site manual surveys (Figs. 16(f), 17(f), and 18(f)).
+
+In general, the FV algorithm reconstructed building models more accurately than the other approaches. The maximum relative errors of the overall dimensions (height and length) were 1.1% (a length of Building 2) for the FV algorithm, and 1.9% (a length of Building 2) for other automatic approaches and 
+                           −
+                           3.0
+                           %
+                         for the Kubit program (Fig. 19
+                        (a) and (b)). Furthermore, the relative error of opening areas in FV-based models were also smaller than other approaches, in which the maximum error was 3.3% in FV-based models, while it was 5.6% for other automatic approaches-based models and 7.2% in the Kubit-based ones. However, in Building 3, the relative error in the FV-based model was slightly higher than those in the other automatic-based models (
+                           −
+                           3.0
+                           %
+                         in FV-based model vs. 
+                           −
+                           2.9
+                           %
+                         in FA-based ones). That is because boundary points of the openings derived from the FV algorithm contained sample points that were slightly further from the actual boundaries of the opening. When working with lower density datasets, the accuracy of the openings can be improved by increasing the number of neighbouring points. For this model and this density the kNN was increased to 20, which was equal to that used in the FA algorithm.
+
+Other geometric discrepancies were checked in terms of the opening dimensions. In the two small buildings (Building 1 and 2), the average absolute errors of opening dimensions in the building models derived from the FV algorithm were generally smaller than those from the other three approaches, while an opposite trend was found in the larger building (Building 3) (Table 4
+                        ). As such, the best result from the FV algorithm was −4.6 mm(Std=116 mm), while ones from other automatic algorithms and commercial software were 7.5 mm (Std=121.5 mm) and 4.7 mm (Std=61.2 mm), respectively. However, in Building 3, the error with the FV-based model was slightly higher than ones from the automatic algorithms. So while the FV algorithm herein did not significantly improve the geometric accuracy of the building models, it did provide a major reduction in computational time, as is presented in Fig. 21.
+
+Using all of the datasets in Table 1, the FV algorithm proved clearly superior for datasets greater than 35.5k points, as was required for even the least dense version of the 19.36 m wide by 17.0 m high Building 3 (Fig. 20
+                        
+                        ). In very dense datasets such as those directly obtained from the laser scanner, the FV algorithm was consistently more than an order of magnitude faster and was up to 25 times faster for the 650.3k point dataset.
+
+@&#CONCLUSIONS AND FUTURE WORK@&#
+
+The FaçadeVoxel algorithm is proposed as a rapid and robust, fully-automated approach to detect boundary points of façade features for many urban structures that otherwise lack existing geometric documentation. This is done by examining only sample points in the vicinity of detected boundary features. Sample points within full voxels around a boundary feature are extracted and examined based on a local score. Subsequently, these boundary points are used to generate fitting boundary lines, and all voxels belonging to a solid portion of the wall are determined. Afterwards, the complete solid model of the building was stored in a neutral file as input for a commercial computational modelling programme. The algorithm consistently detected all openings for three sample buildings and also succeeded in automatically filling non-openings, even at data densities as low as 175 pts/m2. This was achieved without any supplemental datasets, user knowledge, or manual intervention. Furthermore, the resulting solid models were fully compatible with a common, commercial FEM package. When compared to two previous research-based approaches and a commercial program, building models based on the FV method were generally more accurate, and up to 25 times faster for datasets of up to 650.3k points.
+
+Like the three comparative approaches, the FV algorithm is currently limited to relatively simple 2D morphologies. A full 3D model can be obtained theoretically by segmentation and subsequent reassembly of individual exterior walls. Future work is planned in this direction. Additionally, further work is needed to address non-rectangular window openings.
+
+@&#ACKNOWLEDGEMENTS@&#
+
+This work was generously supported by Science Foundation Ireland Grant 05/PICA/I830 and the European Union Grant ERC StG 2012-307836-RETURN. Further thanks to Donal Lennon of UCD’s Earth Institute for his assistance with terrestrial data acquisition.
+
+@&#REFERENCES@&#
+

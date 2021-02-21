@@ -1,0 +1,683 @@
+@&#MAIN-TITLE@&#Just-in-time value specialization
+
+@&#HIGHLIGHTS@&#
+
+
+               
+                  
+                  
+                     
+                        
+                           
+                           Most of the JavaScript functions are called with same arguments.
+
+
+                        
+                        
+                           
+                           We specialize code that the JIT produces, given the arguments of functions.
+
+
+                        
+                        
+                           
+                           We have validated our approach in the industry-quality Firefox browser.
+
+
+                        
+                        
+                           
+                           We speed up programs by 5%, compared to original Firefox.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Just-in-time compilation
+
+JavaScript
+
+Speculation
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  JavaScript emerges today as one of the most important programming languages for the development of client-side web applications. Therefore, it is essential that browsers be able to execute JavaScript programs efficiently. However, the dynamic nature of this programming language makes it very challenging to achieve this much needed efficiency. In this paper we propose parameter-based value specialization as a way to improve the quality of the code produced by JIT engines. We have empirically observed that almost 60% of the JavaScript functions found in the world's 100 most popular websites are called only once, or are called with the same parameters. Capitalizing on this observation, we adapt a number of classic compiler optimizations to specialize code based on the runtime values of function's actual parameters. We have implemented the techniques proposed in this paper in IonMonkey, an industrial quality JavaScript JIT compiler developed at the Mozilla Foundation. Our experiments, run across three popular JavaScript benchmarks, SunSpider, V8 and Kraken, show that, in spite of its highly speculative nature, our optimization pays for itself. As an example, we have been able to speed up V8 by 4.83%, and to reduce the size of its generated native code by 18.84%.
+               
+            
+
+@&#INTRODUCTION@&#
+
+JavaScript is presently the most important programming language used in the development of client-side web applications [1]. If in the past only very simple programs would be written in this language, today the reality is different. JavaScript is ubiquitously employed in programs ranging from simple form validation routines to applications as complex as Google's Gmail. Furthermore, JavaScript is also used as the target intermediate representation of frameworks such as the Google Web Toolkit. Thus, it fills the role of an assembly language of the Internet. Given that every browser of notice has a way to run JavaScript programs, it is not surprising that industry and academia put considerable effort in the creation of efficient execution environments for this programming language.
+
+However, executing JavaScript programs efficiently is not an easy task. JavaScript is a very dynamic programming language: it is dynamically typed, it provides an eval function that loads and runs strings as code, and its programs tend to use the heap heavily. This dynamic nature makes it very difficult for a static compiler to predict how a JavaScript program will behave at runtime. In addition to these difficulties, JavaScript programs are usually distributed in source code format, to ensure portability across different computer architectures. Thus, compilation time generally has impact on the user experience. Today, the just-in-time compiler seems to be the tool of choice of engineers to face all these challenges.
+
+A just-in-time compiler either compiles a JavaScript function immediately before it is invoked, as Google's V8 does, or while it is being interpreted, as Mozilla's TraceMonkey did. The advent of the so-called Browser War between main software companies has boosted significantly the quality of these just-in-time compilers. In recent years we have seen the deployment of very efficient trace compilers [2–4] and type specializers for JavaScript [5]. New optimizations have been proposed to speed up JavaScript programs [6,7], and old techniques [8] have been reused in state-of-the-art browsers such as Google Chrome. Nevertheless, we believe that the landscape of current JIT techniques still offers room for improvement, and our opinion is that much can be done in terms of runtime value specialization.
+
+As we show in Section 2, we have observed empirically that almost 60% of all the JavaScript functions in popular websites are either called only once, or are always called with the same parameters. Similar numbers can be extended to typical benchmarks, such as V8, SunSpider and Kraken. Grounded by this observation, in this paper we propose to use the runtime values of the actual parameters of a function to specialize the code that we generate for it.
+                        1
+                     
+                     
+                        1
+                        This paper is an extended version of earlier work, published in the Symposium on Code Generation and Optimization (CGO) 2013 [9].
+                      In Section 3 we revisit a small collection of classic compiler optimizations under the light of the proposed approach. As we show in the rest of this paper, some of these optimizations, such as constant propagation and dead-code elimination, perform very well once the values of the parameters are known. This knowledge is an asset that no static compiler can use, and, to the best of our knowledge, no just-in-time compiler currently uses.
+
+We have implemented the ideas discussed in this paper in IonMonkey, a JavaScript JIT compiler that runs on top of the SpiderMonkey interpreter used in the Firefox browser. As we explain in Section 4, we have tested our implementation on three popular JavaScript benchmarks: V8, SunSpider and Kraken. We only specialize functions that are called with at most one different parameter set. If a function that we have specialized is invoked more than once with different parameters, then we discard its generated machine code, and fall back into IonMonkey's traditional compilation mode. Even though we might have to recompile a function, our experiments in the SunSpider benchmark suite show that our approach pays for itself. We speed up SunSpider 1.0 by 2.73%. In some cases, as in SunSpider's access-nsieve.js, we have been able to achieve a speedup of 38%. We have improved run times in other benchmarks as well: we have observed a 4.8% speedup in V8 version 6, and 1.25% in Kraken 1.1. We emphasize that we are not comparing our prototype against a straw man: our gains have been obtained on top of Mozilla's industrial quality implementation of IonMonkey.
+
+We propose to specialize the code that the JIT compiler produces for a JavaScript function based on the parameters that this function receives. This kind of optimization is only worth doing if functions are not called many times with different parameters. To check the profitability of this optimization, we have instrumented the Mozilla Firefox browser, and we have used it to collect data from the 100 most visited webpages, according to the Alexa index.
+                        2
+                     
+                     
+                        2
+                        Alexa, last visited at http://www.alexa.com, in October 2012.
+                      We have tried, as much as possible, to use the same methodology as Richards et al. [10]: for each webpage, our script imitates a typical user session, with interactions that simulate keyboard and mouse events. We simulate this mock user section via a jQuery
+                        3
+                     
+                     
+                        3
+                        jQuery Foundation, last visited at jquery.com/ in October 2012.
+                      script. This script collects all links and buttons of a webpage and randomly executes them to simulate mouse events. To simulate keyboard interaction we collect all input fields in the webpage, and then fill them with random strings. We have manually navigated through some of these webpages, to certify that our robot produces results that are similar to those that would be obtained by a human being. For each script, we collect information about all function calls invoked during its execution, logging the following information: length in bytecodes, name (including line number of the function definition), and the value plus type of actual arguments.
+
+The histogram in Fig. 1
+                      shows how many times each different JavaScript function is called. This histogram clearly delineates a power distribution. In total we have seen 23,002 different JavaScript functions in the 100 visited websites. Functions with the same name, invoked in different websites, are not considered to be the same; i.e., the internet domain of the website is part of the name of its JavaScript functions. In all, 48.88% of all these functions are called only once during the entire browser session. In all, 11.12% of the functions are called twice. The most invoked functions are from the Kissy UI library, located at Taobao content delivery network (http://a.tbcdn.cn), and the Facebook JavaScipt library (http://static.ak.fbcdn.net). The first one is called 1956 times and the second 1813 times. These numbers indicate that specializing functions to the runtime value of their parameters may be an interesting approach in the JavaScript world.
+
+If we consider functions that are always called with the same parameters, then the distribution is even more concentrated towards 1. The histogram in Fig. 2
+                      shows how often a function is called with different parameters. This experiment shows that 59.91% of all the functions are always called with the same parameters. The descent in this case is impressive, as 8.71% of the functions are called with two different sets of parameters, and 4.60% are called with three. This distribution is more uniform towards the tail than the previous one: the most varied function is called with 1101 different parameters, the second most varied is called with 827, the third most with 736, etc. If it is possible to reuse the same specialized function when its parameters are the same, the histogram in Fig. 2 shows that the speculation that we advocate in this paper succeeds 60% of the time. As we will explain in Section 4, we keep a cache of actual parameter values, so that we can benefit from this regularity. Thus, if the same function is called many times with the same parameters, then we can still run its specialized version.
+
+We have built these histograms for popular benchmarks also. The results are given in Fig. 3
+                     . The new histograms are more varied than in the previous analysis. We speculate that this greater diversity happens because we are considering a universe with much fewer elements: we have 154 distinct functions in SunSpider, 186 in Kraken, and 320 in Google's V8. Nevertheless, we can still observe a power law, mainly in SunSpider's and Kraken's distribution. In all, 21.43% of SunSpider's functions are called only once. This number is only 4.68% in V8, but is 39.79% in Kraken. The function most often called in SunSpider, md5_ii from the crypto-md5 benchmark, was invoked 2300 times. In V8, we have observed 3209 calls of the method sc_Pair in the earley-boyer benchmark. In Kraken, the most called function is in stanford-crypto-ccm, an anonymous function invoked 648 times.
+
+If we consider how often each function is invoked with the same parameters, then we have a more evident power distribution. Fig. 3 (bottom) shows these histograms. We find that 38.96% of the functions are called with the same actual parameters in SunSpider, 40.62% in V8, and 55.91% in Kraken. At least for V8 we have a stark contrast with the number of invocations of the same function: only 4.68% of the functions are called a single time, yet the number of functions invoked with the same arguments is one order of magnitude larger. In the three collections of benchmarks, the most often called functions are also the most varied. In SunSpider, each of the 2300 calls of the md5_ii function receives different values. In V8 and Kraken, the most invoked functions were called with 2641 and 643 different parameter sets, respectively.
+
+
+                     The types of the parameters: We have performed a comparison between the types of the parameters used by functions called with only one set of arguments in the benchmarks, and in the Alexa top 100 websites. The results of this study are shown in Fig. 4
+                     . Firstly, we observe great diversity between the benchmarks and the web, and among the benchmarks themselves. Nevertheless, one fact is evident: the benchmarks use integers much more often than the JavaScript functions that we found in the wild. In all, 37.5%, 48.72% and 33.03% of the parameters used by functions in SunSpider, V8 and Kraken are integers, respectively. On the Internet, only 6.36% of the parameters are integers. In this case, objects and strings are used much more often: 35.57% and 32.95% of the time. Some of the optimizations that we describe in this paper, notably constant propagation, can use integers, doubles and booleans with great benefit: these primitive types allow us to evaluate some arithmetic operations at code-generation time. We can do less with objects, arrays and strings: we can inline some properties from these types, such as the length constant used in strings. We can also evaluate some conditional tests, e.g., ==, ===, etc., and we can evaluate calls to the typeof operator.
+
+Our idea is to replace the parameters of a function with the values that they hold when the function is called. Before explaining how we perform this replacement, we will briefly review the life cycle of a program executed through a just-in-time compiler. In this paper, we focus on the native machine code generated by a particular compiler – IonMonkey – yet, the same code layout is used in other JIT engines that combine interpretation with code generation. Furthermore, we consider a mixed-execution mode, in which an interpreter is used in combination with an optimizing compiler. That is the configuration that IonMonkey adopted at the time our experiments were performed. Future versions of this engine are likely to interpose a baseline compiler between the interpreter and the optimizer.
+
+Some JavaScript runtime environments, such as Chromium's V8, compile a function the first time that function is called. Other runtime systems compile code while this code is interpreted. The Mozilla Firefox engine follows the second approach. A JavaScript function is first interpreted, and then, if heuristics deem this function worth compiling, it is translated to native machine code. Fig. 5
+                      illustrates this interplay between interpreter and just-in-time compiler. Mozilla's SpiderMonkey engine comes with a JavaScript interpreter. There exists a number of JIT compilers that work with this interpreter, e.g., TraceMonkey [3], JägerMonkey [5] and IonMonkey. We will be working with the latter.
+
+The journey of a JavaScript function in the Mozilla's Virtual Machine starts in the parser, where the JavaScript code is transformed into bytecodes. These bytecodes belong to a stack-based instruction set, which SpiderMonkey interprets. Some JavaScript functions are either called very often, or contain loops that execute for a long time. We say that these functions are hot. Whenever the execution environment judges a function to be hot, this function is sent to IonMonkey to be translated to native code.
+
+The JavaScript function, while traversing IonMonkey's compilation pipeline, is translated into two intermediate representations. The first, the Middle-level Intermediate Representation, or MIR for short, is the baseline format that the compiler optimizes. MIR instructions use three-address code in static single assignment (SSA) form [11]. In this representation we have an infinite supply of virtual registers, also called variables. The main purpose of the MIR format is to provide the compiler with a simple representation that it can optimize. One of the optimizations that IonMonkey performs at this level is global value numbering; a task performed via the algorithm first described by Alpern et al. [12]. It is at this level that we apply the optimizations that we describe in this section.
+
+The optimized MIR program is converted into another format, before being translated into native code. This format is called the Low-level Intermediate Representation, or LIR. Contrary to MIR, LIR contains machine-specific information. MIR's virtual registers have been replaced by a finite set of names whose purpose is to help the register allocator find locations to store variables. After IonMonkey is done with register allocation, its code generator produces native machine code. SpiderMonkey then diverts its control-flow to the address of the generated code, shifting the JavaScript engine to native execution mode.
+
+This native code will be executed until either it legitimately terminates, or some guard, such as a type guard, evaluates to false. In the latter case, we will have a recompilation. Just-in-time compilers usually speculate on properties of runtime values in order to produce better code. IonMonkey, for instance, uses type specialization. JavaScript represents numbers as double precision floating-point values. However, many of these numbers can be represented as simple integers. If the IonMonkey compiler infers that a numeric variable is an integer, then this type is used to compile that variable, instead of the more expensive floating-point type. On the other hand, the type of this variable, initially an integer, might change during the execution of the JavaScript program. This modification triggers an event that aborts the execution of the native code, and forces IonMonkey to recompile the entire function.
+
+
+                        Fig. 6
+                         shows an example of a control flow graph (CFG) that IonMonkey produces. In the rest of this paper we will be using a simplified notation that represents the MIR instruction set. Contrary to a traditional CFG, the program in Fig. 6 has two entry points. The first, which we have labeled function entry point, is the path taken whenever the program flow enters the binary function from its beginning. This is the path taken whenever a function already compiled is invoked. The second entry point, the on-stack replacement (OSR) block, is the path taken by the program flow if the function is translated into binary during its interpretation. As we have mentioned before, a function might be compiled once some heuristics in the interpreter judge that it will run for a long time. In this case, the interpreter must divert the program flow directly to the point that was being interpreted when the native code became active. The OSR block marks this point, usually the first instruction of a basic block that is part of a loop.
+
+The CFG in Fig. 6 contains a number of special instructions called resumepoint. These instructions indicate places where the state of the program must be saved, so that if it returns to interpretation mode, then the interpreter will not be in an inconsistent state. Resume points are necessary after function calls, for instance, because they might have side effects. On the other hand, referentially transparent commands do not require saving the program state back to the interpreter.
+
+The core optimization that we propose in this paper is parameter specialization. This optimization consists of replacing the arguments passed to a function with the values associated with these arguments at the time the function is called. Our optimizer performs this replacement while the MIR control flow graph is built; therefore, it imposes zero overhead on the compiler. That is, instead of creating a virtual name for each parameter in the graph, we create a constant with that parameter's runtime value. We have immediate access to the value of each parameter, as it is stored in the interpreter's stack. There are two types of inputs that we specialize: those in the function entry block, and those in the OSR block. Fig. 7
+                        (a) shows the effects of this optimization in the program first seen in Fig. 6.
+
+Constant propagation is, possibly, the most well-known code optimization, and it is described in virtually every compiler textbook. We have implemented the algorithm present in Aho et al.'s classic book [13, pp. 633–635]. Basically, each program variable is associated with one element in the lattice 
+                           ⊥
+                           <
+                           c
+                           <
+                           ⊤
+                        , where c is any constant. We iterate successive applications of a meet operator until we reach a fixed point. This meet operator is defined as 
+                           ⊥
+                           ∧
+                           c
+                           =
+                           c
+                        , 
+                           ⊥
+                           ∧
+                           ⊤
+                           =
+                           ⊤
+                        , 
+                           ⊤
+                           ∧
+                           c
+                           =
+                           ⊤
+                        , 
+                           
+                              
+                                 c
+                              
+                              
+                                 0
+                              
+                           
+                           ∧
+                           
+                              
+                                 c
+                              
+                              
+                                 1
+                              
+                           
+                           =
+                           
+                              
+                                 c
+                              
+                              
+                                 0
+                              
+                           
+                         if 
+                           
+                              
+                                 c
+                              
+                              
+                                 0
+                              
+                           
+                           =
+                           
+                              
+                                 c
+                              
+                              
+                                 1
+                              
+                           
+                         and 
+                           
+                              
+                                 c
+                              
+                              
+                                 0
+                              
+                           
+                           ∧
+                           
+                              
+                                 c
+                              
+                              
+                                 1
+                              
+                           
+                           =
+                           ⊤
+                         otherwise. We have opted for the simplest possible implementation of constant propagation, to reduce the time overhead that our optimization imposes on the runtime environment. Thus, contrary to Wegman et al.'s seminal algorithm [14], we do not extract information from conditional branches.
+
+
+                        Fig. 7(b) shows the code that results from the application of constant propagation on the program seen in Fig. 7(a). If all the arguments of an instruction i are constants, then we can evaluate i at compilation time. If i defines a new variable v, then we can replace every use of v by the constant that we have just discovered. The elimination of an instruction that only operates on constants is called folding. We have marked the 14 instructions that we have been able to fold in Fig. 7(b). We can fold a large number of JavaScript's typical operations. Some of these operations apply only on primitive types, such as numbers, e.g., addition, subtraction, etc. Others, such as the many comparison operators, e.g., ==, !=, ===, !== and the typeof operator, apply on aggregates too.
+
+JavaScript is a very reflective language, and runtime type inspection is a common operation, not only at the development level, but also at the code generation level. As an example, in Fig. 6 we check if s is an array, before accessing some of its properties. Our constant propagation allows us to fold away many type guards, which are ubiquitous in the code that IonMonkey generates. We have folded the two type guards in block L
+                        3. This optimization is safe, as there is no assignment to variable s in the entire function.
+
+Loop inversion is a classic compiler optimization that consists in replacing a while loop by a repeat loop. The main benefit of this transformation is the replacement of a conditional and an unconditional jump inside a loop by a single conditional loop at its end. Fig. 7(c) shows the result of performing loop inversion in the program seen in Fig. 7(b). Usually loop inversion inserts a wrapping conditional around the repeat loop, to preserve the semantics of the original program. This conditional, only traversed once by the program flow, ensures that the body of the repeat loop will not be executed if the corresponding while loop iterates zero times. Loop inversion does not directly benefit from the knowledge of runtime values. However, we have observed that a subsequent dead-code elimination phase is able to remove the wrapping conditional. This elimination is possible because our parameter specialization often lets us know that a loop will be executed at least once.
+
+Dead-code elimination removes instructions that cannot be reached by the program flow. We run it after constant propagation, in order to give instruction folding the chance to transform conditional branches into simple boolean values. Whenever this extensive folding is possible, the outcome of the conditional branch can be predicted at compile-time; thus, we can safely remove the branch instruction and, possibly, blocks of unreachable code. Fig. 8
+                        (a) shows the effects of dead-code elimination on the program in Fig. 7(c). We have removed block L
+                        2, because the result of the comparison inside this block is known at code generation time. Notice that we keep the function entry block. We only keep this block because we can cache the generated machine code, in case a function is called with the same parameters again. If a function compiled to native code is called again, then execution must start at the function entry point.
+
+JavaScript is a type safe language, which means that any value can only be used according to the contract specified by its runtime type. As a consequence of this type safety, array accesses in JavaScript are bound checked. Accesses outside the bounds of the array return the undefined constant, which is the only element in the Undefined data type. Bound checking an index i is a relatively expensive operation, because, at the native code level it requires loading the array length property l, and demands two conditional tests: 
+                           i
+                           ≥
+                           0
+                         and 
+                           i
+                           <
+                           l
+                        . The knowledge of function inputs allows us to eliminate some simple bound checks.
+
+To perform this optimization, we need to identify integer variables that control loops. If these induction variables are bounded by a known value, then we can perform a trivial kind of range analysis to estimate the minimum and maximum values that array indices might receive. In order to keep our optimizer simple and efficient, we only recognize variables defined by the pattern 
+                           
+                              
+                                 i
+                              
+                              
+                                 0
+                              
+                           
+                           =
+                           exp
+                           ;
+                           
+                              
+                                 i
+                              
+                              
+                                 1
+                              
+                           
+                           =
+                           ϕ
+                           (
+                           
+                              
+                                 i
+                              
+                              
+                                 0
+                              
+                           
+                           ,
+                           
+                              
+                                 i
+                              
+                              
+                                 2
+                              
+                           
+                           )
+                           ;
+                           
+                              
+                                 i
+                              
+                              
+                                 2
+                              
+                           
+                           =
+                           
+                              
+                                 i
+                              
+                              
+                                 1
+                              
+                           
+                           +
+                           
+                              
+                                 c
+                              
+                              
+                                 2
+                              
+                           
+                        . Variables i
+                        3 and i
+                        4, plus the constant 2, in Fig. 8(a) follow this pattern. Variable i
+                        2 is initially assigned the constant 2, and 
+                           
+                              
+                                 i
+                              
+                              
+                                 2
+                              
+                           
+                           <
+                           100
+                         inside the loop; hence, its range is 
+                           [
+                           2
+                           ,
+                           99
+                           ]
+                        . Moreover, 
+                           
+                              
+                                 i
+                              
+                              
+                                 4
+                              
+                           
+                           =
+                           ϕ
+                           (
+                           2
+                           ,
+                           
+                              
+                                 i
+                              
+                              
+                                 2
+                              
+                           
+                           )
+                        ; thus, its range is also 
+                           [
+                           2
+                           ,
+                           99
+                           ]
+                        . Therefore, any access of array s
+                        2, e.g., reference 0xFF3D8800 in the figure, indexed by i
+                        4 is safe, as s
+                        2's length is 100. Fig. 8(b) shows the result of eliminating the bounds checks from the program in Fig. 8(b).
+
+JavaScript supports higher-order functions; therefore, it is possible to pass a function as an argument to another one. We inline functions passed as arguments, whenever possible. Fig. 8(c) shows the result of replacing the call to function inc, seen in Fig. 8(b), with its body. IonMonkey already performs function inlining; however, it requires 40,000 calls, much later than we do. IonMonkey's inliner is profile guided. Once a function is called a large number of times, it decides to inline it. Closures are not immediately inlined, as they are passed as formal parameters to a function that can be called with many different actual parameters. Furthermore, inlining closures requires guards: if the host function is called again, this time with a different closure, recompilation must take place. Our aggressive approach to inlining avoids all this burden. We inline a closure as soon as we compile the host function, and we do not use guards. In case the function is called again, our entire code will be discarded; hence, these guards would not be necessary.
+
+There are many classic compiler optimizations that we have not considered in this work, either due to the lack of time, or due to technological limitations in the current implementation of IonMonkey. Two of these optimizations that we plan to investigate in the future are loop unrolling and integer overflow check elimination. We speculate that loop unrolling can be very effective in our scenario, as we can use the simple analysis of Section 3.6 to find out how many times most of the loops will iterate.
+
+@&#EXPERIMENTS@&#
+
+The experiments that we describe in this section were performed on a Quad-Core Intel i5 processor with 3.3GHz of clock and 8GB of RAM running Ubuntu 12.04.1 32-bits. The IonMonkey version that we are using was obtained from the Mozilla repository on August 3, 2012.
+
+
+                     The benchmarks: Timing JavaScript applications in actual webpages is not trivial, because too many factors, mostly related to I/O operations, have an impact on the runtime of these programs. Therefore, we chose to use three well know benchmarks: SunSpider, Kraken and V8 in our experiments. The advantage of the benchmarks is that we can measure their execution time reliably. The disadvantage is that, as pointed out by Richards et al. [10], benchmarks might not reflect the true nature of the JavaScript applications found in the wild. The data that we show in Section 2 is a testimony of this fact. On one hand, Fig. 4 shows that actual applications tend to use instances of object more often than instances of simpler types. The optimizations in Section 3 work better in the latter case. On the other hand, Figs. 1–3 seem to imply that functions tend to be called with the same parameters more often in the wild than in benchmarks. To mitigate these inconsistencies, we will also use the benchmarks available in Richards et al.'s repository [15]. These programs have been extracted from actual webpages, such as Google or Facebook, and provide a more faithful picture of JavaScript applications that we are likely to find in the wild. Even though it is hard to measure runtime in these benchmarks with high confidence, we can use them to measure code size reduction and number of recompilations very reliably.
+
+
+                     The impact of parameter specialization on run time: Fig. 9
+                      shows the impact of our specialization in the run time of three different benchmark suites. We have tested each of our 44 benchmarks 100 times, to reduce the imprecision of this experiment. The time measured in a test includes interpretation, compilation and native execution. We have tested different configurations of the optimizations that we have implemented. ParameterSpec is the parameter specialization that we have described in Section 3.2, augmented with the automatic inlining of functions passed as parameters.
+
+We have run constant propagation without parameter specialization, as we show in the third column of the table, observing a runtime slowdown of −1.04%. Without parameter specialization, constant propagation has little room to improve the code, as IonMonkey's global value numbering already eliminates most of the constants in the scripts. On the other hand, the combination of parameter specialization, constant propagation and dead-code elimination has produced one of our best results. Some optimizations enable others. As an example, in string-unpack-code, loop inversion has improved the effectiveness of IonMonkey's invariant code motion, yielding a 28% speedup. Our implementation of array bounds check elimination did not gives us a substantial speedup in any benchmark. We are using a simple approach, i.e., we only eliminate checks from arrays indexed by induction variables. Moreover, the alias analysis that ensures the correctness of this optimization is currently implemented in IonMonkey in a very simple way. Thus, if there exists any store instruction in the script being compiled, the elimination of bound check instructions is considered unsafe and is not performed. If we run all our optimizations together, we do not obtain the best speedups. This happens because these optimizations are not cumulative: DeadCodeElim and BoundCheckElim may, for instance, eliminate the same code. We have observed that we do not improve too much programs that iterate through arrays. After going over the binary instructions that are executed in these benchmarks using gdb, we realized that the access of properties of aggregate data-structures in JavaScript is very costly: it is a search in a hash-table. Thus, the bulk of the computations happens in code that either reads or writes array elements, which the runtime environment does not give us to specialize.
+
+
+                     Size of generated code: One of the benefits of our optimizations is code size reduction, which results from the combination of parameter specialization and dead-code elimination. Fig. 10
+                      presents the size of the machine code generated for functions of our three benchmarks with and without our approach. Notice that, due to recompilations, the same function may be translated in different ways. In this analysis, we consider only the smallest version that each compilation mode generates for each function. On average, we are able to reduce the size of the functions in SunSpider by 16.72%. This reduction, for V8 and Kraken, is 18.84% and 15.94%.
+
+These numbers translate to real-world applications, as we show in Fig. 11
+                     . We have run our techniques on the JavaScript benchmark automatically built from actual webpages, using Richards et al.'s tool [15], obtaining a code-size reduction of 13.3% for www.facebook.com, 11.4% for www.google.com, 22.2% for www.twitter.com, and 42.5% for www.yahoo.com. Notice that the JavaScript benchmarks that Richards et al. extract from a webpage depend on the browser used to visit that webpage. Thus, Fig. 11 shows, alongside each benchmark, the browser used to produce it. As expected, Fig. 11 shows that dead-code elimination is essential for code size reduction. Nevertheless, even without it, parameter specialization is still able to reduce the size of native machine code. Reduction, in this case, is due to the elimination of loads and stores necessary to map variables to memory, and the folding of type guards.
+
+
+                     Compilation overhead: Fig. 12
+                      shows the impact of our optimizations in IonMonkey's compilation time, i.e., the time that this engine spends analyzing, optimizing and generating code. Surprisingly, many of our configurations improve IonMonkey's compilation time. As we have seen in Fig. 10, our optimizations decrease function sizes; thus, reducing the amount of work performed by the other phases of IonMonkey. Our key optimization, parameter specialization, has no overhead by construction. Instead of generating instructions that manipulate memory locations, we do it for constants. Additionally, this optimization improves the time of the register allocator, given that it reduces register pressure substantially.
+
+
+                     Impact on number of recompilations: A function will be recompiled by the JIT engine if an assumption made by the compiler stops being true or more information about the program becomes available. Recompilations are expensive, because they stop the execution of a function to generate a new version of it. In IonMonkey's specific case, recompilations happen, for instance, to update type information or to perform function inlining. Since the value of arguments does not change until at least the function is invoked again, we perform our parameter based specialization even if a function is recompiled. Our approach may increase the number of recompilations of a function, because, in our case, each function will have to be recompiled whenever it is called for a second time with different arguments. We have analyzed how often code is recompiled in our three benchmark suites with and without our runtime value specialization. For SunSpider, the number of compilations of the same function grows by 3.1% when using parameter specialization. This number is 6.3% for V8 and 3.4% for Kraken. Notice that these numbers consider the application of parameter specialization alone. The impact of the other combinations of optimizations can be seen in Fig. 13
+                     . These numbers vary, depending on which suite of optimizations we use, because they produce different code layouts, and the number of guarded operations in these different programs is not necessarily the same. Nevertheless, in general our approach tends to increase the number of recompilations by a small factor. Therefore, despite the highly speculative nature of this approach, its drawback, at least in our benchmarks, is not so big as one could at first expect.
+
+
+                     Partial specialization: A second invocation of a function may change some of these function's parameters, but not all of them. Based on this observation, we have implemented a partial specialization policy, that tries to specialize a function only one more time. Our runtime environment, upon first seeing a call 
+                        f
+                        (
+                        
+                           
+                              a
+                           
+                           
+                              0
+                           
+                        
+                        ,
+                        
+                           
+                              b
+                           
+                           
+                              0
+                           
+                        
+                        ,
+                        
+                           
+                              c
+                           
+                           
+                              0
+                           
+                        
+                        )
+                     , generates a specialized version of f to the tuple 
+                        (
+                        
+                           
+                              a
+                           
+                           
+                              0
+                           
+                        
+                        ,
+                        
+                           
+                              b
+                           
+                           
+                              0
+                           
+                        
+                        ,
+                        
+                           
+                              c
+                           
+                           
+                              0
+                           
+                        
+                        )
+                     . Lets call this version f
+                     
+                        abc
+                     . If we observe a second call of f, this time with the parameter set 
+                        f
+                        (
+                        
+                           
+                              a
+                           
+                           
+                              0
+                           
+                        
+                        ,
+                        
+                           
+                              b
+                           
+                           
+                              0
+                           
+                        
+                        ,
+                        
+                           
+                              c
+                           
+                           
+                              1
+                           
+                        
+                        )
+                     , we discard the original specialized function, but, instead of falling back to IonMonkey's traditional code generation, we generate a function that is tailored to the tuple 
+                        (
+                        
+                           
+                              a
+                           
+                           
+                              0
+                           
+                        
+                        ,
+                        
+                           
+                              b
+                           
+                           
+                              0
+                           
+                        
+                        )
+                     . Lets call this function f
+                     
+                        ab
+                     . Further calls of f will use f
+                     
+                        ab
+                     , as long as the first two arguments remain the same. This leaves the third argument free to change between calls, as it has been compiled generically. Thus, a call to 
+                        f
+                        (
+                        
+                           
+                              a
+                           
+                           
+                              0
+                           
+                        
+                        ,
+                        
+                           
+                              b
+                           
+                           
+                              0
+                           
+                        
+                        ,
+                        
+                           
+                              c
+                           
+                           
+                              2
+                           
+                        
+                        )
+                      will still use f
+                     
+                        ab
+                     , even if 
+                        
+                           
+                              c
+                           
+                           
+                              1
+                           
+                        
+                        ≠
+                        
+                           
+                              c
+                           
+                           
+                              2
+                           
+                        
+                     . On the other hand, if we observe a call such as 
+                        f
+                        (
+                        
+                           
+                              a
+                           
+                           
+                              0
+                           
+                        
+                        ,
+                        
+                           
+                              b
+                           
+                           
+                              1
+                           
+                        
+                        ,
+                        
+                           
+                              c
+                           
+                           
+                              1
+                           
+                        
+                        )
+                     , where 
+                        
+                           
+                              b
+                           
+                           
+                              0
+                           
+                        
+                        ≠
+                        
+                           
+                              b
+                           
+                           
+                              1
+                           
+                        
+                     , then we discard the customized code of f, and stop specialization. Fig. 14
+                      shows the proportion of functions that we can specialize partially. Unfortunately, this approach did not produce results better than our first implementation, which only specializes once. The speedups that we produce for SunSpider, V8 and Kraken, using only parameter specialization are 1.63%, 2.33% and 1.72% respectively. Thus, in this case, we have observed gains only in Kraken, compared to the results seen in Fig. 9. If we use parameter specialization plus constant propagation, then our speedups are 2.73%, 1.5%, and 1.18%. In this case, we have observed gains in SunSpider and Kraken, at the expenses of a substantial loss in V8.
+
+
+                     Specialization policy: We cache the arguments of each specialized function. In this way, if a function is called in sequence with the same arguments, then we reuse the specialized code. We distinguish successfully specialized and deoptimized functions. The former category represents the functions that are always called, throughout the entire program execution, with the same arguments. In this case, we have a win–win situation: we have produced more efficient code, and did not have to discard it later. If a function is called again with different arguments, then we discard its specialized code, and recompile it, this time producing generic code for it. Fig. 14 shows the proportion of functions that have been deoptimized because they were called with a different set of arguments. On average, we specialize about 30–50% of the functions that IonMonkey compiles. This is the proportion of functions compiled due to long execution, instead of due to a large number of invocations. About 50–60% of these functions had to be deoptimized because they were called a second time with different parameters. Notice that these numbers are on par with the proportion of functions that are called with the same parameters, as pointed in Fig. 3. We could partially specialize about 30–70% of these functions, given that only part of their arguments have changed.
+
+@&#RELATED WORK@&#
+
+Just-in-time compilers are part of the programming language's folklore since the early 1960s. Since the towering work of John McCarthy [16], the father of Lisp, a multitude of JIT compilers have been designed and implemented. These compilers have been fundamental to the success of languages such as Smalltalk [17], Self [8], Python [18], Java [19], and many others. For a comprehensive survey on just-in-time compilation, we recommend the work of John Aycock [20]. In this section we will focus on the strategies that JIT compilers use to specialize code at runtime. Specialization refers to the translation of a general function into a more limited version of it. For instance, a two-argument function can be transformed into a one-argument function by fixing one of its inputs to a particular value. Fig. 15
+                      shows how our work compares to others related to runtime code specialization.
+
+Code specialization can be classified in various dimensions, depending on when specialization happens, or which part of the program is affected. We follow Duesterwald's [21] suggestion to classify techniques in control or data specialization. In the family of control-flow specializations, we group optimizations that rely on the assumption that some paths in the program code will be traversed more often than others. On the other hand, data specialization is based on particular properties that hold for a certain data. Another possible dimension defines when the code will be specialized: statically or dynamically. Our technique is a kind of dynamic code specialization. Function cloning is a form of static code specialization. There are also hybrid approaches, which prepare program skeletons, statically, and fill them up with values dynamically.
+
+In this section we discuss dynamic ways to specialize code; however, for completeness, we will mention briefly a form of static code specialization: function cloning. If the compiler can infer, statically, information about the context in which a particular function f is invoked, then it can clone f, and specialize this clone to that context. For instance, gcc clones a function if it has only one calling site in the entire program, its linkage is internal, and at least one of its actual parameters is a known-constant. Open64 does a similar trick to remove parameters from functions, if these parameters are always replaced by the same constants. The most extensive discussion about clone-based optimizations that we are aware of can be found in Mary Hall's PhD dissertation [22, Chapter 5]. Further explanations about the technique can be found in a few compiler textbooks, namely Kennedy's [23, p. 594] and Grune's [24, p. 325]. Function cloning, in this sense, is very similar to the specialization that we do in this paper. Yet, we apply our optimizations dynamically, whereas cloning, as discussed by Mary Hall, happens statically.
+
+Control flow specialization happens whenever the compiler assumes that a path will be often taken, and generates better code for that path. Partial procedure inlining [21], indirect branch linking [21], and code sinking [25] are all examples of control-flow specialization. Perhaps the most well-known form of control-flow specialization is the polymorphic inline caches (PICs) [26]: once the target of a method call is discovered, specific code is generated to invoke that method directly in subsequent calls. This technique has found use, for instance, in the Self Compiler [8,27]. When combined with the so-called customized compilation, PICs can divert the execution flow to specific targets of the same method, depending on properties of the actual method parameters. Although this kind of specialization is performed at the bytecode level, Wurthinger et al. [28] have shown that it can also be applied at the AST level.
+
+The idea of trace compilation, for instance, is built around the notion of control flow specialization [3,25]. As an example, TraceMonkey, IonMonkey's precursor, generates native traces, i.e., sequences of native instructions, for the program paths that are traversed more often during code interpretation. These traces can be further augmented if alternative paths are found inside loops, effectively giving origin to code trees. Traces are executed speculatively. If an exceptional condition forces the execution flow away from the trace, then the runtime environment resumes interpretation mode. Recently, Mehrara and Mahlke have pushed this approach a bit further, adding even more speculation to TraceMonkey [4]. The authors propose to execute the main flow of a program's trace speculatively, delegating to a second thread the task of checking if any side-exit has been taken. Whenever such an event is detected, the two threads synchronize, the state of the interpreter is recovered, and execution falls back into interpretation mode.
+
+Another example of this approach is the tracing JIT used in the PyPy project [29,30]. PyPy has the goal to be a flexible VM for dynamic languages. Unlike usual JIT compilers, PyPy's tracing JIT works in the language interpreter instead of in the actual program running in the VM. Thus, the program is optimized as a consequence of the interpreter being traced. In particular, the PyPy JIT compiler traces the interpreter's loop that dispatches bytecodes. Tracing is achieved by the unrolling of this loop. This unrolling is followed by other optimizations, such as constant folding. In this way, PyPy avoids compiling the entire program, an action that could be unprofitable, focusing on the opcodes that correspond to loops.
+
+Data speculation happens whenever the compiler assumes that a certain data has a particular property, or is likely to have this property. In this paper, we distinguish three categories of data speculation: type, range and value-based. A compiler does type specialization if it assumes that the target data has a given type, and generates code customized to that type. Range specialization happens whenever the compiler assumes or infers a range of values to the data. Finally, value specialization, which we do in this paper, happens if the compiler assumes that the target data has a specific value.
+
+There is a large body of work related to runtime type specialization. Many of the current state-of-the-art approaches in this field stem from customization, a specialization technique introduced by Chambers et al. [8], and extensively discussed by Holzle [27]. The core idea is simple: once the compiler proves that a value belongs to a certain type, it uses this type directly, instead of resorting to costly boxing and unboxing operations. Due to the speculative nature of these optimizations, guards are inserted throughout the binary code, so that, in case the type of a variable changes, the execution environment can adapt accordingly. Type specialization seems to be one of the preferred strategies of compiler writers to boost the performance of JIT engines. This technique has found use in several dynamically typed programming languages. Examples include Lua [31], Python [32,18], Matlab Script [33,34] and JavaScript [3,5,28,35]. In this paper, we go one step further than type specialization: instead of focusing on the types of values, we specialize the values themselves. In other words, type specialization assumes that the type of a value will remain stable during the execution of a program. We, on the other hand, assume that the value itself will remain unchanged.
+
+Range specialization generalizes type and value specialization. Whereas the latter assumes a range having one single element, the former assumes a range bounded by the minimum and maximum values allowed by a type. The typical example of range specialization are the optimizations that target ranges of integer values. One of the most well-known works in this direction is Bodik et al.'s ABCD algorithm [36]. ABCD eliminates array bounds checks on demand, and is tailored for just-in-time compilation. Bodik's algorithm relies on the “less-than” lattice [37] to infer that some array indices are always within correct boundaries. Another work that does range specialization in JIT-compilers is Sol et al.'s [7] algorithm to eliminate integer overflow checks. This algorithm has been implemented in TraceMonkey, and has been shown to be very effective to remove these overflow tests. Sol's algorithm uses information only known at runtime to estimate intervals for the variables in the program. From these intervals it decides which arithmetic operations are always safe. Potentially unsafe operations need to be guarded, in such a way that, in face of an overflow, the 32-bit integer types can be replaced by types able to represent larger numbers.
+
+There is another form of range specialization, which we call input centric. One of the first works in this line has been proposed by Canal et al. [38]. Canal et al. generate multiple code regions for the same program, each of them specialized for a particular range of input values. Dynamic tests decide, at runtime, which version of the program is the most appropriate to deal with a given input. Similar techniques have been later proposed by Tian et al. [39,40] and Samadi et al. [41]. The input aware compiler is more general than our approach, because it generates code that works on different inputs. Our specialized code only works with specific values. However, the optimizations that we can perform are more extensive: we trade generality for over-specialization.
+
+As we have mentioned before, value specialization consists in the generation of code that is specific to particular data values. In our opinion, techniques in this category have the largest hit profit. In other words, the code that it generates is the most efficient, whenever this code receives the expected data. On the other hand, this kind of specialization also incurs in the highest miss rates. Because we are expecting specific values, the chances that the customized program receives different data are large. The literature describes different ways to enhance JIT compilers with value specialization. Some techniques improve the hit profit, others decrease the miss rate.
+
+
+                           Partial evaluation: In its original conception, partial evaluation is a static program transformation technique that, given a program P, and a set I formed by part of P's inputs, generates a version of P customized to I 
+                           [42]. This process of code generation involves executing P in such a way to solve as much computation as the knowledge of I allows it. The process of partial evaluation may not terminate, because it involves program execution. Nevertheless, if partial evaluation terminates, then it produces a residual program P
+                           
+                              i
+                           , which, once executed on the rest of P's input, e.g., I', generates the same result as P, if executed on 
+                              I
+                              ∪
+                              I
+                              ′
+                           .
+
+The kind of code specialization that we advocate in this paper is, in many ways, similar to the idea of partial evaluation: we fix the parameters of a function, and use constant folding to solve computations at code generation time. Rigo and Bolz have discussed in details the similarities between partial evaluation and just-in-time value specialization.
+                              4
+                           
+                           
+                              4
+                              See the PyPy Status Blog, at http://morepypy.blogspot.com.br/, entries available in January and February of 2012, for a detailed discussion.
+                            The connection is natural, given that at runtime we know all the inputs that are passed to a program. The application of partial evaluation at runtime is called Dynamic 
+                           [43] or Online partial evaluation [44]. Several groups use one of these two terms to refer to just-in-time value specialization [29,43,45–48]. The combination of static and dynamic partial evaluation has also being studied and is called the hybrid approach [49].
+
+One of the drawbacks of applying pure partial evaluation during JIT compilation is related to the possibility of non-termination. Therefore, most of the research on runtime value specialization does not use partial evaluation in its strict sense, as originally proposed by Jones et al. [42]. Instead, JIT writers use some heuristics to ensure termination, or do partial evaluation in a more limited setting. For instance, Bolz et al. [29] apply partial evaluation on program traces, which have no control flow. In this case, continuous application of instruction folding is guaranteed to terminate. Our work differs from the previous works on runtime partial evaluation because we do this specialization at the function level. The transformations that we apply on functions always terminate, because they are based on compiler optimizations, such as constant propagation and dead code elimination, which are guaranteed to stop.
+
+
+                           Profile-guided value specialization: In this category, the code specializer tries to infer, before the final code is produced, which values are likely to be more common, or, ideally, which values are invariants. Profilers provide major support in this case. Motivated by the Value Prediction technique of Gabbay and Mendelson [50], Calder et al. [51] have proposed a profiler able to find invariant values, or values that are likely to remain invariant throughout the entire execution of a program with high probability. Applying this information on SPEC 95, they have been able to achieve 21% of speedup in some benchmarks. The code specialization done by Calder et al. [52] was performed manually, since the focus of their work was in the analysis of value profiling. However, this is not a limitation inherent of this technique, as it was later demonstrated by Muth et al. [53]. Contrary to Calder or Muth, we do not require profiling information in order to apply our value specialization. Thus, we trade a probably higher miss rate for more simplicity and lower execution overhead.
+
+
+                           Template-based value specialization: Different research groups have proposed to specialize code at runtime with the help of templates, which are built statically, i.e., before the program starts running. The template, in this case, is a skeleton of the native code, that will be filled with dynamic information once the execution of the program starts [45,54,55]. Consel and Nöel [45], for instance, propose to fill the templates with data extracted from the input values passed to the program. The static analysis that Consel and Nöel use to build the templates classifies variables as either static (known) or dynamic (unknown). The variables in the former group define the overall structure of the template, whereas the variables in the latter determine the parts of this structure that must be completed dynamically. Keppel et al. have done an extensive study that compares a traditional and a template based compiler, demonstrating that the latter can be very competitive. The authors have studied several input specific optimizations, and have shown that these optimizations can save memory references, improve register allocation, and help in dead code elimination. Similar to template based compilation, we have the notion of deferred compilation, seen in the FABIOUS compiler [56]. FABIOUS combines partial evaluation techniques and staged compilation to generate program hints that will guide the code generation at runtime. These program hints are functions that take their arguments in curried form; thus, they can be applied partially. The main difference between these works and our technique is that we do not require the pre-compilation phase in which templates, or program hints, are built: our approach is entirely dynamic.
+
+
+                           Blind value specialization: We have dubbed our technique blind specialization, because it does not use any hints from profilers or static analyses. The present work completes our first attempt to implement value specialization in IonMonkey [57]. That earlier endeavor was a very limited study: our compiler would abort execution if the same function was called more than once. Even though we described some optimizations and their benefits, we did not implemented them, except parameter specialization. Thus, we could only test our ideas in an artificial set of benchmarks. Nevertheless, that preliminary study strengthened our belief that the approach that we advocate in this paper could be feasible and useful in practice.
+
+A technique similar to ours is being applied in hardware, by Zhang et al. [58]. The goal of that work was to improve traditional trace cache architectures. The authors have obtained a speedup of 17% over conventional hardware value prediction. Zhang et al. use semi-invariant load values detected at run-time to dynamically specialize the program's code. This approach is inherently speculative, as these semi-invariant loads may change over time, in which case the system will need to recover from mispredictions.
+
+@&#CONCLUSION@&#
+
+This paper has described a suite of value-based compiler optimizations that we have used to improve the execution time of an industrial-strength just-in-time JavaScript compiler. We believe that this paper has pushed substantially further the notion of JIT speculation, as we produce highly specialized native machine code given the input values passed to a function. Our approach is most profitable when applied on functions that are called always with the same parameters. We have demonstrated that these calls are very frequent, be it in well-known benchmarks, be it in actual webpages. We hope that the code optimization approach that we advocate in this paper will open new directions to compiler research. It is our intention to re-implement other classic compiler optimizations such as loop-unrolling and overflow-check elimination in the context of runtime-value specialization. We also plan to experiment our approach with different specialization and cache heuristics. For instance, we cache only one binary per function. Thus, we can specialize only two different parameter sets for the same function. We believe that this approach is the best tradeoff, given the behavior of the JavaScript programs that we have found; however, more experiments are necessary to confirm this hypothesis.
+
+
+                     Software: Our code plus all the data that we have used in this paper are available at our repository: http://code.google.com/p/jit-value-specialization.
+
+@&#REFERENCES@&#
+

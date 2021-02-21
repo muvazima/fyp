@@ -1,0 +1,3414 @@
+@&#MAIN-TITLE@&#Data structures and algorithms for high-dimensional structured adaptive mesh refinement
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           Structured anisotropic refinement of high-dimensional domains.
+
+
+                        
+                        
+                           
+                           Recursive bisection of hyperrectangular mesh elements.
+
+
+                        
+                        
+                           
+                           Linearized kd-tree for storage of the hierarchical mesh decomposition.
+
+
+                        
+                        
+                           
+                           Examples and scalability studies of meshes in up to 6 dimensions.
+
+
+                        
+                        
+                           
+                           Complete scheme scales better than 
+                                 
+                                    n
+                                    
+                                    log
+                                    
+                                    n
+                                 
+                              , although worst case is 
+                                 
+                                    O
+                                    (
+                                    
+                                       
+                                          n
+                                       
+                                       
+                                          2
+                                       
+                                    
+                                    )
+                                 
+                              .
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Structured adaptive mesh refinement
+
+Anisotropic mesh
+
+High-dimensional
+
+Hierarchical data structure
+
+kd-tree
+
+Morton order
+
+2:1 balancing
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  Spatial discretization of high-dimensional partial differential equations requires data representations that are of low overhead in terms of memory and complexity. Uniform discretization of computational domains quickly grows out of reach due to an exponential increase in problem size with dimensionality. Even with spatial adaptivity, the number of mesh data points can be unnecessarily large if care is not taken as to where refinement is done. This paper proposes an adaptive scheme that generates the mesh by recursive bisection, allowing mesh blocks to be arbitrarily anisotropic to allow for fine structures in some directions without over-refining in those directions that suffice with less refinement. Within this framework, the mesh blocks are organized in a linear kd-tree with an explicit node index map corresponding to the hierarchical splitting of internal nodes. Algorithms for refinement, coarsening and 2:1 balancing of a mesh hierarchy are derived. To demonstrate the capabilities of the framework, examples of generated meshes are presented and the algorithmic scalability is evaluated on a suite of test problems. In conclusion, although the worst-case complexity of sorting the nodes and building the node map index is 
+                        
+                           
+                              
+                                 n
+                              
+                              
+                                 2
+                              
+                           
+                        
+                     , the average runtime scaling in the studied examples is no worse than 
+                        
+                           n
+                           
+                           log
+                           
+                           n
+                        
+                     .
+               
+            
+
+@&#INTRODUCTION@&#
+
+Structured adaptive mesh refinement (SAMR) is an active area of research within the scientific computing community [1]. By adjusting the resolution of the computational mesh dynamically to features in the solution or the computational domain, widely varying scales of resolution can be represented simultaneously. In effect, the computational efficiency of a simulation is improved, possibly by orders of magnitude, allowing for larger computations and/or shorter execution times due to a reduction in the number of gridpoints [2]. For problems in two and three dimensions, there are efficient algorithms and data structures available, relying on quad/octrees for structuring the mesh blocks [2–5]. However, extending quadtrees and octrees to higher dimensional trees is problematic since they yield a fan-out of 
+                        
+                           
+                              
+                                 2
+                              
+                              
+                                 D
+                              
+                           
+                        
+                      nodes at every branch, which leads to an exponential increase in the potential number of tree nodes to handle. The contribution of this paper is a framework capable of generating and propagating meshes of arbitrary dimensionality. Our approach is based on recursive bisection and generates far fewer mesh nodes compared to 
+                        
+                           
+                              
+                                 2
+                              
+                              
+                                 D
+                              
+                           
+                        
+                     -trees of corresponding refinement.
+
+In order to construct a practical refinement scheme that works well even in higher dimensions, the framework presented in this paper is built on a structured block-based refinement strategy [1] allowing blocks to be refined anisotropically. The mesh nodes and their mutual relationships are maintained in a kd-tree 
+                     [6]. With anisotropic refinement, a block is not restricted to be refined equally in all dimensions, potentially leading to a more efficient discretization in terms of the number of created blocks since mesh blocks are refined only in the dimensions in which they would benefit from finer resolution. The grid is refined successively by dividing blocks in half, dimension by dimension. If a block needs refinement in more than one dimension, this is done by subsequent division in several steps. This paper does not consider details regarding error estimation and how to determine when refinement/coarsening is required. For the anisotropic refinement strategy to be useful though, the error estimator must be able to detect the discretization error per dimension. An example of such an error estimator is given in [7].
+
+A kd-tree is a binary tree representation of a hierarchical subdivision of a 
+                        
+                           D
+                        
+                     -dimensional hyperrectangle by recursive bisection [6,8–11]. The interior nodes of a kd-tree represent hyperplane cuts, aligned with the Cartesian coordinate axes, and the leaf nodes contain the actual data. In a general kd-tree, a cut can be placed anywhere along the split dimension of a block. However, by restricting the cuts to always be placed in the middle of the block (which we do by imposing a halving of the blocks on each refinement) the scheme is simplified significantly. Furthermore, implementations of kd-trees usually assign split dimensions to nodes cyclically, such that a node at tree level l is split in dimension (
+                        
+                           l
+                           
+                           mod
+                           
+                           D
+                        
+                     ). In the implementation presented here, this restriction is relaxed and nodes are allowed to be split arbitrarily without any intermediate refinement in the other dimensions. Thus, blocks can become as elongated as is needed and in principle there is no restriction on the aspect ratio of the blocks.
+
+It is often motivated for reasons of efficiency and memory requirements that a pointer representation of a tree structure should be avoided. By storing locality information in each mesh node and structuring the nodes in a linear order according to this information, the internal structure of a tree is available implicitly and no pointers are needed for searching and navigating it [2–4,12]. With the leaf nodes stored in linear order (e.g. the Morton order space-filling curve [13]), tree search is replaced by binary search, which is further advantageous in terms of search complexity; a tree representing an adaptively refined mesh is potentially very unbalanced with a search complexity approaching 
+                        
+                           O
+                           (
+                           n
+                           )
+                        
+                      in the number of leaf nodes, whereas binary search in the linear representation is always 
+                        
+                           O
+                           (
+                           
+                              
+                                 log
+                              
+                              
+                                 2
+                              
+                           
+                           n
+                           )
+                        
+                      
+                     [4]. This paper extends previous work by other authors [2,4] and builds upon linear Morton order trees. The data structures and algorithms are generalized to enable an extension to higher dimensionalities. However, the anisotropic node refinement does not map directly to an efficient consecutive order of elements solely from the locality information in the leaf nodes. In order to alleviate this, the linear tree representation is extended with a lightweight representation of the internal node structure (a node map index), corresponding to a hierarchical Morton order of nodes. The node map index is constructed at the same time as the nodes are sorted and stored in a compact array representation for efficient traversal.
+
+The remainder of this paper is organized as follows. In Section 2, some related work is discussed. A key concept in our implementation is the notion of location codes, which is described in Section 3. In Section 4 the construction of a hierarchical Morton order index is derived together with some implementation details. The algorithms for tree search are discussed in Section 5, followed by the adaptive mesh algorithms in Section 6. Finally, Section 7 gives some results of our implementation and Section 8 concludes the paper.
+
+@&#RELATED WORK@&#
+
+To our knowledge, there are no dynamically adaptive frameworks available that support anisotropic SAMR on hyperrectangular domains in 
+                        
+                           D
+                        
+                      dimensions. Klöfkorn and Nolte described the implementation of the SPGrid interface of the DUNE framework [14,15], which allows anisotropic structured grids of higher dimensionality but only handles static meshes. An alternative approach to tackling higher dimensions is to discretize the domain into structured simplex meshes [16–19]. In [11], a two-level approach of combining hypercubes and simplices is presented.
+
+The most typical uses of kd-trees are within domain decomposition for clustering of scattered point data, nearest neighbor search and raytracing, although they were originally developed for efficient searching in multidimensional data bases [6]. It is straightforward to adopt the kd-tree structure to any form of domain decomposition problem. This paper demonstrates how kd-trees can be used for adaptive mesh refinement by subdividing the computational domain until every block in the domain constitutes a fine enough grid resolution for the error in that part of the grid to be below some tolerance. Although presented in this setting, the techniques presented in this paper can potentially be useful in more general kd-trees and for other applications.
+
+Samet and Tamminen [20,21] developed a tree structure that is closely related to the kd-tree, which they refer to as the binary image tree (bintree). It is a pointerless tree structure developed for connected component labeling [21] of 
+                        
+                           D
+                        
+                     -dimensional images, connecting pixels of an image into a hierarchy of larger objects. The tree structure representation of the pointerless bintree is similar to the way our trees are represented, and their algorithms for connected component labeling share some features with the search algorithms presented in this paper.
+
+Throughout this paper, the Morton order space-filling curve is used for linear indexing of mesh elements, due to its simplicity and direct correspondence to recursive bisection and binary trees. Other alternatives have better locality properties, e.g. the Hilbert-curve and the Peano-curve [22], but are more complex to compute and not straightforward to use with the anisotropic refinement presented in this paper.
+
+A mesh block represents a hyperrectangle (orthotope) subdomain of the discretized 
+                        
+                           D
+                        
+                     -dimensional space. The location code 
+                     [2,4] of an orthotope is a unique identifier that encodes the location and refinement of the corresponding mesh element. The location code has two components; (1) a coordinate in space with respect to the orthotope anchor, and (2) refinement level information (per dimension). The anchor of an orthotope is chosen by convention to be the lowermost corner in every direction, given by 
+                        
+                           D
+                        
+                      integer coordinates. Fig. 1
+                      depicts an example node hierarchy and the corresponding mesh with location codes indicated for each mesh node. The integer representation of coordinates directly correspond to the orthotope’s location in the unit hypercube and allows for efficient bitwise integer operations. The actual coordinates of mesh blocks in the domain can be obtained by scaling the unit hypercube coordinates to the domain boundaries. Due to the anisoptropic refinement, separate refinement levels must be stored in each dimension (
+                        
+                           D
+                        
+                      integers). This is a generalization of the location codes used with linear quad/octrees, which only have one integer component for the refinement level due to their isotropic nature.
+
+The coordinates of an orthotope are constructed and stored as follows [2]. Each coordinate is represented by 
+                        
+                           B
+                        
+                      bits, for a total of 
+                        
+                           DB
+                        
+                      bits for the entire coordinate set of an orthotope. Subdividing an orthotope at level l in dimension 
+                        
+                           
+                              
+                                 x
+                              
+                              
+                                 i
+                              
+                           
+                        
+                      updates the lth bit in the ith coordinate accordingly. The leftmost bit of a coordinate is the most significant and corresponds to the first subdivision in the corresponding dimension, the second leftmost bit corresponds to the second subdivision, and so forth. The bits that are below the refinement level of an orthotope are set to 0. Thus, the integer size 
+                        
+                           B
+                        
+                      relates to the maximum level of refinement in any dimension and requires only 
+                        
+                           ⌈
+                           
+                              
+                                 log
+                              
+                              
+                                 2
+                              
+                           
+                           B
+                           ⌉
+                        
+                      bits per dimension for storage of the refinement levels. It is straightforward to combine the coordinates and refinement levels in a single integer per dimension, and given 32-bit integers for the storage this still allows for 27 levels of refinement per dimension to be represented.
+
+For some operations on the tree it is necessary to reason about the smallest possible domain units in the mesh. Throughout this paper, these components are referred to as atoms (also referred to as smallest or least descendants by other authors [2,4]). By definition, an atom is of refinement level 
+                           
+                              B
+                           
+                         in all dimensions. The domain and all its subcomponents can be viewed as overlying a fine grid of atoms, such that an orthotope is spanned by its first and last atoms (i.e. the first and last atoms in the range of linear indices that the orthotope covers). Fig. 2
+                         illustrates how an orthotope depends on a hierarchy of coarser orthotopes and how these are mapped onto the grid of atoms. Further indicated in the figure are the anchors and the first and last atoms of each orthotope.
+                           Property 1
+                           
+                              Given a fully covered domain with no overlapping mesh elements, any atom in the domain will overlap exactly one mesh element.
+                           
+
+Another important type of orthotopes are surfaces. A surface is an orthotope of maximum refinement level 
+                           
+                              B
+                           
+                         in a subset of the dimensions, but not necessarily all, such that it stretches out along e.g. an edge or a face. More specifically, an m-face surface (m-surface for short) is an orthotope corresponding to an m-dimensional mesh element in 
+                           
+                              D
+                           
+                        -dimensional space. Thus, in an m-surface, 
+                           
+                              D
+                              -
+                              m
+                           
+                         of the orthotope’s refinement indicators are of maximum level 
+                           
+                              B
+                           
+                        . Atoms are special cases of surfaces (0-surfaces, or points).
+
+The m-face surfaces of an orthotope describe its corresponding m-dimensional boundaries. As such, they are useful for many purposes, e.g. for obtaining information about an orthotopes neighborhood.
+
+Given an orthotope in the mesh, we are often interested in determining its boundaries (corners, edges, faces, etc.). Following the reasoning in Section 3.2, each boundary element can be derived as an m-dimensional surface, 
+                              
+                                 0
+                                 ⩽
+                                 m
+                                 <
+                                 D
+                              
+                           . To see how an m-surface is obtained from an orthotope’s location code, consider Algorithm 1. The surface of orthotope o that we are interested in is indicated by a 
+                              
+                                 D
+                              
+                           -vector f of face directions; in each dimension d there are three possibilities.
+                              
+                                 •
+                                 
+                                    
+                                       
+                                          f
+                                          [
+                                          d
+                                          ]
+                                          =
+                                          0
+                                       
+                                    : The surface covers o in its full length in d; location code of surface in d (coordinate as well as level) is equal to location code of o.
+
+
+                                    
+                                       
+                                          f
+                                          [
+                                          d
+                                          ]
+                                          <
+                                          0
+                                       
+                                    : The surface is pushed to the lower end of o in d; coordinate of surface in d is equal to coordinate of o, but the level is set to 
+                                       
+                                          B
+                                       
+                                    .
+
+
+                                    
+                                       
+                                          f
+                                          [
+                                          d
+                                          ]
+                                          >
+                                          0
+                                       
+                                    : The surface is pushed to the upper end of o in d; coordinate of surface in d is pushed to the last possible coordinate within o, level is set to 
+                                       
+                                          B
+                                       
+                                    .
+
+
+                                 mFaceSurface(orthotope 
+                                 o
+                                 , int 
+                                 f
+                                 [
+                                 
+                                    
+                                       D
+                                    
+                                 
+                                 ]) 
+                                 
+                                    
+                                       
+                                          
+                                          
+                                             
+                                                
+                                                   
+                                                   1: 
+                                                      
+                                                         q
+                                                         ←
+                                                         o
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   2: for 
+                                                   
+                                                      
+                                                         d
+                                                         ∈
+                                                         0
+                                                         ,
+                                                         …
+                                                         ,
+                                                         D
+                                                         -
+                                                         1
+                                                      
+                                                    
+                                                   do
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   3: 
+                                                   if not
+                                                   
+                                                   
+                                                      
+                                                         f
+                                                         [
+                                                         d
+                                                         ]
+                                                         =
+                                                         0
+                                                      
+                                                    
+                                                   then
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   4: 
+                                                   
+                                                      
+                                                         h
+                                                         ←
+                                                         
+                                                            
+                                                               2
+                                                            
+                                                            
+                                                               B
+                                                               -
+                                                               o
+                                                               .
+                                                               level
+                                                               [
+                                                               d
+                                                               ]
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   5: 
+                                                   if 
+                                                   
+                                                      
+                                                         f
+                                                         [
+                                                         d
+                                                         ]
+                                                         >
+                                                         0
+                                                      
+                                                    
+                                                   then
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   6: 
+                                                   
+                                                   
+                                                      
+                                                         q
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         ←
+                                                         o
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         +
+                                                         (
+                                                         h
+                                                         -
+                                                         1
+                                                         )
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   7: 
+                                                   end
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   8: 
+                                                   
+                                                      
+                                                         q
+                                                         .
+                                                         level
+                                                         [
+                                                         d
+                                                         ]
+                                                         ←
+                                                         B
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   9: 
+                                                   end
+                                                
+                                             
+                                             
+                                                10: end
+                                                
+                                             
+                                             
+                                                11: return 
+                                                   q
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+
+A logical neighbor of an orthotope o is defined as an orthotope of identical shape and size, adjacent to o across some shared boundary element. A logical neighbor does not necessarily exist in the actual mesh, but can be used as an intermediate search key overlapping a subregion of the mesh in order to find the true neighboring nodes. For instance, in Fig. 1(a), orthotopes 1 and 2 are mutual logical neighbors whereas orthotopes 0 and 3 are not.
+
+The procedure to find the neighbor of o across an m-face is similar to how boundary elements are found. See Algorithm 2 for a detailed description. The face directions in f are specified as in Algorithm 1, but the location codes are updated in a different manner. Here, the coordinates are updated at the level of o’s refinement (determined by h), and the values in the level array are copied since the neighbor is of identical shape.
+                              Algorithm 2
+                              
+                                 mFaceNeighbor(orthotope 
+                                 o
+                                 , int 
+                                 f
+                                 [
+                                 
+                                    
+                                       D
+                                    
+                                 
+                                 ]) 
+                                 
+                                    
+                                       
+                                          
+                                          
+                                             
+                                                
+                                                   
+                                                   1: 
+                                                      
+                                                         q
+                                                         ←
+                                                         o
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   2: for 
+                                                   
+                                                      
+                                                         d
+                                                         ∈
+                                                         0
+                                                         ,
+                                                         …
+                                                         ,
+                                                         D
+                                                         -
+                                                         1
+                                                      
+                                                    
+                                                   do
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   3: 
+                                                   
+                                                      
+                                                         h
+                                                         ←
+                                                         
+                                                            
+                                                               2
+                                                            
+                                                            
+                                                               B
+                                                               -
+                                                               o
+                                                               .
+                                                               level
+                                                               [
+                                                               d
+                                                               ]
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   4: 
+                                                   if 
+                                                   
+                                                      
+                                                         f
+                                                         [
+                                                         d
+                                                         ]
+                                                         <
+                                                         0
+                                                      
+                                                    
+                                                   then
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   5: 
+                                                   
+                                                      
+                                                         q
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         ←
+                                                         o
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         -
+                                                         h
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   6: 
+                                                   else if 
+                                                   
+                                                      
+                                                         f
+                                                         [
+                                                         d
+                                                         ]
+                                                         >
+                                                         0
+                                                      
+                                                    
+                                                   then
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   7: 
+                                                   
+                                                      
+                                                         q
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         ←
+                                                         o
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         +
+                                                         h
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   8: 
+                                                   
+                                                      
+                                                         q
+                                                         .
+                                                         level
+                                                         [
+                                                         d
+                                                         ]
+                                                         ←
+                                                         o
+                                                         .
+                                                         level
+                                                         [
+                                                         d
+                                                         ]
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   9: end
+                                                
+                                             
+                                             
+                                                10: return 
+                                                   q
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+
+Testing two orthotopes for overlap and finding the orthotope corresponding to the intersection area are key operations in navigation a kd-tree. They are listed in Algorithms 3 and 4 respectively. The methodology is similar in both cases: Find a refinement level encapsulating the information we are after, mask all irrelevant bits away, and update the result accordingly. In 
+                              
+                                 overlap
+                                 (
+                                 )
+                              
+                           , we take the minimum level in each dimension and perform a bitwise 
+                              
+                                 XOR
+                              
+                            on the corresponding bits. This evaluates the common bits at the coarsest level of refinement; for the nodes to be overlapping, all common bits are required to be equal. In 
+                              
+                                 intersection
+                                 (
+                                 )
+                              
+                            on the other hand, the mutual maximum refinement level is considered, since we want to extract the coordinates on the finest common level and update the corresponding coordinate to the highest of the two within the relevant active bits (which is done by a bitwise 
+                              
+                                 OR
+                              
+                            on the respective coordinates).
+                              Algorithm 3
+                              
+                                 overlap(orthotope 
+                                 
+                                    
+                                       
+                                          
+                                             o
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                    
+                                 
+                                 , orthotope 
+                                 
+                                    
+                                       
+                                          
+                                             o
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                    
+                                 
+                                 ) 
+                                 
+                                    
+                                       
+                                          
+                                          
+                                             
+                                                
+                                                   
+                                                   1: 
+                                                      
+                                                         r
+                                                         ←
+                                                      
+                                                    
+                                                   True
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   2: for 
+                                                   
+                                                      
+                                                         d
+                                                         ∈
+                                                         0
+                                                         ,
+                                                         …
+                                                         ,
+                                                         D
+                                                         -
+                                                         1
+                                                      
+                                                    
+                                                   do
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   3: 
+                                                   
+                                                      
+                                                         m
+                                                         ←
+                                                         min
+                                                         (
+                                                         
+                                                            
+                                                               o
+                                                            
+                                                            
+                                                               1
+                                                            
+                                                         
+                                                         .
+                                                         level
+                                                         [
+                                                         d
+                                                         ]
+                                                         ,
+                                                         
+                                                            
+                                                               o
+                                                            
+                                                            
+                                                               2
+                                                            
+                                                         
+                                                         .
+                                                         level
+                                                         [
+                                                         d
+                                                         ]
+                                                         )
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   4: 
+                                                   
+                                                      
+                                                         mask
+                                                         ←
+                                                         (
+                                                         111
+                                                         …
+                                                         11
+                                                         )
+                                                         
+                                                         ≪
+                                                         (
+                                                         B
+                                                         -
+                                                         m
+                                                         )
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   5: 
+                                                   if 
+                                                   
+                                                      
+                                                         (
+                                                         
+                                                            
+                                                               o
+                                                            
+                                                            
+                                                               1
+                                                            
+                                                         
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         ⊕
+                                                         
+                                                            
+                                                               o
+                                                            
+                                                            
+                                                               2
+                                                            
+                                                         
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         )
+                                                         
+                                                      
+                                                   &
+                                                      
+                                                         
+                                                         mask
+                                                      
+                                                    
+                                                   then
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   6: 
+                                                   
+                                                      
+                                                         r
+                                                         ←
+                                                         r
+                                                      
+                                                   
+                                                   &
+                                                   False
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   7: 
+                                                   else
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   8: 
+                                                   
+                                                      
+                                                         r
+                                                         ←
+                                                         r
+                                                      
+                                                   
+                                                   &
+                                                   True
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   9: 
+                                                   end
+                                                
+                                             
+                                             
+                                                10: end
+                                                
+                                             
+                                             
+                                                11: return 
+                                                   r
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+
+
+                                 intersection(orthotope 
+                                 
+                                    
+                                       
+                                          
+                                             o
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                    
+                                 
+                                 , orthotope 
+                                 
+                                    
+                                       
+                                          
+                                             o
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                    
+                                 
+                                 ) 
+                                 
+                                    
+                                       
+                                          
+                                          
+                                             
+                                                
+                                                   
+                                                   1: if not 
+                                                   overlap(
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               o
+                                                            
+                                                            
+                                                               1
+                                                            
+                                                         
+                                                         ,
+                                                         
+                                                            
+                                                               o
+                                                            
+                                                            
+                                                               2
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   ) 
+                                                   then
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   2: 
+                                                   return 
+                                                   NIL
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   3: end
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   4: for 
+                                                   
+                                                      
+                                                         d
+                                                         ∈
+                                                         0
+                                                         ,
+                                                         …
+                                                         ,
+                                                         D
+                                                         -
+                                                         1
+                                                      
+                                                    
+                                                   do
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   5: 
+                                                   
+                                                      
+                                                         m
+                                                         ←
+                                                         max
+                                                         (
+                                                         
+                                                            
+                                                               o
+                                                            
+                                                            
+                                                               1
+                                                            
+                                                         
+                                                         .
+                                                         level
+                                                         [
+                                                         d
+                                                         ]
+                                                         ,
+                                                         
+                                                            
+                                                               o
+                                                            
+                                                            
+                                                               2
+                                                            
+                                                         
+                                                         .
+                                                         level
+                                                         [
+                                                         d
+                                                         ]
+                                                         )
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   6: 
+                                                   
+                                                      
+                                                         mask
+                                                         ←
+                                                         (
+                                                         111
+                                                         …
+                                                         11
+                                                         )
+                                                         
+                                                         ≪
+                                                         (
+                                                         B
+                                                         -
+                                                         m
+                                                         )
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   7: 
+                                                   
+                                                      
+                                                         q
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         ←
+                                                         (
+                                                         
+                                                            
+                                                               o
+                                                            
+                                                            
+                                                               1
+                                                            
+                                                         
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         
+                                                         |
+                                                         
+                                                         
+                                                            
+                                                               o
+                                                            
+                                                            
+                                                               2
+                                                            
+                                                         
+                                                         .
+                                                         coords
+                                                         [
+                                                         d
+                                                         ]
+                                                         )
+                                                         
+                                                      
+                                                   & mask
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   8: 
+                                                   
+                                                      
+                                                         q
+                                                         .
+                                                         level
+                                                         [
+                                                         d
+                                                         ]
+                                                         ←
+                                                         m
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   9: end
+                                                
+                                             
+                                             
+                                                10: return 
+                                                   q
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+
+Two orthotopes are considered equal if and only if their coordinates are equal and they are of equal refinement. If the indices are equal but the refinement differs, then the following rules determine the order (the linear order of nodes is not based directly on the coordinates of each orthotope, but on the hierarchical Morton index; see Section 4).
+                              
+                                 1.
+                                 An orthotope precedes all the orthotopes that it completely overlaps.
+
+The last atom of an orthotope follows all the orthotope’s contained nodes.
+
+If neither orthotope completely overlaps the other, their respective order is undefined.
+
+
+                           Fig. 3
+                            summarizes the properties of the linear order. Note that the ambiguity in condition 3 above is not a problem in practice, since nodes in an actual mesh are required to be non-overlapping.
+
+In order to understand why it is problematic to omit the internal node hierarchy in anisotropic domains, consider the example in Fig. 4
+                     . If there is no information available regarding the hierarchical structure of node subdivisions in the kd-tree, all we can get is an ordering based directly on the location code information, corresponding to the Morton ordering in Fig. 4(a). Here, the ordering of atoms clearly violates the order of the structure of the mesh blocks, which is an undesirable feature. For instance, consider searching for a mesh block overlapping the highlighted element in Fig. 4. With the regular Morton ordering, the search could break since it would be led astray by the inconsistency in the element ordering. With a hierarchical Morton ordering based on the internal structure of the tree, where the coarser level structure changes the order in which the bits are interleaved, the linear order would be modified to correspond to Fig. 4(b).
+
+The internal node hierarchy (the node index map) is stored in a binary tree, as illustrated in Fig. 1(b). Given a location code coordinate, its corresponding hierarchical Morton index is generated by traversing the node index map from the root, updating the index bit-by-bit from left to right according to each branch that is followed on the path to the corresponding leaf (0/1 for left/right branch). In order to avoid the overhead of random access due to pointer chasing in the tree traversal, the tree is stored in an array corresponding to a depth-first traversal of the nodes [21]. This implies that the left child of a node is the next node in the array whereas the right child of a node is some offset distance away (corresponding to the total number of nodes in its left subtree). The only data item needed in each node is the dimension of the split it represents. Thus, the binary tree can be represented with two integers in each node; the split dimension (at least 
+                           
+                              
+                                 
+                                    log
+                                 
+                                 
+                                    2
+                                 
+                              
+                              D
+                           
+                         bits) and the offset of the right branch (at least 
+                           
+                              
+                                 
+                                    log
+                                 
+                                 
+                                    2
+                                 
+                              
+                              N
+                           
+                         bits, where N is the maximum number of nodes in the tree). The total number of nodes in the binary tree is 
+                           
+                              2
+                              n
+                              -
+                              1
+                           
+                        , where n is the number of leaf nodes. Although the worst-case complexity of traversing the node index map is still 
+                           
+                              O
+                              (
+                              n
+                              )
+                           
+                        , it is a sequential data structure that is fast to traverse.
+
+Updating the mesh may reorder the leaf nodes such that they are no longer arranged in proper hierarchical Morton order. Thus, as soon as the mesh is updated, we must assure that the sorted order is restored. Furthermore, the node index map must be updated to reflect the changes in the mesh layout. Keeping the node hierarchy up-to-date during mesh modifications is cumbersome and involves complex chains of dependent tree updates. Here, a combined sort-and-build-map procedure is utilized that rebuilds the node map index completely on each mesh update, building the map iteratively during sorting.
+
+The procedure to build and sort the map resembles the structure of in-place Quicksort [23]. The following steps summarize the algorithm:
+                           
+                              1.
+                              
+                                 
+                                    
+                                       i
+                                       Find a hyperplane h and an array index 
+                                             
+                                                
+                                                   
+                                                      i
+                                                   
+                                                   
+                                                      split
+                                                   
+                                                
+                                             
+                                           that partitions the nodes in the array index range 
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               i
+                                                            
+                                                            
+                                                               begin
+                                                            
+                                                         
+                                                         ,
+                                                         
+                                                            
+                                                               i
+                                                            
+                                                            
+                                                               end
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                           such that h does not intersect any node.
+
+Rearrange the nodes with respect to h such that all nodes to the left of h are in the index interval 
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               i
+                                                            
+                                                            
+                                                               begin
+                                                            
+                                                         
+                                                         ,
+                                                         
+                                                            
+                                                               i
+                                                            
+                                                            
+                                                               split
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                           and all nodes to the right of h are in 
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               i
+                                                            
+                                                            
+                                                               split
+                                                            
+                                                         
+                                                         ,
+                                                         
+                                                            
+                                                               i
+                                                            
+                                                            
+                                                               end
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          .
+
+Append the split dimension corresponding to h to the node index map.
+
+Recursively partition and sort the nodes in 
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               i
+                                                            
+                                                            
+                                                               begin
+                                                            
+                                                         
+                                                         ,
+                                                         
+                                                            
+                                                               i
+                                                            
+                                                            
+                                                               split
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          .
+
+Recursively partition and sort the nodes in 
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               i
+                                                            
+                                                            
+                                                               split
+                                                            
+                                                         
+                                                         ,
+                                                         
+                                                            
+                                                               i
+                                                            
+                                                            
+                                                               end
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          .
+
+Traverse the nodes in the node index map; examine the total size of the left subtree of each node and update the right child offset accordingly (one pass over the array).
+
+The worst-case complexity of the scheme above is 
+                           
+                              O
+                              (
+                              
+                                 
+                                    n
+                                 
+                                 
+                                    2
+                                 
+                              
+                              )
+                           
+                         (just as for Quicksort [23]), a situation that will occur when the kd-tree is maximally unbalanced. On average in practical computations, the runtime complexity is expected to be much closer to the best-case, which is 
+                           
+                              O
+                              (
+                              n
+                              
+                                 
+                                    log
+                                 
+                                 
+                                    2
+                                 
+                              
+                              n
+                              )
+                           
+                         
+                        [23]. Furthermore, this procedure operates directly on the elements in the leaf node array and rearranges them in-place. All comparisons and the handling of hyperplanes are integer bit-operations, and thus of low overhead.
+
+The basic algorithms 
+                        
+                           binarySearchMatching
+                        
+                      and 
+                        
+                           binarySearchOverlapping
+                        
+                      perform binary search of the linear kd-tree with a location code as search key (the search routines are not listed here since they are straightforward to implement). Given a search key, it is translated to a linear index which is used for comparisons in the binary search, whereas the search key itself is used to indicate a search hit. In 
+                        
+                           binarySearchMatching
+                        
+                      an identical match to the search key is looked for, whereas 
+                        
+                           binarySearchOverlapping
+                        
+                      returns the first node that is found that overlaps the search key. When an atom is passed as search key, 
+                        
+                           binarySearchOverlapping
+                        
+                      is guaranteed to find a unique node due to Property 1.
+
+Based on 
+                        
+                           binarySearchOverlapping
+                        
+                      described above, a new search algorithm is outlined, 
+                        
+                           findOverlappingNodes
+                        
+                      (listed in Algorithm 5), which collects the full set of mesh nodes overlapping a given location code. It uses binary search with overlap to find all the overlapping nodes available in a (sub) tree by exploration; starting with the first atom of the overlap orthotope the search is expanded in the upward direction in each dimension. Explored nodes that are within the overlap region are put on a stack of nodes to revisit, whereas the nodes that fall outside are ignored, effectively pruning the search. When the stack turns up empty, this indicates completion of the search. This is a similar approach to the active border traversal that is described in [21], with the addition that the search is limited to stay within a given region and discards all nodes that do not at least partially lie within this region.
+                        Algorithm 5
+                        
+                           findOverlappingNodes(kd-tree 
+                           
+                              
+                                 T
+                              
+                           
+                           , orthotope 
+                           o
+                           ) 
+                           
+                              
+                                 
+                                    
+                                    
+                                       
+                                          
+                                             
+                                             1: 
+                                                
+                                                   L
+                                                   ←
+                                                   UniqueSet
+                                                   (
+                                                   ∅
+                                                   )
+                                                
+                                              
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             ▷ Unique set of overlapping nodes
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             2: 
+                                                
+                                                   S
+                                                   ←
+                                                   Stack
+                                                   (
+                                                   ∅
+                                                   )
+                                                
+                                              
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                              ▷ Stack of nodes to visit
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             3: 
+                                                
+                                                   f
+                                                   ←
+                                                   firstAtom
+                                                   (
+                                                   o
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             4: 
+                                                
+                                                   
+                                                      
+                                                         i
+                                                      
+                                                      
+                                                         first
+                                                      
+                                                   
+                                                   ←
+                                                   binarySearchOverlapping
+                                                   (
+                                                   T
+                                                   ,
+                                                   f
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             5: 
+                                                
+                                                   S
+                                                   .
+                                                   push
+                                                   (
+                                                   
+                                                      
+                                                         i
+                                                      
+                                                      
+                                                         first
+                                                      
+                                                   
+                                                   )
+                                                
+                                              
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             ▷ Initialize stack with first node
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             6: while not 
+                                             
+                                                
+                                                   S
+                                                   .
+                                                   isempty
+                                                   (
+                                                   )
+                                                
+                                              
+                                             do
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             7: 
+                                             
+                                                
+                                                   
+                                                      
+                                                         i
+                                                      
+                                                      
+                                                         next
+                                                      
+                                                   
+                                                   =
+                                                   S
+                                                   .
+                                                   pop
+                                                   (
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             8: 
+                                             
+                                                
+                                                   q
+                                                   =
+                                                   T
+                                                   .
+                                                   leaves
+                                                   [
+                                                   
+                                                      
+                                                         i
+                                                      
+                                                      
+                                                         next
+                                                      
+                                                   
+                                                   ]
+                                                   .
+                                                   index
+                                                
+                                              
+                                             
+                                             
+                                             
+                                             
+                                             ▷ Location code of next leaf
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             9: 
+                                             
+                                                
+                                                   r
+                                                   =
+                                                   intersection
+                                                   (
+                                                   o
+                                                   ,
+                                                   q
+                                                   )
+                                                
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                              ▷ Intersection guides search
+                                          
+                                       
+                                       
+                                          10: 
+                                             for 
+                                             
+                                                
+                                                   d
+                                                   ∈
+                                                   0
+                                                   ,
+                                                   …
+                                                   ,
+                                                   D
+                                                   -
+                                                   1
+                                                
+                                              
+                                             do
+                                          
+                                       
+                                       
+                                          11: 
+                                             
+                                                
+                                                   f
+                                                   =
+                                                   [
+                                                   -
+                                                   1
+                                                   ,
+                                                   -
+                                                   1
+                                                   ,
+                                                   …
+                                                   ,
+                                                   -
+                                                   1
+                                                   ]
+                                                
+                                             ;
+                                             
+                                                
+                                                   f
+                                                   [
+                                                   d
+                                                   ]
+                                                   =
+                                                   1
+                                                
+                                              
+                                             
+                                             
+                                             
+                                             
+                                             ▷ Request “first” corner
+                                          
+                                       
+                                       
+                                          12: 
+                                             
+                                                
+                                                   u
+                                                   =
+                                                   mFaceSurface
+                                                   (
+                                                   r
+                                                   ,
+                                                   f
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          13: 
+                                             
+                                                
+                                                   v
+                                                   =
+                                                   nextAtom
+                                                   (
+                                                   u
+                                                   ,
+                                                   d
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          14: 
+                                             if 
+                                             
+                                                
+                                                   overlap
+                                                   (
+                                                   o
+                                                   ,
+                                                   v
+                                                   )
+                                                
+                                              
+                                             then
+                                          
+                                       
+                                       
+                                          15: 
+                                             
+                                             
+                                                
+                                                   k
+                                                   =
+                                                   binarySearchOverlapping
+                                                   (
+                                                   T
+                                                   ,
+                                                   v
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          16: 
+                                             
+                                             
+                                                
+                                                   L
+                                                   .
+                                                   insert
+                                                   (
+                                                   k
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          17: 
+                                             
+                                             if 
+                                             k was inserted in L 
+                                             then
+                                          
+                                       
+                                       
+                                          18: 
+                                             
+                                             
+                                                
+                                                   S
+                                                   .
+                                                   push
+                                                   (
+                                                   k
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          19: 
+                                             
+                                             end
+                                          
+                                       
+                                       
+                                          20: 
+                                             end
+                                          
+                                       
+                                       
+                                          21: 
+                                             end
+                                          
+                                       
+                                       
+                                          22: end
+                                          
+                                       
+                                       
+                                          23: return 
+                                             L
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+This section describes the key algorithms for mesh adaptation; refinement, coarsening and 2:1 balancing. All of these algorithms are of worst-case complexity 
+                        
+                           O
+                           (
+                           
+                              
+                                 n
+                              
+                              
+                                 2
+                              
+                           
+                           )
+                        
+                     , where n is the number of leaf nodes in the tree (thus equal to the number of mesh elements). The actual run-time complexity will depend on how unbalanced the refinement tree is and the number of mesh nodes that need to be updated. In practical computations on localized solutions, we expect only a small portion of the mesh nodes to be updated.
+
+In describing these algorithms, the details on how to know when a mesh node should be refined or coarsened are omitted. Each mesh node has associated fields 
+                        
+                           refineFlags
+                        
+                      and 
+                        
+                           coarsenFlags
+                        
+                     ; these are lists of dimensions in which the corresponding node has been flagged for refinement or coarsening. These flags are assumed to be set by the numerical software from which the adaptive framework is used after measuring the error.
+
+The algorithm for refinement is built upon the refine-procedure of Burstedde et al. [2]. In their implementation, an auxiliary by-pass queue (double-ended) is used to perform the refinement in-place with little extra storage. The refinement in the scheme presented here allows for more flexibility, with a binary split of nodes and with no restriction in the order of the nodes’ split-dimensions. Due to this flexibility, the linear order among the nodes might be broken if implemented straight from [2], and we must extend the scheme such that the linear order is maintained or restored at completion of the refinement step. The sorting algorithm is described in Section 4.2.
+
+Given a linear kdtree 
+                           
+                              T
+                           
+                        , refine() (Algorithm 6) makes one linear pass over the nodes. In each step of the procedure (lines 5–17), the point of traversal (node index i) is propagated forward and the node at the current position (
+                           
+                              L
+                              [
+                              i
+                              ]
+                           
+                        ) is appended to the end of the double-ended by-pass queue. The node at the beginning of the queue (the head node) is popped and its refinement flags examined. If refinement is needed, the node is split, and its right child is prepended to the queue. The left node from the split is now the new head node and the pop–refine–prepend sequence is repeated as long as more refinement is needed. When the head node needs no more refinement, it is inserted into the current position of the array. When all nodes have been visited, the array of nodes has increased its size from n to 
+                           
+                              n
+                              +
+                              p
+                           
+                        .
+                           Algorithm 6
+                           
+                              refine(kd-tree 
+                              
+                                 
+                                    T
+                                 
+                              
+                              ) 
+                              
+                                 
+                                    
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                1: 
+                                                   
+                                                      L
+                                                      ←
+                                                      T
+                                                      .
+                                                      leaves
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                2: 
+                                                   
+                                                      Q
+                                                      ←
+                                                      Deque
+                                                      (
+                                                      )
+                                                   
+                                                
+                                                
+                                                
+                                                
+                                                ▷ Intermediate storage of bypassed nodes
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                3: 
+                                                   
+                                                      n
+                                                      ←
+                                                      length
+                                                      (
+                                                      L
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                4: 
+                                                   
+                                                      i
+                                                      ←
+                                                      0
+                                                   
+                                                , 
+                                                
+                                                   
+                                                      p
+                                                      ←
+                                                      0
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                5: while 
+                                                
+                                                   
+                                                      i
+                                                      <
+                                                      n
+                                                      +
+                                                      p
+                                                   
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                6: 
+                                                
+                                                   
+                                                      q
+                                                      ←
+                                                      L
+                                                      [
+                                                      i
+                                                      ]
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                7: 
+                                                
+                                                   
+                                                      Q
+                                                      .
+                                                      pushBack
+                                                      (
+                                                      q
+                                                      )
+                                                   
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                 ▷ Append node to end of queue
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                8: 
+                                                
+                                                   
+                                                      o
+                                                      ←
+                                                      Q
+                                                      .
+                                                      popFront
+                                                      (
+                                                      )
+                                                   
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                 ▷ Pop node from head of queue
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                9: 
+                                                for 
+                                                
+                                                   
+                                                      s
+                                                      ∈
+                                                      o
+                                                      .
+                                                      refineFlags
+                                                   
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             10: 
+                                                
+                                                   
+                                                      (
+                                                      l
+                                                      ,
+                                                      r
+                                                      )
+                                                      ←
+                                                      o
+                                                      .
+                                                      split
+                                                      (
+                                                      s
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             11: 
+                                                
+                                                   
+                                                      Q
+                                                      .
+                                                      pushFront
+                                                      (
+                                                      r
+                                                      )
+                                                   
+                                                 
+                                                
+                                                
+                                                ▷ Prepend right child node to queue
+                                             
+                                          
+                                          
+                                             12: 
+                                                
+                                                   
+                                                      o
+                                                      ←
+                                                      l
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                 ▷ Left child node to be treated next
+                                             
+                                          
+                                          
+                                             13: 
+                                                
+                                                   
+                                                      p
+                                                      ←
+                                                      p
+                                                      +
+                                                      1
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             14: 
+                                                end
+                                             
+                                          
+                                          
+                                             15: 
+                                                
+                                                   
+                                                      L
+                                                      [
+                                                      i
+                                                      ]
+                                                      ←
+                                                      o
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             16: 
+                                                
+                                                   
+                                                      i
+                                                      ←
+                                                      i
+                                                      +
+                                                      1
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                ▷ Propagate point-of-traversal
+                                             
+                                          
+                                          
+                                             17: end
+                                             
+                                          
+                                          
+                                             18: 
+                                                   
+                                                      T
+                                                      .
+                                                      sortAndBuildMap
+                                                      (
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+As discussed in Section 4.2, dynamic updates to the node index map are avoided. Coarsening in particular is cumbersome in this regard, since merging two nodes that are not children of the same node in the node index map would require a dimension reordering, possibly leading to long chains of updates in the node hierarchy. For these reasons, coarsening is restricted to nodes that are siblings at the leaf level, sharing a common parent node in the node index map. Under some circumstances, this may lead to situations where merges between nodes that do not share a common ancestor are hindered, even though they would be feasible with a different ordering of the dimensions. These merges are expected to resolve eventually as the mesh is propagated in time, although suboptimal merging might infer a larger number of mesh blocks than necessary.
+
+The scheme for coarsening is presented in Algorithm 7. The nodes are iterated in reverse order, since this gives us the opportunity to perform several subsequent merges on one node before putting it back in the leaf array. The left node in each merge-pair is the node triggering the merge, and upon a successful merge it is replaced by its parent (since the left child and the parent have the same coordinates and Morton index). The right child in the merge pair is removed. The node index map is updated by making the parent correspond to a leaf node instead of an internal node. Note that there is no need to sort and rebuild the map after coarsening, since this operation does not change the order of the nodes. However, compressing the map will remove any unnecessary space occupied by removed leaf nodes.
+                           Algorithm 7
+                           
+                              coarsen(kd-tree 
+                              
+                                 
+                                    T
+                                 
+                              
+                              ) 
+                              
+                                 
+                                    
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                1: 
+                                                   
+                                                      L
+                                                      ←
+                                                      T
+                                                      .
+                                                      leaves
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                2: for 
+                                                
+                                                   
+                                                      i
+                                                      ∈
+                                                      length
+                                                      (
+                                                      L
+                                                      )
+                                                      -
+                                                      1
+                                                      ,
+                                                      …
+                                                      ,
+                                                      0
+                                                   
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                3: 
+                                                
+                                                   
+                                                      o
+                                                      ←
+                                                      L
+                                                      [
+                                                      i
+                                                      ]
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                4: 
+                                                while 
+                                                o needs more merging do
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                5: 
+                                                
+                                                   
+                                                      s
+                                                      ←
+                                                   
+                                                split dimension of o’s parent
+                                          
+                                          
+                                             
+                                                
+                                                6: 
+                                                if 
+                                                o can merge in s 
+                                                and 
+                                                o is left child in s 
+                                                then
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                7: 
+                                                
+                                                
+                                                   
+                                                      q
+                                                      ←
+                                                   
+                                                sibling of o in dimension s
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                8: 
+                                                
+                                                if 
+                                                q can merge in s 
+                                                and 
+                                                q exists in 
+                                                   
+                                                      T
+                                                   
+                                                 
+                                                then
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                9: 
+                                                
+                                                
+                                                   
+                                                      p
+                                                      ←
+                                                      merge
+                                                      (
+                                                      o
+                                                      ,
+                                                      q
+                                                      ,
+                                                      s
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             10: 
+                                                
+                                                if merge was successful then
+                                             
+                                          
+                                          
+                                             11: 
+                                                
+                                                
+                                                
+                                                   
+                                                      o
+                                                      ←
+                                                      p
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                ▷ Overwrite left (lesser) node with parent
+                                             
+                                          
+                                          
+                                             12: 
+                                                
+                                                
+                                                
+                                                   
+                                                      q
+                                                      ←
+                                                      ∅
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                ▷ Remove right node
+                                             
+                                          
+                                          
+                                             13: 
+                                                
+                                                end
+                                             
+                                          
+                                          
+                                             14: 
+                                                
+                                                end
+                                             
+                                          
+                                          
+                                             15: 
+                                                end
+                                             
+                                          
+                                          
+                                             16: 
+                                                end
+                                             
+                                          
+                                          
+                                             17: end
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+Adaptive mesh refinement on hyperrectangular patches will result in non-conforming mesh configurations and nodal placements. In many cases, interpolation of values along boundaries of non-conforming blocks becomes increasingly complicated as the relative refinement ratio of adjoining blocks increases [2,7,24,25]. In order to simplify the interpolation operators and avoid complicated nodal dependencies, meshes are often required to fulfill certain balance constraints [2,4,11]. The number of m-faces across which the balance constraint is enforced depends on the numerical scheme applied; a scheme that suffices with balancing across a subset of the m-faces results in considerably simpler and faster balancing than a scheme that requires to be fully balanced. In general, a mesh is considered to be k-balanced [4,11], 
+                           
+                              0
+                              ⩽
+                              k
+                              <
+                              D
+                           
+                        , where k is the lowest face-order across which balance is maintained. In this section we describe how to implement 2:1 balancing across all m-faces (0-balance). Other refinement ratios can be implemented analogously to what is described here, and balancing constraints over higher order faces are straightforwardly realized as special cases of 0-balancing.
+
+The balancing procedure is listed in Algorithm 8. Balancing of the refinement is done iteratively on a block-by-block basis. For each block in the mesh, the block’s refinement levels are compared against the refinement levels of its neighbors. Any neighbor that is more than twice coarser than the block under introspection is marked for refinement accordingly.
+
+The potential number of neighbors of a block in an unbalanced mesh is extremely large, and searching for all neighbors of all blocks might become impractical. It is more efficient to search only for those neighbors of a block that are coarser than the block itself [4], which limits the search to a constant number of searches per node. The neighbor search strategy is devised by considering a 
+                           
+                              
+                                 
+                                    2
+                                 
+                                 
+                                    D
+                                 
+                              
+                           
+                         box of atoms around each corner atom of the node to balance. For a 0-balanced mesh (illustrated in Fig. 5
+                        ), the overlapping nodes of all atoms in the corner box are searched for (this can be optimized slightly by excluding the atom overlapping the node itself from the search). In order to obtain a k-balanced mesh for 
+                           
+                              0
+                              <
+                              k
+                              <
+                              D
+                           
+                        , atoms can be removed from the corner box to consider only the face directions of interest.
+
+Due to the ripple effect [4], balancing a particular block might require adjacent blocks to be balanced as well. Thus, we need to keep track of the blocks that have been balanced such that we can propagate the balancing to their neighbors (rebalancing). To this end, two sets of nodes are maintained, a balance list, L, and a rebalance set of unique entries, B. Algorithm 8 operates in rounds. The balance list contains the nodes that are considered for balancing in the current round, and each node that is found to be too coarse is marked for refinement and inserted in the rebalance set. At the end of each balance round, the nodes in the rebalance set as well as all nodes they overlap (i.e. the nodes that were refined in the present round) are moved to the balance list.
+                           Algorithm 8
+                           
+                              balance(kd-tree 
+                              
+                                 
+                                    T
+                                 
+                              
+                              ) 
+                              
+                                 
+                                    
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                1: 
+                                                   
+                                                      L
+                                                      ←
+                                                      T
+                                                      .
+                                                      leaves
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                
+                                                ▷ Initial list of nodes to balance
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                2: 
+                                                   
+                                                      R
+                                                      ←
+                                                      UniqueSet
+                                                      (
+                                                      ∅
+                                                      )
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                ▷ Rebalance set, initially empty
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                3: while not 
+                                                
+                                                   
+                                                      L
+                                                      .
+                                                      isempty
+                                                      (
+                                                      )
+                                                   
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                4: 
+                                                
+                                                   
+                                                      R
+                                                      ←
+                                                      ∅
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                ▷ Clear rebalance set
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                5: 
+                                                for 
+                                                
+                                                   
+                                                      q
+                                                      ∈
+                                                      L
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                6: 
+                                                for each corner atom c of q 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                7: 
+                                                
+                                                
+                                                   
+                                                      v
+                                                      ←
+                                                   
+                                                 Neighbor of c across corner
+                                          
+                                          
+                                             
+                                                
+                                                8: 
+                                                
+                                                
+                                                   
+                                                      b
+                                                      ←
+                                                   
+                                                 Minimum bounding box of c and v (
+                                                   
+                                                      
+                                                         
+                                                            2
+                                                         
+                                                         
+                                                            d
+                                                         
+                                                      
+                                                   
+                                                 atoms)
+                                          
+                                          
+                                             
+                                                
+                                                9: 
+                                                
+                                                for each atom u of corner box b 
+                                                do
+                                             
+                                          
+                                          
+                                             10: 
+                                                
+                                                
+                                                   
+                                                      o
+                                                      ←
+                                                      binarySearchOverlapping
+                                                      (
+                                                      T
+                                                      ,
+                                                      u
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             11: 
+                                                
+                                                
+                                                   
+                                                      t
+                                                      ←
+                                                      q
+                                                      .
+                                                      level
+                                                      -
+                                                      o
+                                                      .
+                                                      level
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             12: 
+                                                
+                                                for 
+                                                
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               d
+                                                               ∈
+                                                               D
+                                                               
+                                                               |
+                                                               
+                                                               t
+                                                               [
+                                                               d
+                                                               ]
+                                                               >
+                                                               1
+                                                            
+                                                         
+                                                      
+                                                   
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             13: 
+                                                
+                                                Mark o for refinement in d
+                                             
+                                          
+                                          
+                                             14: 
+                                                
+                                                
+                                                
+                                                   
+                                                      R
+                                                      .
+                                                      insert
+                                                      (
+                                                      o
+                                                      )
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                ▷ Rebalance neighbor node
+                                             
+                                          
+                                          
+                                             15: 
+                                                
+                                                
+                                                
+                                                   
+                                                      R
+                                                      .
+                                                      insert
+                                                      (
+                                                      q
+                                                      )
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                ▷ Rebalance node
+                                             
+                                          
+                                          
+                                             16: 
+                                                
+                                                end
+                                             
+                                          
+                                          
+                                             17: 
+                                                
+                                                end
+                                             
+                                          
+                                          
+                                             18: 
+                                                end
+                                             
+                                          
+                                          
+                                             19: 
+                                                end
+                                             
+                                          
+                                          
+                                             20: 
+                                                
+                                                   
+                                                      refine
+                                                      (
+                                                      T
+                                                      )
+                                                      
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                ▷ Refine the balanced nodes
+                                             
+                                          
+                                          
+                                             21: 
+                                                
+                                                   
+                                                      L
+                                                      ←
+                                                      ∅
+                                                   
+                                                 
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                ▷ Clear list of nodes to balance
+                                             
+                                          
+                                          
+                                             22: 
+                                                for 
+                                                
+                                                   
+                                                      r
+                                                      ∈
+                                                      R
+                                                   
+                                                 
+                                                do 
+                                                
+                                                
+                                                ▷ Copy from rebalance set to balance list
+                                             
+                                          
+                                          
+                                             23: 
+                                                
+                                                   
+                                                      V
+                                                      ←
+                                                      findOverlappingNodes
+                                                      (
+                                                      T
+                                                      ,
+                                                      r
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             24: 
+                                                
+                                                   
+                                                      L
+                                                      .
+                                                      insert
+                                                      (
+                                                      V
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             25: 
+                                                end
+                                             
+                                          
+                                          
+                                             26: end
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+@&#RESULTS@&#
+
+In order to study how the mesh adaptation performs, examples of different dimensionalities (2D and 4D) are constructed and studied. In each experiment, a function is generated and propagated in time, and the mesh is evolved with it. Here, we do not actually solve a PDE; instead, an analytic function to which we know the values at time t is used, and the mesh points are updated with the exact function values in each time instance. This approach eliminates the impact of all exterior factors, such as interpolation and rounding errors, but still exercises all the important aspects of the mesh generation and adaptation. In each time step, the local truncation error is estimated in each block (using the normalized gradient [26]) and the mesh is updated from the existing mesh according to the estimated error. Note that the mesh is never rebuilt; once initialized it is propagated by adding and removing blocks dynamically.
+
+As analytic functions, time-shifted gaussians are used
+                           
+                              (1)
+                              
+                                 f
+                                 (
+                                 
+                                    
+                                       x
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 ,
+                                 …
+                                 ,
+                                 
+                                    
+                                       x
+                                    
+                                    
+                                       d
+                                    
+                                 
+                                 ,
+                                 t
+                                 )
+                                 =
+                                 
+                                    
+                                       
+                                          ∏
+                                       
+                                       
+                                          i
+                                          =
+                                          1
+                                          ,
+                                          …
+                                          ,
+                                          d
+                                       
+                                    
+                                 
+                                 exp
+                                 
+                                    
+                                       
+                                          -
+                                          
+                                             
+                                                
+                                                   
+                                                      (
+                                                      
+                                                         
+                                                            x
+                                                         
+                                                         
+                                                            i
+                                                         
+                                                      
+                                                      -
+                                                      
+                                                         
+                                                            x
+                                                         
+                                                         
+                                                            i
+                                                            ,
+                                                            0
+                                                         
+                                                      
+                                                      -
+                                                      
+                                                         
+                                                            k
+                                                         
+                                                         
+                                                            i
+                                                         
+                                                      
+                                                      t
+                                                      )
+                                                   
+                                                   
+                                                      2
+                                                   
+                                                
+                                             
+                                             
+                                                2
+                                                
+                                                   
+                                                      σ
+                                                   
+                                                   
+                                                      i
+                                                   
+                                                   
+                                                      2
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 ,
+                              
+                           
+                        since these are straightforward to extend to arbitrary dimensions.
+
+We first study a 2-dimensional example, given by the analytic function in (1) with parameters 
+                              
+                                 
+                                    
+                                       σ
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 =
+                                 0.1
+                                 ,
+                                 
+                                    
+                                       σ
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 =
+                                 1.2
+                                 ,
+                                 
+                                    
+                                       k
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 =
+                                 5
+                                 ,
+                                 
+                                    
+                                       k
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 =
+                                 0
+                                 ,
+                                 
+                                    
+                                       x
+                                    
+                                    
+                                       1
+                                       ,
+                                       0
+                                    
+                                 
+                                 =
+                                 2.5
+                                 ,
+                                 
+                                    
+                                       x
+                                    
+                                    
+                                       2
+                                       ,
+                                       0
+                                    
+                                 
+                                 =
+                                 0
+                              
+                           . In this example, a blocksize of 
+                              
+                                 
+                                    
+                                       16
+                                    
+                                    
+                                       2
+                                    
+                                 
+                              
+                            mesh points is used. At time 
+                              
+                                 t
+                                 =
+                                 0
+                              
+                           , this corresponds to the stretched gaussian function in Fig. 6
+                           (a), shown together with the mesh that is adapted to it. Fig. 6(b)–(d) show snapshots of the propagated solution and corresponding meshes at three following time instances up until 
+                              
+                                 t
+                                 =
+                                 1.0
+                              
+                           .
+
+The mesh adapts well to the propagated solution, and the effects of anisotropic refinement close to the function can clearly be observed. These features are moved along with the solution, and we can also see that the mesh is properly coarsened as the solution moves out of regions that were previously refined. We also note that the number of mesh blocks during the simulation is close to constant throughout each time step.
+
+Next, we have a look at a 4-dimensional problem. Here, a time-shifted gaussian (1) given by parameters 
+                              
+                                 
+                                    
+                                       k
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 =
+                                 2.5
+                                 ,
+                                 
+                                    
+                                       k
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 =
+                                 1.25
+                                 ,
+                                 
+                                    
+                                       k
+                                    
+                                    
+                                       3
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       k
+                                    
+                                    
+                                       4
+                                    
+                                 
+                                 =
+                                 0
+                                 ,
+                                 
+                                    
+                                       σ
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 =
+                                 0.1
+                                 ,
+                                 
+                                    
+                                       σ
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 =
+                                 0.5
+                                 ,
+                                 
+                                    
+                                       σ
+                                    
+                                    
+                                       3
+                                    
+                                 
+                                 =
+                                 0.8
+                                 ,
+                                 
+                                    
+                                       σ
+                                    
+                                    
+                                       4
+                                    
+                                 
+                                 =
+                                 1.2
+                              
+                            is used, initially centered at the origin of the domain (thus 
+                              
+                                 
+                                    
+                                       x
+                                    
+                                    
+                                       1
+                                       ,
+                                       0
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       x
+                                    
+                                    
+                                       2
+                                       ,
+                                       0
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       x
+                                    
+                                    
+                                       3
+                                       ,
+                                       0
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       x
+                                    
+                                    
+                                       4
+                                       ,
+                                       0
+                                    
+                                 
+                                 =
+                                 0
+                              
+                           ). Each block stores 
+                              
+                                 
+                                    
+                                       8
+                                    
+                                    
+                                       4
+                                    
+                                 
+                              
+                            mesh points. The initial mesh is shown in Fig. 7
+                            as 2-dimensional cross-sections through the origin (6 planes in total). Furthermore, Fig. 8
+                           , shows how the number of blocks in the mesh evolves with time.
+
+In this example too, we see that the initial mesh is well adapted to the function, with more anisotropic features in the dimensions where the function is elongated than in the dimensions where it is more uniform. From Fig. 8 the conclusion is drawn that the strategy to only merge nodes at the leaf level seems to lead to a somewhat suboptimal mesh contraction, with an initial increase in mesh nodes as the mesh moves, but after some time the total number of nodes stabilizes around an equilibrium.
+
+Two performance tests have been conducted: a time breakdown of the mesh adaptation procedures (refine, coarsen and balance), based on the experiments in Section 7.1, and a more detailed performance and scalability analysis of the balancing step which is the most time consuming part of the dynamic mesh adaptation.
+
+All code is implemented in C++, and the experiments were performed on a workstation equipped with an Intel Core i5-2500 processor; 4 cores running at 3.3GHz, 6MB L3 cache, 
+                           
+                              4
+                              ×
+                              256
+                           
+                        
+                        kB L2 cache, 
+                           
+                              4
+                              ×
+                              32
+                           
+                        
+                        kB L1 instruction/data caches, and 16GB of RAM. The GNU C++ compiler (version 4.6.1) was used with flags 〈 -O3 -funroll-loops〉. The code makes use of a template constant 〈DIMENSIONS〉 in order to statically unroll loops over dimensions.
+
+In this experiment, performance data from the mesh propagation experiments in Section 7.1 are analyzed, separated into respective timings for each adaptation step; initialization, refinement, coarsening and balancing. The results are found in Table 1
+                           . The total time for initializing the mesh and the average propagation time per time step are presented separately. Propagation includes refinement, coarsening and balancing; the average propagation time per time step is further broken down into the time spent in each of these procedures. The time taken to initialize a mesh is given separately since it is a one-time cost, amortized over a large number of time steps.
+
+From the timings in Table 1 we observe that the balancing step is the most time consuming part of the dynamic mesh propagation. Each node in the mesh has a large number of dependencies to neighboring nodes that must be searched for and examined with respect to refinement ratios. Furthermore, due to the ripple propagation described in Section 6.3, nodes that have been balanced need to be rebalanced iteratively. In this section, the performance of the balance step is studied in more detail. Of particular interest is the scalability with dimensionality, since the complexity of the balance algorithm is directly dependent on the number of potential neighbors of each block to search for.
+
+Two types of synthetic benchmark meshes are studied:
+                              
+                                 •
+                                 Randomly refined meshes of different node counts and dimensionalities. The nodes are repeatedly iterated and (with a probability of 
+                                       
+                                          
+                                             
+                                                p
+                                             
+                                             
+                                                r
+                                             
+                                          
+                                          =
+                                          0.5
+                                       
+                                    ) refined in a random dimension. This creates meshes that are very badly structured and difficult to balance, but serves as a good worst-case scenario for analysis. In this type of meshes, a large portion of anisotropic mesh elements is expected.
+
+Meshes where one of the innermost corners is repeatedly refined isotropically, which creates a subregion with 
+                                       
+                                          
+                                             
+                                                2
+                                             
+                                             
+                                                d
+                                             
+                                          
+                                       
+                                     nodes refined to a certain refinement level (down to maximum refinement level 
+                                       
+                                          B
+                                       
+                                    ), cornered by nodes of refinement level 1. No anisotropic mesh elements will be encountered in this case, but we will see deep chains of rippling refinements due to the imbalance in the initial mesh.
+
+The performance results are presented in Fig. 9
+                           . We see an exponential increase in runtime as the dimensionality is increased, but the performance penalty for each dimensionality is constant. Within each given dimensionality, the scaling with the number of nodes is better than 
+                              
+                                 n
+                                 
+                                 log
+                                 
+                                 n
+                              
+                           . The staggered plot in Fig. 9 is due to the vast difference in the numbers of nodes generated for each dimensionality in this example. Although there are jumps between the lines in the plot, the trend is clear and each line follows a linear slope.
+
+@&#CONCLUSION@&#
+
+In this paper, an efficient scheme for managing adaptively refined meshes with anisotropic features was presented. The framework is built around a linear representation of kd-trees, with algorithms for refinement, coarsening and 2:1 balancing. A linear kd-tree data structure is proposed that can be seen as a generalization of the quadtree/octree data structures for higher dimensionalities, with added flexibility in terms of layout and shape of grid elements. Compared to a binary tree representation of a kd-tree, the linear tree encoding is more efficient in terms of storage and searching in unbalanced trees. In order to obtain a more robust ordering of the nodes, a lightweight representation of the internal node structure (a node index map) is utilized. With the information available in this structure, a hierarchical Morton index is obtained, by which the nodes can be linearized. The performance results show scaling trends that are close to or better than 
+                        
+                           O
+                           (
+                           n
+                           
+                           log
+                           
+                           n
+                           )
+                        
+                      in practical examples, although parts of the algorithms scale as 
+                        
+                           O
+                           (
+                           
+                              
+                                 n
+                              
+                              
+                                 2
+                              
+                           
+                           )
+                        
+                      in the worst case. This paper has focused on the algorithmic foundation and properties of the adaptive grids. In a follow-up paper the scheme will be extended with distributed parallel functionality in order to scale the code to massively parallel computers.
+
+@&#REFERENCES@&#
+

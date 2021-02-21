@@ -1,0 +1,2958 @@
+@&#MAIN-TITLE@&#Practical solutions for a dock assignment problem with trailer transportation
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We study a distribution warehouse.
+
+
+                        
+                        
+                           
+                           Trailers need to be assigned to docks for loading or unloading.
+
+
+                        
+                        
+                           
+                           The purpose is to produce high-quality solutions to large (real-life) instances.
+
+
+                        
+                        
+                           
+                           We cast the practical setting into a hierarchical bi-objective scheduling problem.
+
+
+                        
+                        
+                           
+                           We implement four different methods and compare them via computational experiments.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Dock assignment
+
+Multicriteria scheduling
+
+Branch and bound
+
+Beam search
+
+Tabu search
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  We study a distribution warehouse in which trailers need to be assigned to docks for loading or unloading. A parking lot is used as a buffer zone and transportation between the parking lot and the docks is performed by auxiliary resources called terminal tractors. Each incoming trailer has a known arrival time and each outgoing trailer a desired departure time. The primary objective is to produce a docking schedule such that the weighted sum of the number of late outgoing trailers and the tardiness of these trailers is minimized; the secondary objective is to minimize the weighted completion time of all trailers, both incoming and outgoing. The purpose of this paper is to produce high-quality solutions to large instances that are comparable to a real-life case. This will oblige us to abandon the guarantee of always finding an optimal solution, and we will instead look into a number of sub-optimal procedures. We implement four different methods: a mathematical formulation that can be solved using an IP solver, a branch-and-bound algorithm, a beam search procedure and a tabu search method. Lagrangian relaxation is embedded in the algorithms for computing lower bounds. The different solution frameworks are compared via extensive computational experiments.
+               
+            
+
+@&#INTRODUCTION@&#
+
+We study a distribution warehouse with several docks, where incoming trailers are unloaded after they arrive and where outgoing trailers are loaded before they leave. Each dock can be occupied by at most one trailer at any moment in time. The site also contains a parking lot, which serves as a buffer area where trailers are temporarily parked. We distinguish between three types of trailers. First of all, we have the coupled trailers. These trailers arrive at the parking lot at a known arrival time (a release date) and are brought to the dock by the trucker, who waits until the load or unload activity is completed to take the trailer away. A desired latest departure time (a due date) is specified for each of these trailers to avoid having truckers wait for excessive time at the plant. A second type of trailers are the uncoupled incoming trailers that are to be unloaded. These trailers also have a known arrival time (a release date) but no restrictive due date. The third set of trailers are the uncoupled outgoing trailers to be loaded, which are available at the parking area from the outset. These trailers have a due date, since they need to be transported to clients after being loaded. Uncoupled trailers (both incoming and outgoing) are dropped off by a trucker at the parking lot and afterwards transferred to a dock by one of the terminal tractors, which are tractors designed for use in ports, terminals and heavy industry. After unloading or loading at the dock, the uncoupled trailer is moved back to the parking lot by a tractor, where it will be picked up by a trucker later on.
+
+The described dock assignment problem is modeled after a case encountered at Toyota Parts Center Europe (TPCE), a Toyota warehouse in Diest, Belgium. The stated assumptions closely adhere to this practical situation. The purpose of this paper is to produce a baseline schedule for the entire next day. Such a baseline provides a convenient check whether the available capacity is sufficient for the upcoming operations, and it serves as a clear guideline for prioritization of those operations. Our task was to develop an automated procedure for building this schedule, which was at the time of our contacts being built mainly by hand. During the execution of this baseline schedule, TPCE obviously receives updated information about the planned arrival time of trucks (for instance based on GPS-tracking information), and some trucks without tracking information will also inevitably arrive somewhat earlier or later than planned. Based on this new information that gradually becomes available, the baseline schedule is manually adjusted in real time.
+
+In an earlier paper (Berghman, Leus, & Spieksma, 2014), we have explored the possibility of finding optimal solutions by means of integer (linear) programming (IP). In that study, the due dates were treated as strict deadlines. After discussion with the management of the TPCE site, however, it turned out that these latest departure times were better modeled as due dates: the existence of a feasible schedule meeting all due dates is not guaranteed, but satisfying them is our primary objective. Minimization of the waiting times of the trailers is the secondary objective. We ambition to produce high-quality solutions to realistic instances. Our results in Section 4 will indicate that large instances cannot be solved to guaranteed optimality within reasonable running times, and we will therefore resort to the development of heuristic procedures. The contributions of this text are fourfold: (1) we cast the practical problem setting into a hierarchical bi-objective optimization problem; (2) we present an IP formulation for this problem; (3) we propose different heuristic algorithms; and (4) we investigate how Lagrangian relaxation can lead to lower bounds. Our computational experiments will show that the best solutions are obtained by a hybrid algorithm that combines recovery beam search and tabu search.
+
+On a practical note, we need to mention that in spite of the promising computational performance that we are able to report, a practical implementation of our algorithms at the Toyota site seems rather unlikely: our (very enthusiastic) direct contact person at TPCE has left the company, and the interest of the remaining team members responsible for logistics in applying scientific methods for planning, is very low. The recent economic crisis and additional company-related downturns have even further distracted the team’s interest. We are convinced, however, that the documented work will be useful to readers confronted with similar planning problems in a practical setting.
+
+The remainder of this article is structured as follows. Section 2 provides a brief literature survey on the related topics of dock scheduling, multicriteria scheduling and flexible flow-shop scheduling. In Section 3, some definitions and a formal problem statement are presented. An IP formulation will be proposed in Section 4. Section 5 explains how schedules will be represented in our solution procedures and Section 6 proposes simple heuristics to provide initial solutions. Subsequently, a branch-and-bound (B&B) algorithm, a beam search algorithm and a tabu search algorithm will be represented in Sections 7, 8 and 9, respectively. An overview of our computational results is given in Section 10 and we round off the article with a summary and some conclusions in Section 11.
+
+@&#LITERATURE REVIEW@&#
+
+In this section, we provide a brief review of the recent relevant work in different fields. First, we describe the literature on dock scheduling including cross docking (Section 2.1). Secondly, the literature on multicriteria scheduling is surveyed in Section 2.2 and finally, a brief overview is included of the literature on flexible flow-shop scheduling (Section 2.3).
+
+The problem presented in this paper is a dock assignment problem: trailers are assigned to docks for a limited period of time for loading or unloading activities. The storage capacity of the warehouse is not restricted and there are no links between incoming and outgoing shipments. All goods stay at least one night in the warehouse, such that a product that is unloaded at day X will be forwarded at day 
+                           
+                              X
+                              +
+                              1
+                           
+                         at the earliest. We are not aware of existing scientific papers with exactly the same setup.
+
+A related setting with trailer scheduling that has received attention in the recent literature is cross docking. According to Yu and Egbelu (2008), “Cross docking is a warehouse management concept in which items delivered to a warehouse by incoming trucks are immediately sorted out, reorganized based on customer demands, routed and loaded into outgoing trucks for delivery to customers without the items being actually held in inventory at the warehouse.” The advantages are faster deliveries, lower inventory costs and a reduction of the warehouse space requirement. A comprehensive overview of different variations and the available literature can be found in Boysen and Fliedner (2010) and van Belle, Valckenaers, and Cattrysse (2012). The truck-dock assignment problem examines the scheduling of a set of trailers at docks over time (Miao, Lim, & Ma, 2009). The dock assignment problem is similar to the truck-dock assignment problem in cross docking, but in our case there is no explicit restriction on the warehouse capacity and the incoming and outgoing shipments are unrelated, so there are no precedence constraints between different trailers.
+
+When a schedule’s quality is evaluated on multiple performance criteria, in most cases there will be no schedule that achieves the optimal value for all criteria simultaneously and a tradeoff needs to be struck, which depends on the preferences of the decision maker. A common approach for dealing with such multicriteria scheduling problems is to aggregate the different criteria into one composite objective function, a process that is often called scalarization or simultaneous optimization (Baker & Smith, 2003; Hoogeveen, 2005). If one criterion is dominant, however, the decision maker will prefer to first distinguish the set of all schedules that are optimal with respect to the primary objective and then search within this set of schedules for one that is best for a secondary objective (Pinedo, 2008). This approach is called hierarchical or lexicographic optimization and is an example of a non-scalarizing method (Sarin & Hariharan, 2000; T’kindt, Gupta, & Billaut, 2003).
+
+The dock assignment problem studied in this paper can be modeled as a flexible flow shop. In a flexible flow shop, also called hybrid or multi-processor flow shop, at least one stage consists of parallel machines. The terminal tractors in this paper can be modeled as machines rather than transporters, especially since the time it takes the tractors to convey a trailer between the docks and the parking lot is essentially independent of the distance (see Section 3). In this way, the transportation activities become stages one and three of a flexible flow shop, and the load/unload activities constitute the second stage. In our problem, the same set of identical machines (the tractors) executes both the first and the third stage of the uncoupled trailers, while the second stage of all trailers takes place on another set of identical machines (the docks). None of these machines is needed for the first and the third stage of the coupled trailers. In a slightly different setting, scheduling with multiple resource types has also been studied by Blazewicz, Dell’Olmo, and Drozdowski (1999).
+
+
+                        Linn and Zhang (1999), Vignier, Billaut, and Proust (1999) and Ribas, Leisten, and Framiñan (2010) all provide surveys of the flexible flow-shop literature. Most studies deal with two-stage flow shops with parallel machines either in the first or in the second stage, but not in both. Many research articles related to flexible flow-shop scheduling are available, but most of these do not handle unequal ready times. Both approximation (see, e.g., Nichi, Hiranaka, & Inuiguchi, 2010; Tang & Xuan, 2006) and optimal approaches (for instance Haouari, Hidri, & Gharbi, 2006; Kis & Pesch, 2005) have been published.
+
+A limited number of articles propose solution procedures for flow-shop scheduling with release times. Moursli and Pochet (2000) introduce a B&B algorithm for makespan minimization that produces high-quality results even when it is truncated after a few minutes of computation time. Gupta, Krüger, Lauff, Werner, and Sotskov (2002) generalize well-known heuristic approaches and present constructive algorithms based on job insertion techniques and iterative algorithms based on local search. Paternina-Arboleda, Montoya-Torres, Acero-Domingues, and Herrera-Hernandez (2008) propose a heuristic for makespan minimization that focuses on the identification and exploitation of the bottleneck stage.
+
+A flowshop where a job may return one or more times to a previously visited machine, is called a reentrant flowshop. Although these flowshops are usually operated and scheduled as general job shops (Graves, Meal, Stefeka, & Zeghmi, 1983), some dedicated algorithms can be found in literature (see, e.g., Chen, Pan, & Wu, 2007; Choi & Kim, 2008; Kubiak, Lou, & Wang, 1996). Due to the specificity of our dock assignment problem, however, we will develop new models for producing optimal and heuristic solutions.
+
+We pointed out in Section 2.3 that three tasks are performed for each trailer (corresponding to three stages in a flexible flow shop): the movement from the parking lot to a dock, the loading or unloading task and the transportation back to the parking area. The decisions to be made are the timing of each of the three tasks, the choice of the tractor for stages one and three of the uncoupled trailers, and the choice of the dock for stage two of all trailers. The load/unload times may differ between jobs but do not depend on the dock. The transportation activities are modeled as having a constant duration because the time to follow the safety instructions and fulfilling administrative requirements is large compared to the actual transportation time. The parking lot and the gates are located very close to each other, so the driving time only makes up a small part of the total shunting time. In reality, not all trailers will need exactly the same duration for safety and for administration, but 10 minutes will suffice to cover these activities for all trailers. This value thus serves as a robust estimate of the processing time of these tasks in the baseline schedule to be developed, and the durations are modeled as a constant. Since the durations of the loading and unloading activities are all expressed as multiples of 10 minutes, we decide to work with time periods of this length. Consequently, the transportation activities have a duration of one time unit.
+
+The set J contains all jobs (trailers), with 
+                        
+                           |
+                           J
+                           |
+                           =
+                           n
+                           ,
+                        
+                      and T is the set of all tasks. Each job j ∈ J is a vector (t
+                     1, t
+                     2, t
+                     3) of three tasks, one at each stage (the first component is the task in the first stage, etc.). Set T can be partitioned as follows: 
+                        
+                           T
+                           =
+                           
+                              T
+                              1
+                           
+                           ∪
+                           
+                              T
+                              2
+                           
+                           ∪
+                           
+                              T
+                              3
+                           
+                           ,
+                        
+                      with Ti
+                      the set of all tasks of stage i (
+                        
+                           i
+                           =
+                           1
+                           ,
+                           2
+                           ,
+                           3
+                        
+                     ). A second partition is 
+                        
+                           T
+                           =
+                           
+                              T
+                              C
+                           
+                           ∪
+                           
+                              T
+                              U
+                           
+                           ∪
+                           
+                              T
+                              L
+                           
+                           ,
+                        
+                      where the set TC
+                      contains all tasks related to trailers that will remain coupled to the truck, TU
+                      gathers all tasks related to an uncoupled trailer that has to be unloaded, and TL
+                      contains all tasks pertaining to an uncoupled trailer that has to be loaded. Each task t ∈ T
+                     1 has a ready time rt
+                     ; for t ∈ TL
+                     , 
+                        
+                           
+                              r
+                              t
+                           
+                           =
+                           0
+                        
+                     . With each task t ∈ T
+                     2 we associate a processing time pt
+                     , denoting the time to load or unload the trailer. Each third-stage loading task t ∈ TL
+                     ∩T
+                     3 has a due date dt
+                     , which is based on the agreed arrival time at the customer. Each third-stage coupled task t ∈ TC
+                     ∩T
+                     3 also has a due date, which creates a time window for the coupled trailers. This window is meant to restrict the trucker’s time at the site. Each of the tasks t ∈ (TU
+                     ∩T
+                     2)∪(TL
+                     ∩T
+                     3)∪(TC
+                     ∩T
+                     3) also has a weight wt
+                     , representing the importance of the job. The weights are chosen based on the product type and on the transportation mode towards the client. At TPCE, a higher weight applies for outbound trailers that need to be loaded on a train or a boat, for instance. The resources in the second stage are m < n identical docks (also called ‘gates’), and τ < m identical terminal tractors execute both the first and the third stage of the uncoupled trailers. The trucks that transport coupled trailers are not explicitly modeled as resources because they are not shared among the different trailers. Each machine (either a dock or a tractor) can process at most one task at a time and preemption of a task is not allowed.
+
+During the transportation stages one and three, the dock is also considered to be occupied, mainly for safety reasons. As a consequence, a stage-two task always starts immediately at the end of the corresponding stage-one task: the selected dock is always free. A stage-three task of a coupled trailer will also start directly at the end of its stage-two task. A stage-three task of an uncoupled trailer, on the other hand, can start as soon as the corresponding stage-two task is finished, but will regularly be delayed because of unavailability of tractors. This leads to the phenomenon of blocking: as long as the stage-three task for a trailer is not executed, the assigned dock remains occupied although stage two may already be completed. Consequently, also the ‘dock’-resources are not exclusively tied to only one stage. An example instance with five trailers (
+                        
+                           n
+                           =
+                           5
+                        
+                     ) is described in Table 1
+                     . A feasible schedule with one tractor (
+                        
+                           τ
+                           =
+                           1
+                        
+                     ) and three docks (
+                        
+                           m
+                           =
+                           3
+                        
+                     ) is depicted in Fig. 1
+                      (‘gi
+                     ’ stands for gate/dock i). Each job is visually represented by three blocks, one for each stage. White blocks represent occupation of the dock and black blocks represent occupation of both the tractor and the dock. Note that the tractor is not assigned to the transportation of job one, since it is a coupled job. The hatched block represents blocking: trailer three remains at dock two although unloading is already finished because the terminal tractor is occupied at dock 3 during time period 17.
+
+A final constraint is that the schedule length cannot exceed H
+                     max , the length of the time horizon. Unless otherwise mentioned, we impose 
+                        
+                           
+                              H
+                              max
+                           
+                           =
+                           120
+                           ,
+                        
+                      representing a working day of 20 hours (each time unit corresponds to 10 minutes). With this common deadline, verifying the existence of a feasible schedule becomes NP-complete (since the decision variant of P||C
+                     max  is NP-complete, by straightforward reduction from 3-PARTITION; see Garey and Johnson, 1978).
+
+Informally, our goal is to have all outgoing and coupled trailers ready for transportation by their due date and also to perform all tasks as quickly as possible. The first objective of respecting due dates is far more important than the overall desire of ‘early’ processing, and we opt for lexicographic optimization. The primary objective is to live up to the due dates as well as possible. The minimization of the weighted sum of completion times is our secondary objective, where for incoming jobs the completion time of stage two is important, while for coupled and outgoing jobs we focus on the completion time of stage three. In Berghman et al. (2014), optimization only of the second objective was studied, while due-date violation was forbidden (due dates were deadlines). In practice, however, it turns out that the due dates are tight and a feasible plan without violation might not exist. After discussions with the site management, we have opted for modeling the primary objective by means of two components: we minimize the weighted sum of the number of late coupled and outgoing trailers and the tardiness of those trailers. Formally, our objectives are
+
+                        
+                           
+                              
+                                 min
+                                 
+                                 
+                                    z
+                                    1
+                                 
+                                 =
+                                 
+                                    ∑
+                                    
+                                       
+                                          
+                                             
+                                                t
+                                                ∈
+                                                
+                                                   (
+                                                   
+                                                      T
+                                                      C
+                                                   
+                                                   ∩
+                                                   
+                                                      T
+                                                      3
+                                                   
+                                                   )
+                                                
+                                                ∪
+                                                
+                                                   (
+                                                   
+                                                      T
+                                                      L
+                                                   
+                                                   ∩
+                                                   
+                                                      T
+                                                      3
+                                                   
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 
+                                    θ
+                                    t
+                                 
+                                 +
+                                 α
+                                 
+                                    δ
+                                    t
+                                 
+                              
+                           
+                        
+                     and
+
+                        
+                           
+                              
+                                 min
+                                 
+                                 
+                                    z
+                                    2
+                                 
+                                 =
+                                 
+                                    ∑
+                                    
+                                       
+                                          
+                                             
+                                                t
+                                                ∈
+                                                
+                                                   (
+                                                   
+                                                      T
+                                                      C
+                                                   
+                                                   ∩
+                                                   
+                                                      T
+                                                      3
+                                                   
+                                                   )
+                                                
+                                                ∪
+                                                
+                                                   (
+                                                   
+                                                      T
+                                                      L
+                                                   
+                                                   ∩
+                                                   
+                                                      T
+                                                      3
+                                                   
+                                                   )
+                                                
+                                                ∪
+                                                
+                                                   (
+                                                   
+                                                      T
+                                                      U
+                                                   
+                                                   ∩
+                                                   
+                                                      T
+                                                      2
+                                                   
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 
+                                    w
+                                    t
+                                 
+                                 
+                                    C
+                                    t
+                                 
+                                 ,
+                              
+                           
+                        
+                     where Ct
+                      is the completion time of task t, 
+                        
+                           
+                              θ
+                              t
+                           
+                           =
+                           max
+                           
+                              {
+                              
+                                 C
+                                 t
+                              
+                              −
+                              
+                                 d
+                                 t
+                              
+                              ;
+                              0
+                              }
+                           
+                        
+                      is the tardiness of t and δt
+                      is a binary indicator equal to 1 if θt
+                      > 0, and 0 otherwise.
+
+The composite objective z
+                     1 was chosen because lower tardiness is better for a trailer, but we may prefer having one trailer late by two time periods over having two trailers late each by one time period, because each tardiness occurrence will give rise to communication with the client, loss of time and a possible loss in revenues and/or reputation. For this reason, we also incorporate the number of late trailers. The value α ≥ 0 serves as a scaling parameter between these two client-oriented performance measures. Consequently, objective z
+                     1 is an extension of the total tardiness objective and incorporates a fixed as well as a proportional tardiness cost for every tardy job. It has a very practical sense: if a trailer is tardy then the warehouse incurs a penalty that increases proportionally over time. The weighted completion-time objective z
+                     2 is also convenient for our setting: all the incoming goods will be stored in the warehouse as early as possible and all outgoing trailers will be in the parking zone as quickly as possible, ready for transportation towards the client. Additionally, in case of coupled trailers, we also reduce the trucker’s stay on site. Optimization of z
+                     1 has priority over z
+                     2: improving z
+                     1 is crucial, even if it causes a worsening in z
+                     2 (hierarchical optimization).
+
+Unless otherwise mentioned, the different solution methods tested below will each be allotted 1 hour of computation time for each instance. This time limit was imposed by the TPCE management. Letting the computations run overnight was not an option because the management of the site found it important to have a full schedule ready by the end of the previous working day in order to cross-check various external contacts with clients and suppliers.
+
+Various IP formulations were explored in Berghman et al. (2014) for minimizing z
+                     2 with deadlines. A time-indexed formulation was consistently found to be the most efficient. For this reason, we will adapt that formulation to our multicriteria setting with due dates. Let (time) period u be the time interval 
+                        
+                           [
+                           u
+                           −
+                           1
+                           ,
+                           u
+                           [
+                        
+                     . For all tasks t ∈ T and for all time periods u ∈ Ht
+                     , we define variable
+
+                        
+                           
+                              
+                                 
+                                    
+                                       
+                                          
+                                             x
+                                             
+                                                t
+                                                u
+                                             
+                                          
+                                          =
+                                          
+                                             {
+                                             
+                                                
+                                                   
+                                                      1
+                                                   
+                                                   
+                                                      
+                                                         if
+                                                         
+                                                         task
+                                                         
+                                                         t
+                                                         
+                                                         starts
+                                                         
+                                                         in
+                                                         
+                                                         period
+                                                         
+                                                         u
+                                                         ,
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      0
+                                                   
+                                                   
+                                                      
+                                                         otherwise
+                                                         ,
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     with Ht
+                      the time window for t ∈ T. Specifically, 
+                        
+                           
+                              H
+                              t
+                           
+                           =
+                           
+                              {
+                              
+                                 r
+                                 t
+                              
+                              +
+                              1
+                              ,
+                              …
+                              ,
+                              
+                                 H
+                                 max
+                              
+                              −
+                              
+                                 p
+                                 t
+                              
+                              −
+                              1
+                              }
+                           
+                        
+                      if t ∈ T
+                     1, 
+                        
+                           
+                              H
+                              t
+                           
+                           =
+                           
+                              {
+                              
+                                 r
+                                 t
+                              
+                              +
+                              2
+                              ,
+                              …
+                              ,
+                              
+                                 H
+                                 max
+                              
+                              −
+                              
+                                 p
+                                 t
+                              
+                              }
+                           
+                        
+                      if t ∈ T
+                     2 and 
+                        
+                           
+                              H
+                              t
+                           
+                           =
+                           
+                              {
+                              
+                                 r
+                                 t
+                              
+                              +
+                              2
+                              +
+                              
+                                 p
+                                 t
+                              
+                              ,
+                              …
+                              ,
+                              
+                                 H
+                                 max
+                              
+                              }
+                           
+                        
+                      if t ∈ T
+                     3 (each task has to be finished by H
+                     max , so we choose the latest starting time for each task as H
+                     max  minus the duration of the considered task and of its successors). Furthermore, for all tasks t ∈ (TC
+                     ∩T
+                     3)∪(TL
+                     ∩T
+                     3), consider θt
+                      and δt
+                      as defined in Section 3. A linear formulation with these variables and with two objectives is:
+
+                        
+                           (1)
+                           
+                              
+                                 
+                                    
+                                       
+                                          min
+                                          
+                                          
+                                             z
+                                             1
+                                          
+                                          =
+                                          
+                                             ∑
+                                             
+                                                
+                                                   
+                                                      
+                                                         t
+                                                         ∈
+                                                         
+                                                            (
+                                                            
+                                                               T
+                                                               C
+                                                            
+                                                            ∩
+                                                            
+                                                               T
+                                                               3
+                                                            
+                                                            )
+                                                         
+                                                         ∪
+                                                         
+                                                            (
+                                                            
+                                                               T
+                                                               L
+                                                            
+                                                            ∩
+                                                            
+                                                               T
+                                                               3
+                                                            
+                                                            )
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             θ
+                                             t
+                                          
+                                          +
+                                          α
+                                          
+                                             δ
+                                             t
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (2)
+                           
+                              
+                                 
+                                    
+                                       
+                                          min
+                                          
+                                          
+                                             z
+                                             2
+                                          
+                                       
+                                    
+                                    
+                                       =
+                                    
+                                    
+                                       
+                                          
+                                             ∑
+                                             
+                                                t
+                                                ∈
+                                                
+                                                   T
+                                                   U
+                                                
+                                                ∩
+                                                
+                                                   T
+                                                   2
+                                                
+                                             
+                                          
+                                          
+                                             w
+                                             t
+                                          
+                                          
+                                             (
+                                             
+                                                (
+                                                
+                                                   ∑
+                                                   
+                                                      u
+                                                      ∈
+                                                      
+                                                         H
+                                                         t
+                                                      
+                                                   
+                                                
+                                                u
+                                                
+                                                   x
+                                                   
+                                                      t
+                                                      u
+                                                   
+                                                
+                                                )
+                                             
+                                             −
+                                             1
+                                             +
+                                             
+                                                p
+                                                t
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                 
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          +
+                                          
+                                          
+                                             ∑
+                                             
+                                                
+                                                   
+                                                      
+                                                         t
+                                                         ∈
+                                                         
+                                                            (
+                                                            
+                                                               T
+                                                               C
+                                                            
+                                                            ∩
+                                                            
+                                                               T
+                                                               3
+                                                            
+                                                            )
+                                                         
+                                                         ∪
+                                                         
+                                                            (
+                                                            
+                                                               T
+                                                               L
+                                                            
+                                                            ∩
+                                                            
+                                                               T
+                                                               3
+                                                            
+                                                            )
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             w
+                                             t
+                                          
+                                          
+                                             (
+                                             
+                                                ∑
+                                                
+                                                   u
+                                                   ∈
+                                                   
+                                                      H
+                                                      t
+                                                   
+                                                
+                                             
+                                             u
+                                             
+                                                x
+                                                
+                                                   t
+                                                   u
+                                                
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     subject to
+
+                        
+                           (3)
+                           
+                              
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                             ∑
+                                             
+                                                u
+                                                ∈
+                                                
+                                                   H
+                                                   t
+                                                
+                                             
+                                          
+                                          
+                                             x
+                                             
+                                                t
+                                                u
+                                             
+                                          
+                                          =
+                                          1
+                                          
+                                          ∀
+                                          t
+                                          ∈
+                                          T
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (4)
+                           
+                              
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                             ∑
+                                             
+                                                u
+                                                ∈
+                                                
+                                                   H
+                                                   t
+                                                
+                                             
+                                          
+                                          u
+                                          
+                                             x
+                                             
+                                                t
+                                                u
+                                             
+                                          
+                                          −
+                                          
+                                             d
+                                             t
+                                          
+                                          −
+                                          
+                                             δ
+                                             t
+                                          
+                                          
+                                             H
+                                             max
+                                          
+                                          ≤
+                                          0
+                                          
+                                          ∀
+                                          t
+                                          ∈
+                                          
+                                             (
+                                             
+                                                T
+                                                C
+                                             
+                                             ∩
+                                             
+                                                T
+                                                3
+                                             
+                                             )
+                                          
+                                          ∪
+                                          
+                                             (
+                                             
+                                                T
+                                                L
+                                             
+                                             ∩
+                                             
+                                                T
+                                                3
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (5)
+                           
+                              
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                             ∑
+                                             
+                                                u
+                                                ∈
+                                                
+                                                   H
+                                                   t
+                                                
+                                             
+                                          
+                                          u
+                                          
+                                             x
+                                             
+                                                t
+                                                u
+                                             
+                                          
+                                          −
+                                          
+                                             d
+                                             t
+                                          
+                                          −
+                                          
+                                             θ
+                                             t
+                                          
+                                          ≤
+                                          0
+                                          
+                                          ∀
+                                          t
+                                          ∈
+                                          
+                                             (
+                                             
+                                                T
+                                                C
+                                             
+                                             ∩
+                                             
+                                                T
+                                                3
+                                             
+                                             )
+                                          
+                                          ∪
+                                          
+                                             (
+                                             
+                                                T
+                                                L
+                                             
+                                             ∩
+                                             
+                                                T
+                                                3
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (6)
+                           
+                              
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                             ∑
+                                             
+                                                (
+                                                
+                                                   t
+                                                   1
+                                                
+                                                ,
+                                                
+                                                   t
+                                                   2
+                                                
+                                                ,
+                                                
+                                                   t
+                                                   3
+                                                
+                                                )
+                                                ∈
+                                                J
+                                             
+                                          
+                                          
+                                             (
+                                             
+                                                x
+                                                
+                                                   
+                                                      t
+                                                      1
+                                                   
+                                                   u
+                                                
+                                             
+                                             +
+                                             
+                                                x
+                                                
+                                                   
+                                                      t
+                                                      3
+                                                   
+                                                   u
+                                                
+                                             
+                                             +
+                                             
+                                                ∑
+                                                
+                                                   v
+                                                   ≤
+                                                   u
+                                                
+                                             
+                                             
+                                                (
+                                                
+                                                   x
+                                                   
+                                                      
+                                                         t
+                                                         2
+                                                      
+                                                      v
+                                                   
+                                                
+                                                −
+                                                
+                                                   x
+                                                   
+                                                      
+                                                         t
+                                                         3
+                                                      
+                                                      v
+                                                   
+                                                
+                                                )
+                                             
+                                             )
+                                          
+                                          ≤
+                                          m
+                                       
+                                    
+                                 
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                          ∀
+                                          u
+                                          ∈
+                                          {
+                                          1
+                                          ,
+                                          …
+                                          ,
+                                          
+                                             H
+                                             max
+                                          
+                                          }
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (7)
+                           
+                              
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                             ∑
+                                             
+                                                
+                                                   (
+                                                   
+                                                      t
+                                                      1
+                                                   
+                                                   ,
+                                                   
+                                                      t
+                                                      2
+                                                   
+                                                   ,
+                                                   
+                                                      t
+                                                      3
+                                                   
+                                                   )
+                                                
+                                                ∈
+                                                
+                                                   J
+                                                   U
+                                                
+                                                ∩
+                                                
+                                                   J
+                                                   L
+                                                
+                                             
+                                          
+                                          
+                                             (
+                                             
+                                                x
+                                                
+                                                   
+                                                      t
+                                                      1
+                                                   
+                                                   u
+                                                
+                                             
+                                             +
+                                             
+                                                x
+                                                
+                                                   
+                                                      t
+                                                      3
+                                                   
+                                                   u
+                                                
+                                             
+                                             )
+                                          
+                                          ≤
+                                          τ
+                                          
+                                          ∀
+                                          u
+                                          ∈
+                                          
+                                             {
+                                             1
+                                             ,
+                                             …
+                                             ,
+                                             
+                                                H
+                                                max
+                                             
+                                             }
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (8)
+                           
+                              
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                             x
+                                             
+                                                
+                                                   t
+                                                   1
+                                                
+                                                u
+                                             
+                                          
+                                          −
+                                          
+                                             x
+                                             
+                                                
+                                                   t
+                                                   2
+                                                
+                                                ,
+                                                u
+                                                +
+                                                1
+                                             
+                                          
+                                          =
+                                          0
+                                          
+                                          ∀
+                                          
+                                             (
+                                             
+                                                t
+                                                1
+                                             
+                                             ,
+                                             
+                                                t
+                                                2
+                                             
+                                             ,
+                                             
+                                                t
+                                                3
+                                             
+                                             )
+                                          
+                                          ∈
+                                          J
+                                          ;
+                                          ∀
+                                          u
+                                          ∈
+                                          
+                                             H
+                                             
+                                                t
+                                                1
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (9)
+                           
+                              
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                             ∑
+                                             
+                                                v
+                                                =
+                                                1
+                                             
+                                             u
+                                          
+                                          
+                                             x
+                                             
+                                                
+                                                   t
+                                                   3
+                                                
+                                                v
+                                             
+                                          
+                                          −
+                                          
+                                             ∑
+                                             
+                                                v
+                                                =
+                                                1
+                                             
+                                             
+                                                u
+                                                −
+                                                
+                                                   p
+                                                   
+                                                      t
+                                                      2
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             x
+                                             
+                                                
+                                                   t
+                                                   2
+                                                
+                                                v
+                                             
+                                          
+                                          ≤
+                                          0
+                                          
+                                          ∀
+                                          
+                                             (
+                                             
+                                                t
+                                                1
+                                             
+                                             ,
+                                             
+                                                t
+                                                2
+                                             
+                                             ,
+                                             
+                                                t
+                                                3
+                                             
+                                             )
+                                          
+                                          ∈
+                                          J
+                                          ;
+                                          ∀
+                                          u
+                                          ∈
+                                          
+                                             {
+                                             1
+                                             ,
+                                             …
+                                             ,
+                                             
+                                                H
+                                                max
+                                             
+                                             }
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (10)
+                           
+                              
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                             x
+                                             
+                                                t
+                                                u
+                                             
+                                          
+                                          ∈
+                                          
+                                             {
+                                             0
+                                             ,
+                                             1
+                                             }
+                                          
+                                          
+                                          ∀
+                                          t
+                                          ∈
+                                          T
+                                          ;
+                                          ∀
+                                          u
+                                          ∈
+                                          
+                                             H
+                                             t
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (11)
+                           
+                              
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                             δ
+                                             t
+                                          
+                                          ∈
+                                          
+                                             {
+                                             0
+                                             ,
+                                             1
+                                             }
+                                          
+                                          
+                                          ∀
+                                          t
+                                          ∈
+                                          
+                                             (
+                                             
+                                                T
+                                                C
+                                             
+                                             ∩
+                                             
+                                                T
+                                                3
+                                             
+                                             )
+                                          
+                                          ∪
+                                          
+                                             (
+                                             
+                                                T
+                                                L
+                                             
+                                             ∩
+                                             
+                                                T
+                                                3
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (12)
+                           
+                              
+                                 
+                                    
+                                    
+                                    
+                                       
+                                          
+                                             θ
+                                             t
+                                          
+                                          ≥
+                                          0
+                                          
+                                          ∀
+                                          t
+                                          ∈
+                                          
+                                             (
+                                             
+                                                T
+                                                C
+                                             
+                                             ∩
+                                             
+                                                T
+                                                3
+                                             
+                                             )
+                                          
+                                          ∪
+                                          
+                                             (
+                                             
+                                                T
+                                                L
+                                             
+                                             ∩
+                                             
+                                                T
+                                                3
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     Objective function (1) minimizes the weighted sum of the number of late coupled trailers and late uncoupled outgoing trailers, and the tardiness of those trailers. Objective (2) minimizes the weighted completion time of the stage-two tasks of the incoming trailers and the stage-three tasks of the coupled and outgoing trailers. Constraints (3) require each task to be processed exactly once. Constraints (4) establish whether a job is late or not and constraints (5) measure the tardiness. Constraints (6) ensure that in each time period, at most m docks are occupied. Constraints (7) enforce the capacity of the terminal tractors. Constraints (8) and (9) implement the precedence constraints between the three stages. We observe that a stage-two task can always begin immediately after the corresponding stage-one task has been completed. For reasons of clarity, the model above includes all variables relating to the three stages, but for actual computations the stage-two variables are eliminated via substitution according to (8). Optimization proceeds in two steps: first, objective (1) is optimized subject to constraints (3)–(12), leading to objective value z
+                     *. Subsequently, the constraint z
+                     1 ≤ z
+                     * is added and then objective (2) is optimized. The obtained objective value will be denoted as z
+                     2(z
+                     *). Alternatively, optimization can also proceed in one single step by minimizing 
+                        
+                           M
+                           
+                              z
+                              1
+                           
+                           +
+                           
+                              z
+                              2
+                           
+                           ,
+                        
+                      with 
+                        
+                           M
+                           =
+                           n
+                           
+                              w
+                              max
+                           
+                           
+                              H
+                              max
+                           
+                        
+                      an upper bound on z
+                     2, where w
+                     max  is the maximum weight over all trailers.
+                  
+
+All algorithms in this article were encoded in C using the Microsoft Visual Studio programming environment, and executed on a Lenovo Thinkpad X220i with an Intel Core i3 2.3 gigahertz processor and 2 gigabytes RAM, equipped with Windows 7. CPLEX version 12.4 is used to solve the IP and LP models. In all implementations, we choose 
+                        
+                           α
+                           =
+                           1
+                        
+                      unless otherwise mentioned. Based on Sadykov and Wolsey (2006) and Berghman et al. (2014) and in line with the current situation in the case studied, instances were created in the following way: 25 percent of the trailers remains coupled, 30 percent is uncoupled and has to be unloaded, and the remaining 45 percent are uncoupled trailers to be loaded. The ready times for the coupled and the incoming trailers are integers randomly selected out of [0, 64] and the weights of all trailers are randomly selected out of {1, 2, 3} (each value has equal probability). The processing times 
+                        
+                           
+                              p
+                              t
+                           
+                           =
+                           1
+                           +
+                           X
+                        
+                      with X binomially distributed with 16 trials and a probability of 0.5. The due dates for the coupled trailers are obtained as 
+                        
+                           
+                              d
+                              t
+                           
+                           =
+                           
+                              r
+                              t
+                           
+                           +
+                           
+                              p
+                              t
+                           
+                           +
+                           18
+                           ,
+                        
+                      while the due dates for the outgoing jobs are calculated in the following way: 
+                        
+                           
+                              d
+                              j
+                           
+                           =
+                           max
+                           
+                              {
+                              
+                                 d
+                                 j
+                                 ′
+                              
+                              ,
+                              
+                                 r
+                                 j
+                              
+                              +
+                              
+                                 max
+                                 
+                                    k
+                                    ∈
+                                    J
+                                 
+                              
+                              
+                                 {
+                                 
+                                    p
+                                    k
+                                 
+                                 }
+                              
+                              }
+                           
+                        
+                      with 
+                        
+                           
+                              d
+                              j
+                              ′
+                           
+                           ∈
+                           
+                              [
+                              β
+                              −
+                              10
+                              ,
+                              β
+                              +
+                              10
+                              ]
+                           
+                        
+                      and 
+                        
+                           β
+                           =
+                           
+                              
+                                 
+                                    ∑
+                                    
+                                       j
+                                       ∈
+                                       J
+                                    
+                                 
+                                 
+                                    p
+                                    j
+                                 
+                                 *
+                                 0.5
+                              
+                              m
+                           
+                        
+                     . For the case, the number of tractors is always very low compared to the number of gates. At TPCE, the tractors are actually rented on a monthly basis, and so the number τ is, to a certain extent, a decision variable (albeit not for our daily operational planning horizon), but financial considerations do not allow to employ a similar number of tractors as there are gates.
+
+
+                     Table 2 displays the objective values and the computation times for medium-sized instances for both the IP formulations and for their LP relaxations; the latter yield lower bounds LB1 on z
+                     1 and LB2(z
+                     1) on z
+                     2(z
+                     1). We have evaluated the performance of the solver with parameter settings that emphasize feasibility and focus less on proof of optimality (ILOG, 2008); with this new setting, however, CPLEX was not able to find a feasible solution for more instances. Moreover, the objective values found were sometimes worse than with the (initial) balanced setting (equal emphasis on feasibility and proof of optimality). We therefore report the results for the latter setting. We include the lower bounds because they may be useful for later sections. Here and below, ‘time
+                        i
+                     ’ represents the time spent by the relevant procedure on optimizing objective zi
+                      and ‘time’ represents the time consumed by the one-step procedure. For most instances, the single-step optimization is significantly faster than the two steps separately, although it does not find a guaranteed optimal solution within the time limit for one of the instances (entry ‘no opt sol’). For larger and more realistic instances with more trailers per dock (up to 48 gates, 480 trailers and over 1000 operations (tasks)), CPLEX is no longer able to produce optimal solutions: see Table 3
+                     . For most of those cases, CPLEX is even unable to find a feasible solution within 1 hour of computation time, or is aborted because of memory problems.
+
+It turns out (based on the previous section as well as on preliminary results for the exact B&B algorithm proposed in Section 7) that we cannot solve realistic instances to guaranteed optimality within reasonable running times and in the remainder of this text, we therefore resort to the development of heuristic procedures for solving the dock assignment problem. The procedures will be discussed in the following sections and afterwards compared experimentally. In this section, we first explain the schedule representation and the schedule generation scheme that will be used by those procedures.
+
+Similar to most improvement heuristics for scheduling problems, we will not operate directly on a schedule but rather on a representation of a schedule that admits an efficient and effective functioning of the algorithm. We opt for an (ordered) task list, which will also be referred to as a ‘sequence’ or ‘permutation’; similar choices have been made in a number of branching algorithms (see, e.g., Baker, 1974; Azizoğlu & Kirca, 1999). The tasks of stage two are not included in the list because they always start immediately after the corresponding stage-one task. The third-stage tasks of the coupled trailers are not included either since they start immediately after the corresponding stage-two task. As a consequence, the length of the permutation will be 
+                        
+                           2
+                           n
+                           −
+                           c
+                           ,
+                        
+                      with c the number of coupled trailers. A number without prime will represent a stage-one task and a number with prime ( ′ ) a stage-three task (the number is the job index).
+
+A schedule representation is transformed into a schedule by means of a schedule generation scheme (for details, see Kolisch, 1996). We implement a so-called serial generation scheme, which iteratively selects the next task in the list and schedules it as early as possible, taking ready times and capacity constraints into account. Only sequences that respect the intra-job precedence constraints will be considered: for each uncoupled trailer, the stage-one task has to precede the stage-three task. The sequence (4, 3, 1, 2, 4′, 5, 3′, 5′, 2′), for instance, can be transformed into the schedule in Fig. 1. Note that this is not the only sequence leading to this schedule. It can be shown (e.g. Kolisch, 1996) that with a regular objective function (i.e., non-decreasing with task completion times), which is the case both for z
+                     1 and for z
+                     2, at least one sequence is mapped to an optimal schedule by the serial generation scheme.
+
+Scheduling an uncoupled stage-one task blocks the considered gate from the task’s completion until the end of the time horizon; scheduling the corresponding stage-three task makes the gate available again from its ending time onwards. This blocking phenomenon may hamper a straightforward transformation of a task list into a feasible schedule. An illustration is provided in Fig. 2
+                     , where all docks are blocked after the stage-one tasks of trailers 4, 3 and 2 are scheduled because the corresponding stage-three tasks are not yet scheduled. The next task in the permutation is the stage-one task of trailer 5, for which there is no free dock.
+
+We call a permutation valid if the generation scheme finds a free dock at each iteration in which a stage-one task is planned, so that the capacity constraints are always respected. A valid permutation does not always generate a feasible schedule, because the overall deadline H
+                     max  may still be violated. Let γ(t) be the number of stage-one tasks related to uncoupled trailers from the start of the permutation up to, but not including, position t; let ω(t) be the number of stage-three tasks from the start of the permutation up to, but not including, position t; and define 
+                        
+                           ν
+                           (
+                           t
+                           )
+                           =
+                           γ
+                           (
+                           t
+                           )
+                           −
+                           ω
+                           (
+                           t
+                           )
+                           ,
+                        
+                      with 
+                        
+                           t
+                           ∈
+                           {
+                           2
+                           ,
+                           …
+                           ,
+                           2
+                           n
+                           −
+                           c
+                           }
+                        
+                      for all three definitions.
+
+                        Observation 1
+                        A permutation is valid if and only if for each position 
+                              
+                                 t
+                                 ∈
+                                 {
+                                 2
+                                 ,
+                                 …
+                                 ,
+                                 2
+                                 n
+                                 −
+                                 c
+                                 }
+                              
+                            filled with a stage-one task, ν(t) < m.
+
+This result is straightforward because when the generation scheme reaches position t in permutation, the number of free docks is exactly 
+                        
+                           m
+                           −
+                           ν
+                           (
+                           t
+                           )
+                        
+                     . In the example provided in Fig. 2, 
+                        
+                           ν
+                           (
+                           5
+                           )
+                           =
+                           3
+                           =
+                           m
+                           ,
+                        
+                      so the permutation is not valid.
+
+For a given permutation L, we define a new permutation V(L) obtained by traversing the permutation from left to right and monitoring ν(t) for each position t. Each time when 
+                        
+                           ν
+                           (
+                           t
+                           )
+                           =
+                           m
+                           ,
+                        
+                      the first stage-three task in the list after position t with stage-one task before position t is inserted at position t and the tasks in between are shifted one position to the right. We observe, based on Observation 1:
+
+                        Observation 2
+                        For any list L, the list V(L) is valid.
+
+As an illustration, the invalid (i.e., not valid) permutation (4, 3, 1, 2, 5, 4′, 3′, 5′, 2′) can be transformed into the valid permutation (4, 3, 1, 2, 4′, 5, 3′, 5′, 2′) using the above strategy. The resulting schedule was given in Fig. 1.
+
+In this section, we present a number of simple heuristics that consume only little runtime and that will be used to produce initial solutions for the algorithms that will be proposed in the following sections. We compare the performance of these simple algorithms on a set of test instances.
+
+The first set of algorithms are static dispatching rules, which determine the relative position of a task in a sequence by means of an index value for each task that is independent of the other tasks and of the start time of the task. For our problem, the loading and coupled jobs are sequenced first, and the sequence is then completed with the unloading jobs. The loading and unloading jobs are then replaced by both their first-stage and third-stage task (consecutively); the uncoupled jobs are replaced by their first-stage tasks. The SPT heuristic orders jobs in non-decreasing order of their processing time; SWPT sequences the jobs in non-decreasing order of their weighted processing time. The EDD rule sequences the coupled and unloading jobs in non-decreasing order of their due date; all unloading jobs have a non-restrictive due date, and they are sequenced in non-decreasing order of their weighted processing time.
+
+A second set of algorithms are dynamic dispatching rules, which are time-dependent (Pinedo, 2008). The MSF (minimum slack first) heuristic schedules the loading and coupled tasks j in order of non-decreasing 
+                        
+                           (
+                           
+                              d
+                              j
+                           
+                           −
+                           
+                              p
+                              j
+                           
+                           −
+                           t
+                           )
+                           ,
+                        
+                      with t the next decision point in the partially constructed schedule. The R&M heuristic (Rachamadugu & Morton, 1981) sequences the coupled and loading tasks j by non-decreasing order of their apparent tardiness cost ATC, which is defined as follows: 
+                        
+                           
+                              ATC
+                              j
+                           
+                           =
+                           
+                              1
+                              
+                                 p
+                                 j
+                              
+                           
+                           exp
+                           
+                              
+                                 −
+                                 
+                                    d
+                                    j
+                                    ′
+                                 
+                              
+                              
+                                 2
+                                 
+                                    p
+                                    avg
+                                 
+                              
+                           
+                           ,
+                        
+                      where 
+                        
+                           
+                              d
+                              j
+                              ′
+                           
+                           =
+                           max
+                           
+                              {
+                              0
+                              ,
+                              
+                                 d
+                                 j
+                              
+                              −
+                              
+                                 p
+                                 j
+                              
+                              −
+                              t
+                              }
+                           
+                        
+                      and p
+                     avg is the average processing time over all jobs. In both dynamic algorithms, the coupled tasks are again ordered by non-decreasing weighted processing time.
+
+We have tested these five algorithms on the 48 instances of Tables 2 and 3. Table 4
+                      shows the number of instances for which the heuristics produce an infeasible schedule, and the average gap for each objective. The gap for the first objective is calculated as follows: 
+                        
+                           
+                              gap
+                              1
+                           
+                           =
+                           
+                              
+                                 
+                                    z
+                                    1
+                                 
+                                 −
+                                 
+                                    z
+                                    *
+                                 
+                              
+                              
+                                 z
+                                 1
+                              
+                           
+                           ,
+                        
+                      with z
+                     1 the objective value of the heuristic and z
+                     * the optimal objective value when CPLEX was able to find it within 1 hour of computation time. If that is not the case, z
+                     * is the lowest one over all objective values found. Value gap2 is computed similarly for the second objective as the relative deviation from z
+                     2(z
+                     *), the best value known for z
+                     2 subject to the constraint that z
+                     1 ≤ z
+                     *. We observe that all the five heuristics find feasible solutions for almost all instances. EDD, MSF and R&M provide relatively good upper bounds. The runtimes of all heuristics are very low (fractions of a second). Unless mentioned otherwise, we use the best of the five solutions as a global upper bound in the algorithms that will be described in the following sections.
+
+The IP formulation presented in Section 4 is frequently unable to produce any feasible solution within the allotted runtime (see Table 3). In this section, we describe a B&B algorithm for the dock assignment problem. Its running times for obtaining guaranteed optimal solutions have turned out to be excessive for larger instances, regularly even longer than for the IP formulation of Section 4, and we will therefore examine the performance of the algorithm especially in a truncated mode (interrupted after a predetermined time period); the algorithm will be referred to as ‘truncated B&B’. An alternative way of exploring the enumeration tree only partially via beam search will be studied in Section 8.
+
+Below, we first comment the branching strategy (Section 7.1) and subsequently provide more details on the dominance rules (7.2), on the bounding procedures (7.3) and on parameterization (7.4).
+
+The second stage of the dock assignment problem corresponds to a parallel machine scheduling problem. For minimizing the total weighted completion time on parallel machines without ready times, it is a dominant decision to sequence the jobs allocated to a given machine by non-decreasing weighted processing time. Therefore, optimization routines need only be concerned with establishing appropriate job-machine assignments. Azizoğlu and Kirca (1999), for example, propose a B&B algorithm for minimization of the total weighted completion time on parallel machines where at each level of the enumeration tree, a given job is assigned to one of the machines. Procedures for identical parallel machine problems with ready times (see, e.g., Nessah, Yalaoui, & Chu, 2008) or which minimize the (weighted) tardiness (see, e.g., Azizoğlu & Kirca, 1998; Shim & Kim, 2007) rely on the fact that an optimal schedule can be constructed by assigning jobs to earliest available machines one by one according to an optimal job priority list (Baker, 1974). Therefore, enumeration schemes fix the elements of a priority list from first to last such that a subproblem corresponds to a partial schedule: a node at the ith level of the tree represents a partial schedule in which the first i positions have been filled, and branching from a node consists in appending an unscheduled job to the end of the partial list.
+
+For the three-stage scheduling problem studied in this article, we will also enumerate priority lists (permutations) by selecting the tasks in the list from the first to the last. A subproblem corresponding to a node at depth l of the search tree is to determine the last 
+                           
+                              (
+                              2
+                              n
+                              −
+                              c
+                              −
+                              l
+                              )
+                           
+                         elements of the permutation, and branching at this node is performed by fixing the 
+                           
+                              (
+                              l
+                              +
+                              1
+                              )
+                              th
+                           
+                         task in the list; the already sequenced tasks are called fixed tasks. Nodes for which the fixed tasks do not respect the intra-job precedences or the capacity constraints are immediately discarded. Each level of the tree constitutes a partition of all valid permutations, in which each node represents a subset of permutations with the same initial elements. From this subset, we choose one particular permutation that will be called the representative of the node, which is the permutation that most closely resembles the representative of the parent node and respects the branching decision. We refer to the corresponding objective values for the primary and the secondary objective as rep
+                        1 and rep
+                        2, respectively.
+
+We have also considered other branching strategies for an enumeration algorithm, in an attempt to partially avoid the combinatorial explosion in the enumeration. One possibility would be to branch on resolution options for resource conflicts, in line with, for instance, the B&B procedure of Demeulemeester and Herroelen (1992) for resource-constrained project scheduling, where nodes in the enumeration tree represent resource and precedence-feasible partial schedules. All remaining tasks are then scheduled according to earliest start times, not taking the resource constraints into account. Branches from a parent node correspond to inclusion-minimal sets of tasks, the delay of which resolves the next resource conflict at the parent node (so-called ‘minimal delay alternatives’). Kolisch, Sprecher, and Drexl (1995) find that the performance of this branching strategy is strongly dependent on the parametric characterization of the problem instances; in particular, the less dense the network, the higher the average CPU time. For the problem under study in this paper, the implied precedence network is quite sparse: there is a lot of parallelism due to the flexible flow-shop layout. Consequently, an enumeration procedure based on minimal delaying alternatives would risk incurring very high runtimes as well. We have therefore not implemented this alternative enumeration scheme.
+
+Define S(i; π) as the starting time of task i in the schedule S(π) that is generated based on permutation π, and let π(k) be the kth task in permutation π.
+
+                           Observation 3
+                           Given a permutation π, if there are two tasks 
+                                 
+                                    π
+                                    (
+                                    k
+                                    )
+                                    =
+                                    i
+                                 
+                               and 
+                                 
+                                    π
+                                    (
+                                    l
+                                    )
+                                    =
+                                    j
+                                 
+                               with k < l and S(i; π) > S( j; π), then π is dominated.
+
+This dominance result holds because for schedule S(π), an alternative permutation π′ can be set up with the tasks sequenced in non-decreasing starting time such that 
+                           
+                              S
+                              
+                                 (
+                                 
+                                    π
+                                    ′
+                                 
+                                 )
+                              
+                              =
+                              S
+                              
+                                 (
+                                 π
+                                 )
+                              
+                           
+                        . A related result pertains to task pairs with identical starting time:
+
+                           Observation 4
+                           Given a permutation π, if there are two tasks 
+                                 
+                                    π
+                                    (
+                                    k
+                                    )
+                                    =
+                                    i
+                                 
+                               and 
+                                 
+                                    π
+                                    (
+                                    l
+                                    )
+                                    =
+                                    j
+                                 
+                               with k < l, 
+                                 
+                                    S
+                                    (
+                                    i
+                                    ;
+                                    π
+                                    )
+                                    =
+                                    S
+                                    (
+                                    j
+                                    ;
+                                    π
+                                    )
+                                 
+                               and i > j, then π is dominated.
+
+Consider a schedule where two jobs start at the same time t, namely a task j
+                        1 on machine m
+                        1 and a task j
+                        2 on machine m
+                        2. If we interchange the schedules on machines m
+                        1 and m
+                        2 from time t onwards, the resulting overall schedule will have the same score on both objective functions. As a consequence, under the conditions listed in Observation 4, there exists a permutation π′ with the same objective values as π and in which i and j are sequenced by increasing job index.
+
+A feasible solution to constraints (3)–(12) yields an upper bound UB1 to z
+                        1 and also an upper bound UB2(UB1) to z
+                        2 that is conditional on an upper-bound constraint z
+                        1 ≤ UB1. For the example of Table 1, the schedule represented by Fig. 1 gives an upper bound 
+                           
+                              
+                                 UB
+                                 1
+                              
+                              =
+                              0
+                           
+                         to z
+                        1 and an upper bound 
+                           
+                              
+                                 UB
+                                 2
+                              
+                              
+                                 (
+                                 0
+                                 )
+                              
+                              =
+                              216
+                           
+                         to z
+                        2. Upper bounds are global bounds: they hold for all nodes in the search tree. Obviously, a value UB2(z) can also serve as 
+                           
+                              
+                                 UB
+                                 2
+                              
+                              
+                                 (
+                                 
+                                    z
+                                    +
+                                 
+                                 )
+                              
+                           
+                         with 
+                           
+                              z
+                              <
+                              
+                                 z
+                                 +
+                              
+                           
+                        . A lower bound LB1 for z
+                        1 is obtained as the optimal solution for a relaxation; a lower bound LB2(UB1) for z
+                        2 corresponds to the optimal solution for a relaxed problem with the addition of an upper-bound constraint z
+                        1 ≤ UB1. Lower bounds are local bounds: they are specific to one node in the search tree and all its children; a lower bound in the root node is a global bound.
+
+In each node, the partial schedule with the fixed tasks is monitored and a relaxation of the scheduling problem containing the remaining tasks is solved, where the capacities vary over the time periods (so in the IP formulation, for instance, the right-hand side of (6) and (7) can be different for different u). A lower bound is then the sum of the exact objective value for the fixed tasks and a bound for the contribution of the other tasks. It holds that 
+                              
+                                 
+                                    LB
+                                    2
+                                 
+                                 
+                                    (
+                                    z
+                                    )
+                                 
+                                 ≥
+                                 
+                                    LB
+                                    2
+                                 
+                                 
+                                    (
+                                    
+                                       z
+                                       +
+                                    
+                                    )
+                                 
+                              
+                            if 
+                              
+                                 
+                                    z
+                                    +
+                                 
+                                 >
+                                 z
+                                 ,
+                              
+                            since the optimization problem for 
+                              
+                                 z
+                                 +
+                              
+                            is a relaxation of the problem associated with z.
+
+When for a certain node LB1 > UB1, the node will be pruned. The same holds for a node where 
+                              
+                                 
+                                    LB
+                                    1
+                                 
+                                 =
+                                 
+                                    UB
+                                    1
+                                 
+                              
+                            and LB2(UB1) ≥ UB2(UB1). In this way, a node is eligible for further exploration only when LB1 < UB1 or when 
+                              
+                                 
+                                    LB
+                                    1
+                                 
+                                 =
+                                 
+                                    UB
+                                    1
+                                 
+                              
+                            and LB2(UB1) < UB2(UB1).
+
+
+                           Table 3 shows that CPLEX needs excessive runtimes for solving the LP relaxation; a similar problem arises for the other formulations of Berghman et al. (2014). If we relax the number of tractors (more concretely, we set 
+                              
+                                 τ
+                                 =
+                                 m
+                              
+                           ), a parallel machine scheduling problem results in which only stage two needs to be considered, after extending the processing times by the transportation times. The resulting bound can be computed by a time-indexed parallel machine formulation based on the one of Berghman et al. (2014). If we relax the number of gates (more precisely, we let 
+                              
+                                 m
+                                 =
+                                 n
+                              
+                           ), we can use CPLEX to solve the resulting parallel machine scheduling problem with precedence constraints in which some jobs do not need machines. It turns out that for both relaxed problems, most of the instances are too hard to solve within 1 hour of computation time.
+
+Another relaxation that is considered for producing lower bounds is Lagrangian relaxation and produces the lower bounds 
+                              
+                                 LB
+                                 1
+                                 LR
+                              
+                            and 
+                              
+                                 
+                                    LB
+                                    2
+                                    LR
+                                 
+                                 
+                                    (
+                                    U
+                                    
+                                       B
+                                       1
+                                    
+                                    )
+                                 
+                              
+                           ; this method is explained in more detail in Section 7.3.2.
+
+For each relaxation we can produce a permutation, by sequencing the jobs in non-decreasing order of their starting times and then replacing each coupled job by its corresponding stage-one task and each uncoupled job by its corresponding stage-one and stage-three task. The resulting feasible schedule after applying the serial schedule generation scheme yields an upper bound. The idea of transforming a solution to a relaxation into a feasible solution is not very common for ‘standard’ B&B algorithms, but has been suggested already in a context of Lagrangian relaxation (see Möhring, Schulz, Stork, & Uetz, 1999; 2003).
+
+To calculate 
+                              
+                                 
+                                    LB
+                                    1
+                                    LR
+                                 
+                                 ,
+                              
+                            the capacity constraints of both resource types (docks and tractors) are relaxed by means of Lagrange multipliers (see, e.g., Fisher, 1981). Additionally, for computing 
+                              
+                                 
+                                    LB
+                                    2
+                                    LR
+                                 
+                                 
+                                    (
+                                    
+                                       UB
+                                       1
+                                    
+                                    )
+                                 
+                                 ,
+                              
+                            the extra constraint z
+                           1 ≤ UB1 is also relaxed. Since the capacity constraints were the only constraints including more than one job, easily solvable independent job-level subproblems are obtained where the multipliers act as prices that regulate the use of the machines. For each task, the optimal starting time strikes a balance between these machine prices and the original objective function, either the number of jobs late and the total tardiness or the weighted completion time. At each iteration, the relaxed problem is solved and the multipliers are updated by means of subgradient optimization. An overview of the complete procedure is given as Algorithm 1
+                           . The two stopping criteria consist of an upper limit on the number of iterations and on the running time; in our implementations, these limits are 60 seconds and 1000 iterations in the root node, and 5 seconds and 10 iterations for all other search nodes. When the optimization is halted, a relaxed solution is obtained, which may or may not be feasible. The two most important steps in the computation are explained next.
+
+                              
+                                 
+                                    Relaxation The subproblem per job entails the choice of starting times for the different tasks so as to minimize the objective value subject to the intra-job precedence constraints (8) and (9). We evaluate each precedence-feasible combination of starting times and select one with the lowest cost. For the uncoupled trailers, only the tasks of stages one and three need to be scheduled explicitly since the stage-two task is started immediately after stage one. For the coupled trailers, it suffices to schedule only stage one explicitly and select a starting time with lowest cost. A natural implementation has a running time that is linear in the number of jobs and quadratic in the length of the planning horizon.
+
+
+                                    Updating the Lagrangian multipliers Subgradient optimization is an iterative procedure that generates new multipliers starting from an initial set in a systematic fashion. This procedure attempts to find values for the multipliers that yield the maximum lower bound. The initial multipliers are of the form 
+                                       
+                                          λ
+                                          
+                                             u
+                                             0
+                                          
+                                          ′
+                                       
+                                     = 
+                                       
+                                          β
+                                          
+                                             
+                                                H
+                                                max
+                                             
+                                             m
+                                          
+                                       
+                                     for the docks and 
+                                       
+                                          λ
+                                          
+                                             u
+                                             0
+                                          
+                                          
+                                             ′
+                                             ′
+                                          
+                                       
+                                     = 
+                                       
+                                          β
+                                          
+                                             
+                                                H
+                                                max
+                                             
+                                             τ
+                                          
+                                       
+                                     for the tractors (
+                                       
+                                          u
+                                          ∈
+                                          {
+                                          1
+                                          ,
+                                          …
+                                          ,
+                                          
+                                             H
+                                             max
+                                          
+                                          }
+                                       
+                                    ). The subgradients for the relaxed constraints are 
+                                       
+                                          
+                                             SG
+                                             u
+                                             ′
+                                          
+                                          =
+                                          
+                                             ∑
+                                             
+                                                (
+                                                
+                                                   t
+                                                   1
+                                                
+                                                ,
+                                                
+                                                   t
+                                                   2
+                                                
+                                                ,
+                                                
+                                                   t
+                                                   3
+                                                
+                                                )
+                                                ∈
+                                                J
+                                             
+                                          
+                                          
+                                             (
+                                             
+                                                x
+                                                
+                                                   
+                                                      t
+                                                      1
+                                                   
+                                                   u
+                                                
+                                             
+                                             +
+                                             
+                                                x
+                                                
+                                                   
+                                                      t
+                                                      3
+                                                   
+                                                   u
+                                                
+                                             
+                                             )
+                                          
+                                          +
+                                          
+                                             ∑
+                                             
+                                                (
+                                                
+                                                   t
+                                                   1
+                                                
+                                                ,
+                                                
+                                                   t
+                                                   2
+                                                
+                                                ,
+                                                
+                                                   t
+                                                   3
+                                                
+                                                )
+                                                ∈
+                                                J
+                                             
+                                          
+                                          
+                                             ∑
+                                             
+                                                v
+                                                ≤
+                                                u
+                                             
+                                          
+                                          
+                                             (
+                                             
+                                                x
+                                                
+                                                   
+                                                      t
+                                                      2
+                                                   
+                                                   v
+                                                
+                                             
+                                             −
+                                             
+                                                x
+                                                
+                                                   
+                                                      t
+                                                      3
+                                                   
+                                                   v
+                                                
+                                             
+                                             )
+                                          
+                                          −
+                                          
+                                             m
+                                             u
+                                          
+                                       
+                                     for the docks and 
+                                       
+                                          
+                                             SG
+                                             u
+                                             
+                                                ′
+                                                ′
+                                             
+                                          
+                                          =
+                                          
+                                             ∑
+                                             
+                                                
+                                                   (
+                                                   
+                                                      t
+                                                      1
+                                                   
+                                                   ,
+                                                   
+                                                      t
+                                                      2
+                                                   
+                                                   ,
+                                                   
+                                                      t
+                                                      3
+                                                   
+                                                   )
+                                                
+                                                ∈
+                                                
+                                                   J
+                                                   U
+                                                
+                                                ∪
+                                                
+                                                   J
+                                                   L
+                                                
+                                             
+                                          
+                                          
+                                             (
+                                             
+                                                x
+                                                
+                                                   
+                                                      t
+                                                      1
+                                                   
+                                                   u
+                                                
+                                             
+                                             +
+                                             
+                                                x
+                                                
+                                                   
+                                                      t
+                                                      3
+                                                   
+                                                   u
+                                                
+                                             
+                                             )
+                                          
+                                          −
+                                          
+                                             τ
+                                             u
+                                          
+                                       
+                                     for the tractors, where mu
+                                     represents the number of available docks during time period u and τu
+                                     represents the number of available tractors during u. The step size is 
+                                       
+                                          
+                                             w
+                                             
+                                                −
+                                                1
+                                             
+                                          
+                                          ,
+                                       
+                                     with w increasing by X every Y iterations. The multipliers are updated as follows in iteration i: 
+                                       
+                                          
+                                             λ
+                                             
+                                                u
+                                                i
+                                             
+                                             ′
+                                          
+                                          =
+                                          max
+                                          
+                                             {
+                                             0
+                                             ,
+                                             
+                                                λ
+                                                
+                                                   u
+                                                   ,
+                                                   i
+                                                   −
+                                                   1
+                                                
+                                                ′
+                                             
+                                             +
+                                             
+                                                w
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                             
+                                                SG
+                                                u
+                                                ′
+                                             
+                                             }
+                                          
+                                       
+                                     for the docks and 
+                                       
+                                          
+                                             λ
+                                             
+                                                u
+                                                i
+                                             
+                                             
+                                                ′
+                                                ′
+                                             
+                                          
+                                          =
+                                          max
+                                          
+                                             {
+                                             0
+                                             ,
+                                             
+                                                λ
+                                                
+                                                   u
+                                                   ,
+                                                   i
+                                                   −
+                                                   1
+                                                
+                                                
+                                                   ′
+                                                   ′
+                                                
+                                             
+                                             +
+                                             
+                                                w
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                             
+                                                SG
+                                                u
+                                                
+                                                   ′
+                                                   ′
+                                                
+                                             
+                                             }
+                                          
+                                       
+                                     for the tractors (
+                                       
+                                          i
+                                          =
+                                          1
+                                          ,
+                                          2
+                                          ,
+                                          …
+                                       
+                                    ). The multipliers for the additional constraint on z
+                                    1 in the optimization of z
+                                    2 are updated in a similar fashion. Some small experiments were run for parameterization.
+
+
+                        Table 5
+                         shows the results of an experiment run on four large instances
+                           1
+                        
+                        
+                           1
+                           More concretely (m, n, τ) = (36,288,5), (40,320,5), (44,352,6) and (48,384,6).
+                         in order to evaluate the most convenient algorithmic choices for the truncated B&B algorithm. Four different branching choices have been implemented. Each choice uses two ‘estimates’ for the best value of one objective achievable in each node; each estimate is either an upper or a lower bound. The first value is used to decide which node to explore next, and the second one serves as tie breaker. Superscript ‘LR’ refers to Lagrangian relaxation. In choices (1) and (2), the upper bound UB1 on z
+                        1 imposed for computing LB2(UB1) is the minimum of rep
+                        1 and the upper bound on z
+                        1 obtained via the 
+                           
+                              LB
+                              1
+                              LR
+                           
+                         computation. The second estimate in choice (3) is the minimum of rep
+                        2 and the upper bound on z
+                        2 associated with 
+                           
+                              LB
+                              1
+                              LR
+                           
+                        . The estimates in choice (4) are rep
+                        1 and rep
+                        2 respectively. In each setting, only the bounds mentioned are actually computed for fathoming. For each branching choice, we report a gap for the primary objective as before (
+                           
+                              
+                                 gap
+                                 1
+                              
+                              =
+                              
+                                 
+                                    
+                                       z
+                                       1
+                                    
+                                    −
+                                    
+                                       z
+                                       *
+                                    
+                                 
+                                 
+                                    z
+                                    1
+                                 
+                              
+                           
+                        ), but now we take z
+                        1 as the objective value for the particular branching choice and z
+                        * as the best objective value over all branching choices, (the ‘base’ setting, corresponding to 0.00 percent in the table), when each setting is interrupted after 20 minutes. Choice (1), for instance, reached an objective value that was 26.47 percent higher on average compared to setting (4). Branching choice (4) achieves the best results. Apparently, the upper bounds reflect rather well the quality of the partial solutions and exploring more nodes is better than having more accurate bounds for branching and pruning.
+
+
+                     Beam search (see, e.g., Bisiani, 1992; Ball, 2011) is a heuristic framework based on a B&B procedure with a breadth-first tree exploration, which provides a structured approach to a partial examination of an enumeration tree. The technique systematically develops a low number of solutions in parallel in an attempt to find good solutions with minimal search effort. At each level of the tree, only the b most promising nodes are retained as nodes to branch from; the parameter b is called the beam width. These nodes are pursued in a breadth-first fashion. Clearly, beam search will tend to require substantially less computational effort than standard B&B procedures, at the expense of the loss of guarantee of finding an optimal solution and the inability to recover from ‘wrong’ decisions. The same branching choices (here: evaluation functions) as for the B&B algorithm are tested. The values gap1 in Table 6
+                      are computed similarly as in the previous section. The table indicates that the best branching choice is based exclusively on upper bounds. Based on some preliminary experiments, the beam width is set to 
+                        
+                           b
+                           =
+                           5
+                        
+                     . We have also implemented and tested an enhanced beam search procedure that allows for more variation in the selection criteria for search nodes in the framework of what is usually called filtered beam search, but this did not lead to better results.
+
+The major disadvantage of beam search is that pruning a node, in particular a node leading to an optimal or to nearly optimal solutions, can never be recovered. The recovering beam search method overcomes this issue by introducing a recovering step at each level of the search tree, which searches for improved partial solutions (see, e.g., Della Croce & T’kindt, 2002; Della Croce, Ghirardi, & Tadei, 2004; Ghirardi & Potts, 2005; Valente & Alves, 2005; Esteve, Aubijoux, Chartier, & T’Kindt, 2006). At each level of the search tree, once the best b nodes and the corresponding best partial solutions are identified, a recovering step is applied to verify whether a current partial solution is dominated by another partial solution at the same level of the tree. If that is the case, the latter solution becomes the new current partial solution. This modification allows to partially recover from previous wrong decisions and can be seen as a local search on the partial solution.
+
+Since there are no obvious problem-specific dominance rules that can be used here, we opt for so-called pseudo-dominance conditions (Ghirardi & Potts, 2005): dominance conditions that are not always valid in general, but work in practice in most cases. Concretely, for a node at depth l, we try to insert the task at position l at all positions k ≤ l, we evaluate the objective values z
+                     1 and z
+                     2(z
+                     1) for the resulting partial schedules and we retain the best one. Subsequently, the insertion of the task at position 
+                        
+                           l
+                           −
+                           1
+                        
+                      is considered similarly at all positions 
+                        
+                           k
+                           ≤
+                           l
+                           −
+                           1
+                        
+                     . These steps are iterated up until the task at position 
+                        
+                           l
+                           −
+                           
+                              l
+                              *
+                           
+                           ,
+                        
+                      with l
+                     * a predefined number. We examine this reduced neighborhood because applying all possible interchange operators to the current partial schedule would take too much time. During this process, we ensure that we have b different partial solutions at each level of the tree. After some preliminary results, we set 
+                        
+                           b
+                           =
+                           2
+                        
+                      and 
+                        
+                           
+                              l
+                              *
+                           
+                           =
+                           40
+                        
+                     .
+
+For node evaluation we use a two-stage approach, where a crude evaluation (filtering phase) is applied to select a limited number of nodes that will be evaluated more accurately. For the crude evaluation, we apply the following rule: at the first 
+                        
+                           2
+                           u
+                           +
+                           c
+                        
+                      levels of the search tree, with u the number of uncoupled loading trailers and c the number of coupled trailers, we only branch on tasks related to coupled trailers and uncoupled loading trailers, because these trailers have due dates and thus can influence the primary objective. For accurate evaluation, the same criteria as for the branching choice in Section 7.4 are tested. Table 7
+                      indicates that the best choice coincides with that for the standard beam search.
+
+Tabu search (see, e.g., Glover, 1989) is a metaheuristic procedure that uses local search to iteratively move from a current solution to a solution in the neighborhood of this solution, until some stopping criterion is satisfied. Each solution has an associated neighborhood, and each solution in this neighborhood is reached from the initial solution by an operation called a move. At each iteration, a predetermined number of neighbor solutions are created and the best one is retained, even if it does not improve the current objective value. In this way, the chance of becoming trapped in local optima that are not globally optimal, is reduced. To prevent the search from cycling and re-visiting the same solutions many times, the (reverse of the) most recent moves are classified as forbidden or tabu. In case a tabu move would result in a very promising solution, however, its tabu classification may be overridden. The aspiration criterion that implements this condition evaluates the improvement in the objective value.
+
+We have implemented two tabu-search variants. For the first implementation, a move consists in swapping two random tasks in the permutation and, if needed, rendering the obtained permutation valid. At each iteration, the number of solutions generated equals the number n of jobs. When the objective function is not improved for 750 iterations (250 iterations with 10-minutes runtime limit), the procedure is re-initialized with the next best of the solutions produced by the initial heuristics.
+
+The second implementation attempts to select moves more judiciously rather than simply by swapping random tasks. This can be expected to produce better neighbors, but it will take more computation time. We again generate n solutions at each iteration. In X percent of the cases, a tardy job is inserted earlier in the permutation and in 
+                        
+                           (
+                           1
+                           −
+                           X
+                           )
+                        
+                      percent, a non-tardy job is put in a later position. We use regret-based random sampling (RBRS, Drexl 1991) to determine the next job to be moved: the probability of selection of job j is 
+                        
+                           
+                              
+                                 (
+                                 
+                                    T
+                                    j
+                                 
+                                 +
+                                 1
+                                 )
+                              
+                              α
+                           
+                           
+                              
+                                 ∑
+                                 
+                                    i
+                                    ∈
+                                    
+                                       T
+                                       t
+                                    
+                                 
+                              
+                              
+                                 
+                                    (
+                                    
+                                       T
+                                       i
+                                    
+                                    +
+                                    1
+                                    )
+                                 
+                                 α
+                              
+                           
+                        
+                      where Tj
+                      represents the tardiness of the job j and Tt
+                      is the set containing all tardy jobs. The selected job will be placed 
+                        
+                           5
+                           ,
+                           10
+                           ,
+                           15
+                           ,
+                           …
+                        
+                      and 50 places earlier in the permutation. For the jobs j with 
+                        
+                           
+                              T
+                              j
+                           
+                           =
+                           0
+                           ,
+                        
+                      we apply RBRS with the load/unload durations pj
+                      for selection; the jobs are then placed 
+                        
+                           5
+                           ,
+                           10
+                           ,
+                           15
+                           ,
+                           …
+                        
+                      and 50 positions further in the permutation. In case the objective is not improved for 750 iterations (250 iterations for 10-minutes runtime), we re-initialize with the next best of the initial solutions. Table 8
+                      shows that 
+                        
+                           α
+                           =
+                           0.5
+                        
+                      and 
+                        
+                           X
+                           =
+                           75
+                        
+                      percent produces the best results for RBRS.
+
+In order to experimentally compare the performance of the algorithms proposed in this paper, we have first run all algorithms for 10 minutes of computation time on the medium-sized instances (which already range between 240 and 480 operations), knowing that the largest instances will be allotted 1 hour of runtime. Table 9
+                      shows the values of z
+                     1 and z
+                     2 for the best solution found within the time limit. The average objective values are also reported, together with the average gap (deviation from optimal). We observe here that the standard tabu search algorithm (with random swaps) is the best performing one. Among the tree search algorithms, truncated B&B has the lowest average gap and recovery beam search achieves the lowest average objective value. The column labeled ‘hybrid’ is commented below.
+
+We have tested the dominance rules of Section 7.2 in a complete B&B algorithm (i.e., run to completion) on small examples (six or eight trailers, two gates and one or two tractors) and the results were quite favorable. For six trailers, the number of visited nodes in the search tree decreased from 62 000 to around 2000 and the computation time decreased from 0.3 seconds to 0.03 seconds. For eight trailers, the number of explored nodes went down from 13 000 000 to about 60 000 and the computation time improved from 85 seconds to less than 1 second. The first dominance rule was responsible for almost all improvements, which is quite logical for these particular instances because we only have two gates. We have then tested the dominance rules as part of a truncated B&B that was interrupted after 10 minutes on our medium-sized instances; see column ‘trunc B&B dom’ in Table 9. There were no significant improvements, however. We suspect that the main reason for the absence of improvement is the following. If the search tree is not completely explored, then dominance rules cannot be guaranteed to work: if a node is discarded because it is dominated by another one, then it is still not sure that the other node will be explored (see Gacias, Artigues, & Lopez, 2010 for similar observations). We have therefore decided not to use the dominance rules for the large instances.
+
+We now compare on a dataset with eight medium-size and eight large instances for 1 hour of computation time. Table 10
+                      shows the values of z
+                     1 and z
+                     2 for the best solution found within the time limit. The average objective values are also reported, together with the average gap (deviation from the best solution identified per instance). Similarly as for Table 9, we conclude that the recovery beam search algorithm performs slightly better than the standard beam search implementation, and so the pseudo-dominance rule and the limited neighborhood exploration do improve the performance. Recovery beam search does not come out as promising for this problem as it did for other problems, however: the extent of the improvement is only minor compared to previous studies in literature (see, for instance, Ghirardi & Potts, 2005 for makespan minimization for unrelated parallel machines and Esteve et al., 2006 for single-machine just-in-time scheduling). Tabu search with random swaps is the best performing algorithm of all those listed in Table 10; it is also better than tabu search with ‘intelligent’ insert operations and achieves an average gap for z
+                     1 of 3.68 percent for these instances.
+
+After closer examination (not in the tables), it turns out that recovery beam search often makes some drastic improvements in the initial solution over the first five to 10 minutes, but then the objective typically flattens out, and no important improvements are usually found afterwards. Tabu search, on the other hand, achieves a steady decrease in the objective function with time, even up to the 1-hour time limit. This observation motivates us to study the hybridization of the two procedures where the output of the recovery beam search after limited runtime is used as the first starting solution, replacing the best of the five dispatching rules discussed in Section 6, and then the tabu search is run for the remainder of the runtime. The results after 10 minutes of computation time (2 minutes recovery beam search and 8 minutes tabu search) for the medium-sized instances are presented in the last column (labeled ‘hybrid’) of Table 9. Clearly, this hybrid procedure is better than the other algorithms, achieving the lowest average objective value, and the lowest average optimality gap of around 11 percent; excluding the somewhat aberrant instance (20, 100, 3) with a z
+                     1-gap of 150 percent (objective 
+                        
+                           
+                              z
+                              1
+                           
+                           =
+                           25
+                        
+                      versus optimum of 10), the average gap reduces to 4.9 percent. For the large instances, we will allocate 5 minutes of CPU time to recovery beam search and 55 minutes to tabu search.
+
+Next to the foregoing sequential hybrid, for the large instances we have also implemented an alternating hybrid method, where the recovery algorithm is run for 5 minutes on each starting solution: on the initial one but also on each new starting solution after re-initialization. Table 11
+                      shows a final comparison of the recovery beam search, tabu search and the hybrid algorithms after 1 hour of computation time for the dataset with all large instances. For some instances, none of the algorithms finds a feasible solution. This, however, need not indicate a global shortcoming of the algorithms: it may well be that a feasible solution simply does not exist—there is no guarantee from the outset that the instances are feasible. For the instances concerned, we therefore subsequently extend the length of the planning horizon H
+                     max  to 144 and rerun all the tests. In practical terms, this means that the day will be run with overtime. The sequential hybrid is the best overall, with an average z
+                     1-gap of 6.40 percent for this dataset. For most of the 24 instances considered, this gap is below 4 percent, but the average is considerably increased by two instances with a gap of over 20 percent.
+
+Based on these results, we conclude that the main achievement of this study is the fact that we find high-quality feasible solutions – albeit not always optimal solutions – to very large real-life instances consisting of over 1000 operations. Finding such close-to-optimal solutions to the underlying problem is difficult, to start with because merely verifying whether a feasible solution exists, is already NP-complete, and also because there are no obvious (lower) bounds of good quality: LP cannot be computed anymore for the largest instances, and Lagrangian relaxation turns out to be not strong and/or informative enough when computed with reasonable runtimes. We underline also the fact that the parameters of the algorithms have not been tuned individually for each instance: the parametric choices described in the foregoing sections have been run without modification on all the large instances.
+
+@&#CONCLUSIONS@&#
+
+In this paper, we have defined and solved a bi-objective dock assignment problem with trailer transportation, with a clear hierarchy between the two objectives. We have explored the limits of the instance sizes that can be solved to guaranteed optimality within acceptable running times by means of integer programming and branch and bound. It turns out that these limits are too low to be of any use in the practical case that was the prime motivation for undertaking this work, which can require the planning of up to 48 gates, 480 trailers and over 1000 operations. We have therefore also examined the performance of different heuristics for solving large instances, namely a truncated branch-and-bound algorithm, a standard and a recovery beam search algorithm, and a tabu search algorithm. We apply Lagrangian relaxation for computing lower bounds, which can also be transformed into upper bounds (candidate solutions) via a schedule generation scheme. With respect to beam search, a recovery phase via a pseudo-dominance rule and a limited neighborhood search improves the standard implementation. This improvement is not as substantial as reported in literature for other problems, however. We find that a hybrid implementation of tabu search with recovery beam search produces the best results, generating high-quality solutions to realistic instances within reasonable computation times.
+
+Overall, with the current size and complexity of the search space, we conclude that a strong randomization is better than a structured search of the solution space by means of, e.g., beam search alone, presumably because too much overhead runtime is incurred in steering the procedure in the latter case. The main problem with branch and bound and beam search resides in the computation time for the lower bounds. Different bounds have been implemented, but all are either computationally too expensive or not tight enough to be beneficial. As a result, the best-performing implementations explore more nodes by not computing any lower bounds. As a first consequence, nodes in the search tree cannot be pruned. Secondly, lower bounds are also not available to guide the choice of the next branching alternative. For this reason, a challenging but valuable direction for future research is the development of efficient lower bounds. These may be interesting even if they are not tight, as long as they represent rather well the quality of a node.
+
+We have proposed to use a baseline schedule as a general guideline for the operations, which is gradually adjusted to reflect more accurate information as it becomes available, and not as a strict prescriptive plan providing a minute-to-minute description of the timing of the activities throughout the day. There is a large body of scientific literature on scheduling under uncertainty that confirms that when uncertainty is not too pervasive, then developing an indicative static baseline schedule and updating it as time progresses, allows to achieve a better quality for the resulting schedule than when no such baseline schedule is used and tasks are simply handled on a first-come-first-served basis (see for instance Vieira, Herrmann, & Lin, 2003 or Herroelen & Leus, 2005). For future work, a thorough simulation exercise might be set up to verify whether adhering to such an iteratively updated baseline schedule is more valuable than the use of simple real-time dispatching rules also in this particular scheduling environment.
+
+@&#REFERENCES@&#
+

@@ -1,0 +1,2880 @@
+@&#MAIN-TITLE@&#A framework for estimating relative depth in video
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           A method for generating sparse, relative depth estimates from video.
+
+
+                        
+                        
+                           
+                           Depth estimates can be generated without access to past or future frames.
+
+
+                        
+                        
+                           
+                           Depth maps are created through efficient filter-based propagation.
+
+
+                        
+                        
+                           
+                           Results are favourable when compared to more expensive SfM+MVS techniques.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Depth estimation
+
+2D-to-3D conversion
+
+Video processing
+
+Image processing
+
+Edge-aware filtering
+
+Label interpolation
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  We present a method for efficiently generating dense, relative depth estimates from video without requiring any knowledge of the imaging system, either a priori or by estimating it during processing. Instead we only require that the epipolar constraint between any two frames is satisfied and that the fundamental matrix can be estimated. By tracking sparse features across many frames and aggregating the multiple depth estimates together, we are able to improve the overall estimate for any given frame. Once the depth estimates are available, we treat the generation of the depth maps as a label propagation problem. This allows us to combine the automatically generated depth maps with any user corrections and modifications (if so desired).
+               
+            
+
+@&#INTRODUCTION@&#
+
+Depth information is useful for a variety of different image processing applications [1]. One such application is 2D-to-3D conversion whereby a single “2D” image or video is converted into a stereoscopic “3D” image or video, often through Depth-based Image Rendering (DBIR) [2]. DBIR is only possible if a depth map is available.
+
+A depth map is a monochromatic image where each pixel indicates how far that particular pixel in the original image is from the camera. Obtaining a depth map is a non-trivial procedure as there are many different ways to accomplish this. One such method is to apply computer vision techniques [3] such as Structure from Motion (SfM) and Multi-View Stereo (MVS) to obtain highly accurate depth maps for each frame in a video. These techniques are extremely powerful; the results that they return are representative of the actual imaged scene up to some scale factor.
+
+However, a complete reconstruction is often unnecessary. DBIR, for instance, is used to generate a stereo pair that is pleasant to view but not necessarily one that reflects the actual camera setup. In this case, a relative depth map is sufficient as the ordering between objects is more important than their actual depths [4].
+
+In our earlier work [5], we treated the tracking and depth estimation separately. We also made no attempt at rejecting frame pairs where there was insufficient camera motion. Here, we unify the tracking and estimation into a single depth estimation framework and make the method more resistant to degenerate camera configurations. We still treat the map generation as a labelling problem but we improve on the propagation method. We also provide several different strategies for performing the propagation.
+
+Our primary contribution in this paper is a novel framework for estimating sparse, relative depth in a computationally efficient fashion. Our secondary contributions are demonstrating how edge-aware filters can be used to generate dense depth maps and addressing certain numerical issues that arise with using these filters. We demonstrate this framework on a variety of footage to demonstrate its efficacy in different scenarios.
+
+@&#RELATED WORK@&#
+
+Methods for generating depth maps for 2D-to-3D conversion are different from the classical computer vision approaches in that they do not seek to find an accurate representation of the scene depth. Rather, they attempt to find a representation that is plausible to the viewer. As such the definition of depth and how it is obtained is much less stringent than with MVS, for instance.
+
+One way to do this is to generate depth maps purely from user inputs, i.e. semi-automated conversion. A well-known example of this is the work by Guttman et al. [4] where sparse, user-provided labels were propagated over an entire video. This has since been refined through the work of Wang et al. [6] and Phan and Androutsos [7]. The advantage is that it gives the user complete control over how the final depth maps appear. However providing the labelling can still be quite tedious and time-consuming.
+
+Another way to approach this is to first provide a seed labelling using automated methods. Here is where SfM and related approaches are quite useful. Depth Director by Ward et al. [8] uses SfM to obtain sparse depth values that are then propagated using Graph Cuts [9]. Video Stereolization by Liao et al. [10] and Movie Dimensionalization by Becker et al. [11] work in much the same way. These methods mainly differ in how the final maps are generated along with some heuristics for dealing with different types of camera motion. The strength of these approaches is that the initial maps can be generated automatically but then modified by a user later on as needed.
+
+It should be noted that SfM can be used to directly obtain novel views for the purpose of 2D-to-3D conversion. For instance, Zhang et al. [12] and Knorr et al. [13] both use SfM to determine the camera pose (position and orientation) and create new views by warping the existing frames. While this is a more direct approach than using a depth map for rendering, it suffers from the problems inherent with using SfM: the scene must be static. Independently moving objects break SfM’s inherent assumptions. By using the results in an intermediate step, it is possible to adjust them later on to correct any errors.
+
+Recently, work has been done into fully automated conversion using existing image-depth map pairs. Two examples are the work of Konrad et al. [14] and DepthTransfer by Karsch et al. [15]. These methods assume that the depth maps of similar images will look the same and so, given a database of images and depth maps, a depth map for an unknown image can be constructed by merging the depth maps of similar images. The known depth maps themselves can be obtained through a number of different means, include MVS. However, just like with the purely SfM-based approaches, it is very difficult to adjust the output of the algorithm.
+
+Finally, the propagation method we will describe in Section 7 is similar in idea to depth upsampling/interpolation [16,17]. However, those approaches take an existing, low-resolution disparity map and upsample it so that it is the same resolution as a higher resolution colour image of the scene. For example, Min et al. [16] use a filter-based approach to perform the upsampling. The difference between their method and ours is that we resample in order to allow the filter to propagate labelling information farther across the image. We then joint upsample to fill in any small details that would have been missed at the lower scale and produce a full-resolution depth map. Because joint upsampling can be interpreted as a label propagation problem, we are able to reuse our propagation scheme, only with different input images. As well, we note that Lang et al. [18] also addressed joint upsampling of low-resolution disparity maps. But, their approach was closer to ours as they were more concerned with a general label propagation problem.
+
+Our depth estimation framework is summarized in Fig. 1
+                     . For each new frame, we detect a set of features and track features from the previous frame into the current one. Once a track is sufficiently long enough, we perform pairwise disparity estimation through a process known as “parallel chaining” [19]. This is done in order to maximize the inter-frame motion for slow-moving cameras. Once sparse estimates are available, we can store them for future processing or generate a depth map immediately using edge-aware filtering [20]. Due to how the tracking is performed, depth estimates are unavailable for the first 
+                        
+                           
+                              
+                                 N
+                              
+                              
+                                 T
+                              
+                           
+                        
+                      frames of the sequence.
+
+As with the approaches described in Section 2, we treat the depth map generation as a labelling problem. This allows us to separate the estimation from the map generation. However, unlike the prior work, we consider the estimation and generation as completely separate stages. This can allow us to utilize different methods [21,18] for obtaining the final depth maps. For example, we can choose between generating high quality maps slowly or low quality maps quickly depending on the application.
+
+We have chosen to develop a new depth estimation scheme rather than relying on SfM as that degree of complexity is unnecessary. A straightforward approach based on sparse rectification is able to do the same thing. While there are very efficient methods for computing SfM [22,23], they require fairly sophisticated batch processing to update the reconstruction in real-time. If processing on a modern mobile device, the reconstruction can be done even more quickly if the on-board motion sensors are used [24]. That said, the process is still very computationally expensive. Because much of the data provided by SfM will be discarded, it is better to start from first principles in developing a more efficient solution.
+
+The rest of the paper is organized as follows. Section 4 describes our technique for sparse depth estimation. Sections 5 and 6 describe how we perform our feature tracking and generate our depth estimates from those tracks. Section 7 describes our propagation method. Finally, we present our results and discuss them in Sections 8 and 9, respectively.
+
+We begin by defining depth as being proportional to the rectified disparity between tracked features. Unlike SfM, we are not concerned with recovering the 3D structure of a scene. Rather, we wish to find how close or far an object is from the camera at any particular frame. We are not necessarily interested in any past or future frames, simply the current one. As such we focus on using the well-known depth/disparity relationship to obtain our relative depth estimates.
+
+The method is based on Pollefeys et al.’s epipolar rectification [25] and is very simple. Given an estimate of the fundamental matrix 
+                        
+                           F
+                        
+                     , use the left and right epipoles, 
+                        
+                           
+                              
+                                 
+                                    
+                                       e
+                                    
+                                    
+                                       →
+                                    
+                                 
+                              
+                              
+                                 l
+                              
+                           
+                        
+                      and 
+                        
+                           
+                              
+                                 
+                                    
+                                       e
+                                    
+                                    
+                                       →
+                                    
+                                 
+                              
+                              
+                                 r
+                              
+                           
+                        
+                      respectively, as the origins of a polar coordinate system. This will make the scanlines in the original images parallel to the epipolar lines in the transformed images. Because this is non-linear transformation, finding the mapping between the original and transformed images is non-trivial and much of [25] is spent finding the mapping.
+
+We chose epipolar rectification for two reasons. First, finding the rectification transform is quite easy to do for point sets. Second, and more importantly, the method is insensitive to the position of the epipoles. Standard stereo rectification methods attempt to find a pair of planar homographies [26] that will align epipolar lines to scanlines. These homographies act very similar to rotations and scalings in 3D space. The underlying assumption is that the original stereo pair had some small degree of misalignment and need to be corrected prior to any disparity estimation.
+
+This approach fails, however, if the epipoles are inside the image boundaries. An epipole is the projection of the other camera centre onto the current camera’s image plane. If the epipole is inside of the image then there is no linear transformation that will make the epipolar lines parallel to the scanlines. No rotation or scaling in 3D space will fix this. This type of configuration is common if the camera is moving forwards or backwards and so it is useful to be able to handle this situation. Because the epipolar rectification is a non-linear transformation, it is better able to handle this case.
+
+Consider a feature 
+                           
+                              
+                                 
+                                    
+                                       
+                                          p
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    k
+                                 
+                              
+                           
+                         in frame k (the reference frame) and its corresponding feature 
+                           
+                              
+                                 
+                                    
+                                       
+                                          p
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    l
+                                 
+                              
+                           
+                         in frame l (the target frame). Let 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                         be the fundamental matrix estimated from the correspondences between k and l. By definition the epipoles are the left and right null-spaces of 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                        . The inhomogeneous representation of the epipole in k is
+                           
+                              (1)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             e
+                                          
+                                          
+                                             →
+                                          
+                                       
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      x
+                                                   
+                                                   
+                                                      k
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      w
+                                                   
+                                                   
+                                                      k
+                                                   
+                                                
+                                             
+                                          
+                                          ,
+                                          
+                                             
+                                                
+                                                   
+                                                      y
+                                                   
+                                                   
+                                                      k
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      w
+                                                   
+                                                   
+                                                      k
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    k
+                                 
+                              
+                           
+                         is the epipole’s homogeneous coordinate. 
+                           
+                              
+                                 
+                                    
+                                       
+                                          e
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    l
+                                 
+                              
+                           
+                         is similarly defined.
+
+We define the rectified position of 
+                           
+                              
+                                 
+                                    
+                                       
+                                          p
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    k
+                                 
+                              
+                           
+                         as
+                           
+                              (2)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             ρ
+                                          
+                                          
+                                             →
+                                          
+                                       
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 =
+                                 (
+                                 
+                                    
+                                       ρ
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 ,
+                                 
+                                    
+                                       θ
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 )
+                                 ,
+                              
+                           
+                        where
+                           
+                              (3)
+                              
+                                 
+                                    
+                                       ρ
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 =
+                                 ‖
+                                 
+                                    
+                                       
+                                          
+                                             p
+                                          
+                                          
+                                             →
+                                          
+                                       
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 -
+                                 
+                                    
+                                       
+                                          
+                                             e
+                                          
+                                          
+                                             →
+                                          
+                                       
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 ‖
+                              
+                           
+                        and
+                           
+                              (4)
+                              
+                                 
+                                    
+                                       θ
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 =
+                                 ∠
+                                 (
+                                 
+                                    
+                                       
+                                          
+                                             p
+                                          
+                                          
+                                             →
+                                          
+                                       
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 -
+                                 
+                                    
+                                       
+                                          
+                                             e
+                                          
+                                          
+                                             →
+                                          
+                                       
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 )
+                                 .
+                              
+                           
+                        The same holds for 
+                           
+                              
+                                 
+                                    
+                                       
+                                          p
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    l
+                                 
+                              
+                           
+                        . We then define the disparity 
+                           
+                              
+                                 
+                                    Δ
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                         at k as
+                           
+                              (5)
+                              
+                                 
+                                    
+                                       Δ
+                                    
+                                    
+                                       k
+                                       ,
+                                       l
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       ρ
+                                    
+                                    
+                                       l
+                                    
+                                 
+                                 -
+                                 
+                                    
+                                       ρ
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 .
+                              
+                           
+                        
+                     
+
+We can ignore the angular component θ because it represents the angle of an epipolar line. The radial, or magnitude, component ρ represents a feature’s distance from an epipole. Because the apparent offset between features, i.e. disparity, encodes depth, the difference in ρ provides an estimate of the observed depth. We provide an example to demonstrate this.
+
+
+                        Fig. 2
+                         shows an image pair along with the overlaid feature point correspondences to provide an indication of the camera motion. SURF matching and detection [27] was used to obtain the initial correspondences and the standard RANSAC-based approach [28] was used to estimate 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                         and the associated inliers.
+
+
+                        Fig. 3
+                         shows the feature locations relative to the epipoles. In this example the epipoles are located outside of the image. The results of the coordinate transformation are shown in Fig. 4
+                        . By using the epipoles as the centre of a polar coordinate system, corresponding points can be trivially aligned along epipolar lines in the other image. All that is needed to do this is to scale the transformed set such that the range of θ for both the reference and target sets are the same. In fact, this is precisely what is done by Pollefeys et al. [25]. But because the correspondences are known, the value of θ can be ignored.
+
+A point cloud with the final spatial distribution of disparity values is shown in Fig. 5
+                        . As expected, disparities strongly correlate with the apparent distance of a feature from the camera. For example, features located on the shrubs behind the inuksuk have a smaller disparity than those on the inuksuk itself.
+
+An issue with this approach is that the resulting disparity measurements are directly dependant on the locations of the epipoles, which in turn depends on the estimate of 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                        . This is most evident when measuring the disparity of footage with purely translational motion. In this case the footage is, for all intents and purposes already rectified. When this occurs the epipoles are theoretically located at infinity, or more specifically their homogeneous coordinates will be close to zero.
+
+The effect of 
+                           
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    k
+                                 
+                              
+                              ,
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    l
+                                 
+                              
+                              ≈
+                              0
+                           
+                         is that the epipoles can now be located either on the same side of the image or on opposite sides. Furthermore, their locations do not have to be consistent with the motion of the camera. Rather, their locations are somewhat arbitrary because there are multiple valid solutions that will correspond to the epipolar lines being parallel (rectified).
+
+To accommodate this we transform the rectified points such that they appear as if the epipoles were both located on the same side of the Cartesian plane. By convention we chose the right-hand side because the image is located there. Prior to obtaining 
+                           
+                              
+                                 
+                                    Δ
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                         we pre-process 
+                           
+                              
+                                 
+                                    ρ
+                                 
+                                 
+                                    k
+                                 
+                              
+                           
+                         such that
+                           
+                              (6)
+                              
+                                 
+                                    
+                                       (
+                                       
+                                          
+                                             ρ
+                                          
+                                          
+                                             k
+                                          
+                                       
+                                       )
+                                    
+                                    
+                                       ′
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   2
+                                                   
+                                                      
+                                                         μ
+                                                      
+                                                      
+                                                         ρ
+                                                      
+                                                   
+                                                   -
+                                                   
+                                                      
+                                                         ρ
+                                                      
+                                                      
+                                                         k
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         
+                                                            |
+                                                            ∠
+                                                            (
+                                                            
+                                                               
+                                                                  
+                                                                     
+                                                                        e
+                                                                     
+                                                                     
+                                                                        →
+                                                                     
+                                                                  
+                                                               
+                                                               
+                                                                  k
+                                                               
+                                                            
+                                                            )
+                                                            |
+                                                            <
+                                                            
+                                                               
+                                                                  π
+                                                               
+                                                               
+                                                                  2
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   ⊕
+                                                   
+                                                      
+                                                         
+                                                            |
+                                                            ∠
+                                                            (
+                                                            
+                                                               
+                                                                  
+                                                                     
+                                                                        e
+                                                                     
+                                                                     
+                                                                        →
+                                                                     
+                                                                  
+                                                               
+                                                               
+                                                                  l
+                                                               
+                                                            
+                                                            )
+                                                            |
+                                                            <
+                                                            
+                                                               
+                                                                  π
+                                                               
+                                                               
+                                                                  2
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      
+                                                         ρ
+                                                      
+                                                      
+                                                         k
+                                                      
+                                                   
+                                                
+                                                
+                                                   otherwise
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    μ
+                                 
+                                 
+                                    ρ
+                                 
+                              
+                           
+                         is the mean of the set of 
+                           
+                              
+                                 
+                                    ρ
+                                 
+                                 
+                                    k
+                                 
+                              
+                           
+                         values and 
+                           
+                              ⊕
+                           
+                         is the exclusive-or operator. By mirroring along ρ, the effect is that the epipoles are now on the same side of the Cartesian plane. Finally, if the reference set is not located on the right-hand side we invert the measured disparity values by
+                           
+                              (7)
+                              
+                                 
+                                    
+                                       (
+                                       
+                                          
+                                             Δ
+                                          
+                                          
+                                             k
+                                             ,
+                                             l
+                                          
+                                       
+                                       )
+                                    
+                                    
+                                       ′
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      max
+                                                   
+                                                   (
+                                                   
+                                                      
+                                                         Δ
+                                                      
+                                                      
+                                                         k
+                                                         ,
+                                                         l
+                                                      
+                                                   
+                                                   )
+                                                   +
+                                                   
+                                                      min
+                                                   
+                                                   (
+                                                   
+                                                      
+                                                         Δ
+                                                      
+                                                      
+                                                         k
+                                                         ,
+                                                         l
+                                                      
+                                                   
+                                                   )
+                                                   -
+                                                   
+                                                      
+                                                         Δ
+                                                      
+                                                      
+                                                         k
+                                                         ,
+                                                         l
+                                                      
+                                                   
+                                                
+                                                
+                                                   |
+                                                   ∠
+                                                   (
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               e
+                                                            
+                                                            
+                                                               →
+                                                            
+                                                         
+                                                      
+                                                      
+                                                         k
+                                                      
+                                                   
+                                                   )
+                                                   |
+                                                   <
+                                                   
+                                                      
+                                                         π
+                                                      
+                                                      
+                                                         2
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      
+                                                         Δ
+                                                      
+                                                      
+                                                         k
+                                                         ,
+                                                         l
+                                                      
+                                                   
+                                                
+                                                
+                                                   otherwise
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 .
+                              
+                           
+                        These heuristics ensure that locations of the epipoles are consistent between frames for the same set of motions. In other words, if the camera is moving left-to-right then the estimated disparities should be the same, regardless of the footage itself.
+
+When dealing with arbitrarily captured footage, particularly from a hand-held camera, it is important to determine if the resulting 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                         estimate will be reliable. Insufficient baselines and rotations about the camera’s principle axis remain problematic regardless of the capture method. However, other effects such as an unsteady camera or rolling shutter,
+                           1
+                           The effect is an unnatural tilt in the direction of fast motion caused by the bottom rows being captured later then the top rows. This is an artifact of how modern CMOS cameras capture video.
+                        
+                        
+                           1
+                         tend to occur quite frequently with hand-held footage.
+
+Because we estimate the disparity directly from the rectified point correspondences, we always obtain a depth estimate regardless of the quality of 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                        . There is no “degenerate” condition where we cannot obtain a depth estimate. That said, a poor estimate of 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                         results in depth estimates that are little better than random noise.
+
+Our approach is to reject the 
+                           
+                              k
+                              →
+                              l
+                           
+                         frame pair if the GRIC score [29] of 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                         is greater than a homography 
+                           
+                              
+                                 
+                                    H
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                                 
+                                    inl
+                                 
+                              
+                           
+                         generated from the inliers of 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                        . This is a well-known technique in recovering structure from video sequences because it can detect both cases when the camera has not moved or if it is rotating about its principle axis. Furthermore it can also detect cases of severe rolling shutter artifacts as the shearing effect can be represented as an affine transform, something that is part of a more general homography. While this may result in frames without depth estimates, it helps to make the system more robust against poor camera motion.
+
+The crux of our depth estimation framework is our feature tracking strategy. By using disparity as a proxy for depth, we have the problem of ensuring that there is sufficient camera motion to obtain a good baseline so that it will not be rejected by GRIC (Section 4.3). As in [5], our solution is to obtain multiple 
+                        
+                           
+                              
+                                 F
+                              
+                              
+                                 k
+                                 ,
+                                 l
+                              
+                           
+                        
+                      estimates over a feature track and aggregate them. Unlike [5], we now use a parallel tracking strategy, shown in Fig. 6
+                     , so that after some buffering period of 
+                        
+                           
+                              
+                                 N
+                              
+                              
+                                 T
+                              
+                           
+                        
+                      frames, a depth estimate is available for every subsequent frame.
+
+Our approach to tracking is different from what is traditionally used in SfM [30–33]. During tracking, we do not attempt to determine if a feature met the epipolar constraint, merely that it was visible. We are not searching for globally optimal depth estimates, such as what is done in SfM. There, more accurate feature tracking can greatly improve the overall result. Our depth aggregation stage (Section 6) combines multiple, independent disparity measurements and so in this context is more tolerant against tracking errors. As we will discuss later on, outlier rejection based on the epipolar constraint may not actually be beneficial when generating the depth maps.
+
+The advantage to this approach is that each tracking buffer is independent of every other buffer. We only require access to the current frame in the video. Provided that the camera is moving, this strategy can generate new depth estimates for each new frame with a nearly constant memory footprint (linear with respect to the value of 
+                        
+                           
+                              
+                                 N
+                              
+                              
+                                 T
+                              
+                           
+                        
+                      and the number of detected features).
+
+An overview of this procedure is shown in Fig. 7
+                     . When a new frame k arrives we generate a set of features 
+                        
+                           
+                              
+                                 f
+                              
+                              
+                                 0
+                              
+                           
+                        
+                      using the FAST corner detector [34], where 
+                        
+                           
+                              
+                                 
+                                    
+                                       p
+                                    
+                                    
+                                       →
+                                    
+                                 
+                              
+                              
+                                 k
+                              
+                           
+                           ∈
+                           
+                              
+                                 f
+                              
+                              
+                                 0
+                              
+                           
+                        
+                      is the coordinate of a feature in frame k. We then create a tracking buffer 
+                        
+                           
+                              
+                                 F
+                              
+                              
+                                 b
+                              
+                           
+                           =
+                           
+                              
+                                 
+                                    
+                                       
+                                          f
+                                       
+                                       
+                                          0
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                      from the feature set, where b is the next available buffer index. The features in the previously initialized buffers are then tracked from the previous frame, 
+                        
+                           k
+                           -
+                           1
+                        
+                     , to the current frame, k. After a feature set has been tracked over 
+                        
+                           
+                              
+                                 N
+                              
+                              
+                                 T
+                              
+                           
+                        
+                      frames, it is flagged as “complete” and ready for depth estimation. We term this “parallel tracking” because each prior frame up to 
+                        
+                           k
+                           -
+                           
+                              
+                                 N
+                              
+                              
+                                 T
+                              
+                           
+                           -
+                           1
+                        
+                      has its own tracking buffer and those buffers are updated at the same time.
+
+When 
+                        
+                           
+                              
+                                 F
+                              
+                              
+                                 b
+                              
+                           
+                        
+                      is complete, it will contain the features over the tracked frames such that
+                        
+                           (8)
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    b
+                                 
+                              
+                              =
+                              
+                                 
+                                    
+                                       
+                                          
+                                             f
+                                          
+                                          
+                                             0
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             f
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                       ,
+                                       …
+                                       ,
+                                       
+                                          
+                                             f
+                                          
+                                          
+                                             
+                                                
+                                                   N
+                                                
+                                                
+                                                   T
+                                                
+                                             
+                                             -
+                                             1
+                                          
+                                       
+                                    
+                                 
+                              
+                              .
+                           
+                        
+                     However, during tracking features can leave the frame, disappear due to occlusions or begin tracking the wrong feature entirely. Therefore there are less properly tracked features in 
+                        
+                           
+                              
+                                 f
+                              
+                              
+                                 
+                                    
+                                       N
+                                    
+                                    
+                                       T
+                                    
+                                 
+                                 -
+                                 1
+                              
+                           
+                        
+                      then in 
+                        
+                           
+                              
+                                 f
+                              
+                              
+                                 0
+                              
+                           
+                        
+                     . When the track is complete, the tracker presents a final set of features
+                        
+                           (9)
+                           
+                              
+                                 
+                                    T
+                                 
+                                 
+                                    b
+                                 
+                              
+                              =
+                              
+                                 
+                                    
+                                       
+                                          
+                                             t
+                                          
+                                          
+                                             0
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             t
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                       ,
+                                       …
+                                       ,
+                                       
+                                          
+                                             t
+                                          
+                                          
+                                             
+                                                
+                                                   N
+                                                
+                                                
+                                                   T
+                                                
+                                             
+                                             -
+                                             1
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     where 
+                        
+                           
+                              
+                                 
+                                    
+                                       p
+                                    
+                                    
+                                       →
+                                    
+                                 
+                              
+                              
+                                 k
+                                 ∣
+                                 i
+                              
+                           
+                           ∈
+                           
+                              
+                                 t
+                              
+                              
+                                 i
+                              
+                           
+                        
+                      if and only if 
+                        
+                           
+                              
+                                 
+                                    
+                                       p
+                                    
+                                    
+                                       →
+                                    
+                                 
+                              
+                              
+                                 k
+                                 ∣
+                                 i
+                              
+                           
+                        
+                      is present in all of the feature sets 
+                        
+                           
+                              
+                                 f
+                              
+                              
+                                 i
+                              
+                           
+                        
+                     . The vector 
+                        
+                           
+                              
+                                 
+                                    
+                                       p
+                                    
+                                    
+                                       →
+                                    
+                                 
+                              
+                              
+                                 k
+                                 ∣
+                                 i
+                              
+                           
+                        
+                      is the position of feature 
+                        
+                           
+                              
+                                 
+                                    
+                                       p
+                                    
+                                    
+                                       →
+                                    
+                                 
+                              
+                              
+                                 k
+                              
+                           
+                        
+                      tracked to frame 
+                        
+                           k
+                           +
+                           i
+                        
+                     .
+
+We flag invalid features by examining the 
+                        
+                           
+                              
+                                 L
+                              
+                              
+                                 2
+                              
+                           
+                        
+                     -norm between small windows around the feature in frame k and 
+                        
+                           k
+                           +
+                           1
+                        
+                     . We also track features in reverse to validate that the feature tracked to 
+                        
+                           k
+                           +
+                           1
+                        
+                      will track back to its original location in k. These are standard techniques for quickly verifying tracking quality and available in off-the-shelf KLT tracking software such as Matlab’s Computer Vision Toolbox
+                        2
+                        
+                           www.mathworks.com/help/vision/index.html
+                        
+                     
+                     
+                        2
+                      or OpenCV
+                        3
+                        
+                           www.opencv.org
+                        
+                     
+                     
+                        3
+                     .
+
+Once a track buffer 
+                        
+                           
+                              
+                                 T
+                              
+                              
+                                 b
+                              
+                           
+                        
+                      is available, we construct a set of depth estimates
+                        
+                           (10)
+                           
+                              
+                                 
+                                    D
+                                 
+                                 
+                                    k
+                                 
+                              
+                              =
+                              
+                                 
+                                    
+                                       
+                                          
+                                             Δ
+                                          
+                                          
+                                             k
+                                             -
+                                             1
+                                             ,
+                                             k
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             Δ
+                                          
+                                          
+                                             k
+                                             -
+                                             2
+                                             ,
+                                             k
+                                          
+                                       
+                                       ,
+                                       …
+                                       ,
+                                       
+                                          
+                                             Δ
+                                          
+                                          
+                                             k
+                                             -
+                                             (
+                                             
+                                                
+                                                   N
+                                                
+                                                
+                                                   T
+                                                
+                                             
+                                             -
+                                             1
+                                             )
+                                             ,
+                                             k
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     from those tracks using the procedure outlined in Section 4. This particular setup is known as a parallel chain [19] and has the benefit of a gradually increasing temporal distance. We visualize a small parallel chain in Fig. 8
+                      and we address how the reference is chosen in Section 6.1.
+
+An alternate chaining method, serial chaining, was proposed by Triggs et al. where pairwise estimates were used rather than pairs growing farther apart in time. In that instance the frame-to-frame motion was relatively constant but in our case we do not know anything about how the camera is or will be moving. We have chosen the parallel chain precisely because of the gradually increasing temporal distances.
+
+As discussed in Section 4.3, we discard frame pair 
+                        
+                           (
+                           k
+                           -
+                           i
+                           )
+                           →
+                           k
+                        
+                      if the model verification criteria is not met. It is quite possible for all of the pairs to be discarded and no disparity estimate will be available. This is, in fact, unavoidable for poorly captured footage.
+
+After the chain has been constructed we standardize all of the disparity estimates to have zero mean and unit variance, i.e. we compute its z-score. Due to the unknown positioning of the epipoles, along with total amount of camera motion, the magnitudes of the disparities along the chain will vary by large amounts. This is shown in Fig. 9
+                     , where the disparity measurements along a parallel chain, starting from Frame 80 of the Inuksuk sequence, are visualized. Also shown are the positions of the features in the reference frame.
+
+However, after standardization the features that have been well-tracked and are inliers will have very similar values. Conversely, points where there has been tracking difficultly or are potential outliers will have some degree of difference in their disparity values. This can be seen in Fig. 10
+                      where the ground points are in agreement but those on the inukshuk are not.
+
+To arrive at the final set of depth estimates, 
+                        
+                           
+                              
+                                 d
+                              
+                              
+                                 k
+                              
+                           
+                        
+                     , we simply take the median of all of the depth estimates along a track such that
+                        
+                           (11)
+                           
+                              
+                                 
+                                    d
+                                 
+                                 
+                                    k
+                                 
+                              
+                              [
+                              n
+                              ]
+                              =
+                              median
+                              
+                                 
+                                    
+                                       
+                                          
+                                             D
+                                          
+                                          
+                                             k
+                                          
+                                          
+                                             ′
+                                          
+                                       
+                                       [
+                                       n
+                                       ]
+                                    
+                                 
+                              
+                              ,
+                           
+                        
+                     where 
+                        
+                           
+                              
+                                 D
+                              
+                              
+                                 k
+                              
+                              
+                                 ′
+                              
+                           
+                           [
+                           n
+                           ]
+                        
+                      is the set of standardized disparity values along track n. This approach has been used before in merging depth estimates [14] and is effective even with multi-modal distributions. Generally this occurs when the direction of the camera motion changes along a track and so the median depth will be the one associated with the dominant direction.
+
+The final result after aggregation is shown in Fig. 11
+                     . The result is much cleaner and better displays the underlying structure of the scene. It is also very similar to Fig. 5 where SURF feature matching was used instead of KLT tracking. This is expected as the feature matching was chosen with frames that had a sufficiently large baseline.
+
+We should note that the aggregation can be done both with and without 
+                        
+                           
+                              
+                                 F
+                              
+                              
+                                 k
+                                 ,
+                                 l
+                              
+                           
+                        
+                     -estimate outlier rejection. When outlier rejection is enabled, the number of estimates on any track may be less than or equal to the length of the track. Because each track is processed independently, this has no impact on the final estimates. However, whether or not outlier rejection should be enabled depends on the image content.
+
+The advantage to short-term feature tracking is that the quality of the tracking is quite high. Often, features flagged as outliers usually are not. We have found that for online propagation (Section 7) rejecting RANSAC outliers can significantly degrade the quality of the final depth map because it greatly reduces the number of input labels. However, it may be necessary if there are a large number of independently moving objects to avoid erroneous depth estimates. Fortunately, we have also found that this poses less of a problem with temporal propagation (Section 7.2).
+
+There are two choices to make when constructing the chain: the chaining direction and the reference frame. Deciding on the direction is straightforward. In (5) we defined disparity to be target minus reference. Therefore we should choose the chaining direction to respect this definition.
+
+Choosing the reference depends more on the particular application. Our depth estimation framework was designed to allow for online processing and so it assumes that only the current frame is available. The last entry in 
+                           
+                              
+                                 
+                                    T
+                                 
+                                 
+                                    b
+                                 
+                              
+                           
+                         always corresponds to the current frame so we chose it to be the reference frame. However, if online processing is not a concern then any other frame on the track can be used as a reference. That said, the previous constraint on the direction must still be respected.
+
+Once the sparse estimates are available, there are a number of options for producing the final dense depth maps. In this section, we discuss how edge-aware filters, specifically the Domain Transform (DT) filter proposed by Gastal and Oliveira [20], can be used to propagate the sparse estimates. This particular filter has relatively low computational requirements and is well-suited to sparse feature propagation.
+
+Our primary focus will be on the propagation of features in individual frames, though we will discuss how temporal filtering can be applied to improve the result quality. We will also address how scaling the depth values, an operation equivalent to a brightness adjustment, affects the results. In this paper we are mainly focused on purely automatic depth estimation and will not discuss user interaction. However, incorporating this into the framework is trivial to do [35].
+
+Traditionally, label propagation has been treated as an energy minimization procedure. This notion has since been carried over to generating depth maps from user scribbles [4,6]. This is not surprising as this is considered a type of label propagation problem.
+
+However, there is an alternative approach that was alluded to by Gastal and Oliveira and expanded upon by Lang et al. [18]. It is possible to perform label propagation using filters and under certain circumstances this is, in fact, equivalent to an energy minimization. There are several advantages to using filters, namely that they tend to be computationally efficient and changing their parameters effects the output in a predictable fashion.
+
+Naive filter-based propagation is done as follows. Let 
+                           
+                              DT
+                              {
+                              I
+                              ∣
+                              G
+                              }
+                           
+                         be some edge-aware filtering operator (the DT filter in our case) that filters image I using a guidance image 
+                        G. We first define our sparse input labelling as
+                           
+                              (12)
+                              
+                                 
+                                    
+                                       D
+                                    
+                                    
+                                       sp
+                                    
+                                 
+                                 (
+                                 x
+                                 ,
+                                 y
+                                 )
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         d
+                                                      
+                                                      
+                                                         k
+                                                      
+                                                   
+                                                   (
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               p
+                                                            
+                                                            
+                                                               →
+                                                            
+                                                         
+                                                      
+                                                      
+                                                         k
+                                                      
+                                                   
+                                                   )
+                                                
+                                                
+                                                   if
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               p
+                                                            
+                                                            
+                                                               →
+                                                            
+                                                         
+                                                      
+                                                      
+                                                         k
+                                                      
+                                                   
+                                                   
+                                                   is located at
+                                                   
+                                                   (
+                                                   x
+                                                   ,
+                                                   y
+                                                   )
+                                                
+                                             
+                                             
+                                                
+                                                   0
+                                                
+                                                
+                                                   otherwise
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    d
+                                 
+                                 
+                                    k
+                                 
+                              
+                              (
+                              
+                                 
+                                    
+                                       
+                                          p
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    k
+                                 
+                              
+                              )
+                           
+                         is the depth associated with the feature at 
+                           
+                              
+                                 
+                                    
+                                       
+                                          p
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    k
+                                 
+                              
+                              ∈
+                              
+                                 
+                                    t
+                                 
+                                 
+                                    
+                                       
+                                          N
+                                       
+                                       
+                                          T
+                                       
+                                    
+                                    -
+                                    1
+                                 
+                              
+                           
+                        . Note: it is possible that 
+                           
+                              
+                                 
+                                    
+                                       
+                                          p
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    k
+                                 
+                              
+                           
+                         has non-integral coordinates and so we round to the nearest pixel coordinate. We also define a confidence image 
+                           
+                              C
+                              (
+                              x
+                              ,
+                              y
+                              )
+                           
+                         such that
+                           
+                              (13)
+                              
+                                 C
+                                 (
+                                 x
+                                 ,
+                                 y
+                                 )
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   1
+                                                
+                                                
+                                                   if
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               p
+                                                            
+                                                            
+                                                               →
+                                                            
+                                                         
+                                                      
+                                                      
+                                                         k
+                                                      
+                                                   
+                                                   
+                                                   is located at
+                                                   
+                                                   (
+                                                   x
+                                                   ,
+                                                   y
+                                                   )
+                                                
+                                             
+                                             
+                                                
+                                                   0
+                                                
+                                                
+                                                   otherwise
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 .
+                              
+                           
+                        We then obtain the dense depth map for frame 
+                           
+                              k
+                              ,
+                              
+                              
+                                 
+                                    D
+                                 
+                                 
+                                    k
+                                 
+                              
+                              (
+                              x
+                              ,
+                              y
+                              )
+                           
+                        , by
+                           
+                              (14)
+                              
+                                 
+                                    
+                                       D
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 (
+                                 x
+                                 ,
+                                 y
+                                 )
+                                 =
+                                 
+                                    
+                                       DT
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      D
+                                                   
+                                                   
+                                                      sp
+                                                   
+                                                
+                                                (
+                                                x
+                                                ,
+                                                y
+                                                )
+                                                C
+                                                (
+                                                x
+                                                ,
+                                                y
+                                                )
+                                                |
+                                                
+                                                   
+                                                      I
+                                                   
+                                                   
+                                                      k
+                                                   
+                                                
+                                                (
+                                                x
+                                                ,
+                                                y
+                                                )
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       DT
+                                       
+                                          
+                                             
+                                                C
+                                                (
+                                                x
+                                                ,
+                                                y
+                                                )
+                                                |
+                                                
+                                                   
+                                                      I
+                                                   
+                                                   
+                                                      k
+                                                   
+                                                
+                                                (
+                                                x
+                                                ,
+                                                y
+                                                )
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    I
+                                 
+                                 
+                                    k
+                                 
+                              
+                              (
+                              x
+                              ,
+                              y
+                              )
+                           
+                         is image for frame k.
+
+This works by using 
+                           
+                              C
+                              (
+                              x
+                              ,
+                              y
+                              )
+                           
+                         to indicate how much influence each labelled pixel had on unlabelled ones after filtering, somewhat like a normalization term. However, there is a serious flaw with this that we show in Fig. 12
+                        . While not mentioned in either [20] or [18], it is possible for (14) to have both the numerator and denominator become zero. This occurs when no labelling information reaches an unlabelled pixel after filtering and so that pixel’s labelling will still be unknown. If the input labelling is relatively dense, as is the case in [18], then this issue is unlikely to occur. This cannot always be guaranteed, however. We provide a more complete explanation of this phenomenon in [35].
+
+In our prior work [5] we used the DT-RF (recursive form) variant as it propagated information throughout the image; it is defined as a first-order IIR filter. Being a first-order IIR filter, it has a tendency to smooth out edges more so than the DT-NC (normalized convolution) variant
+                           4
+                           There is also a third variant, interpolated convolution, that is related to the DT-NC filter and has similar properties. We primarily focus on the DT-NC and DT-RF filters.
+                        
+                        
+                           4
+                         as there is a wide transition between the filter’s pass and stop bands. However, as is evident in Fig. 12, the DT-NC filter is substantially more sensitive to the value of 
+                           
+                              
+                                 
+                                    σ
+                                 
+                                 
+                                    r
+                                 
+                              
+                           
+                         than the DT-RF filter. We also note that so long as the spatial extent 
+                           
+                              
+                                 
+                                    σ
+                                 
+                                 
+                                    s
+                                 
+                              
+                           
+                         is suitably large, it has minimal impact on the final propagated result.
+
+To help mitigate the 
+                           
+                              0
+                              /
+                              0
+                           
+                         problem, we propose a modification to the basic propagation approach by joint-resampling. First, we generate a new set of features 
+                           
+                              
+                                 
+                                    
+                                       
+                                          q
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    k
+                                 
+                              
+                           
+                         such that
+                           
+                              (15)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             q
+                                          
+                                          
+                                             →
+                                          
+                                       
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   p
+                                                
+                                                
+                                                   →
+                                                
+                                             
+                                          
+                                          
+                                             k
+                                          
+                                       
+                                    
+                                    
+                                       K
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where K is some integer scaling factor. Next, we scale 
+                           
+                              
+                                 
+                                    I
+                                 
+                                 
+                                    k
+                                 
+                              
+                              (
+                              x
+                              ,
+                              y
+                              )
+                           
+                         so that
+                           
+                              (16)
+                              
+                                 
+                                    
+                                       J
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 (
+                                 u
+                                 ,
+                                 v
+                                 )
+                                 =
+                                 
+                                    
+                                       I
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                x
+                                             
+                                             
+                                                K
+                                             
+                                          
+                                          ,
+                                          
+                                             
+                                                y
+                                             
+                                             
+                                                K
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 .
+                              
+                           
+                        We subsample through bicubic interpolation to avoid any aliasing artifacts (any method would be sufficient). If any elements in 
+                           
+                              
+                                 
+                                    
+                                       
+                                          q
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    k
+                                 
+                              
+                           
+                         overlap, we simply take the median depth value. Using (14), we generate a scaled depth map, 
+                           
+                              
+                                 
+                                    D
+                                 
+                                 
+                                    sub
+                                 
+                              
+                              (
+                              u
+                              ,
+                              v
+                              )
+                           
+                         from 
+                           
+                              
+                                 
+                                    
+                                       
+                                          q
+                                       
+                                       
+                                          →
+                                       
+                                    
+                                 
+                                 
+                                    k
+                                 
+                              
+                           
+                         where 
+                           
+                              
+                                 
+                                    J
+                                 
+                                 
+                                    k
+                                 
+                              
+                              (
+                              u
+                              ,
+                              v
+                              )
+                           
+                         is used as the guidance image. Through downsampling we are effectively increasing the size of the filter. This reduces the likelihood of a 
+                           
+                              0
+                              /
+                              0
+                           
+                         because filter at the lower scale is able to propagate information farther throughout the image.
+
+The full-resolution depth map is obtained through joint upsampling. This is done by first creating a new sparse map 
+                           
+                              
+                                 
+                                    D
+                                 
+                                 
+                                    up
+                                 
+                              
+                              (
+                              x
+                              ,
+                              y
+                              )
+                              =
+                              
+                                 
+                                    D
+                                 
+                                 
+                                    sub
+                                 
+                              
+                              (
+                              Ku
+                              ,
+                              Kv
+                              )
+                           
+                         where 
+                           
+                              
+                                 
+                                    D
+                                 
+                                 
+                                    up
+                                 
+                              
+                              (
+                              x
+                              ,
+                              y
+                              )
+                              =
+                              0
+                           
+                         wherever there is no mapping from the lower scale to the upper one. We also construct a new confidence map such that 
+                           
+                              
+                                 
+                                    C
+                                 
+                                 
+                                    up
+                                 
+                              
+                              (
+                              x
+                              ,
+                              y
+                              )
+                              =
+                              1
+                           
+                         if 
+                           
+                              
+                                 
+                                    D
+                                 
+                                 
+                                    up
+                                 
+                              
+                              (
+                              x
+                              ,
+                              y
+                              )
+                              
+                              ≠
+                              
+                              0
+                           
+                         and 
+                           
+                              
+                                 
+                                    C
+                                 
+                                 
+                                    up
+                                 
+                              
+                              (
+                              x
+                              ,
+                              y
+                              )
+                              =
+                              0
+                           
+                         otherwise. The full-resolution map is generated by simply applying (14) to 
+                           
+                              
+                                 
+                                    D
+                                 
+                                 
+                                    up
+                                 
+                              
+                              (
+                              x
+                              ,
+                              y
+                              )
+                           
+                         and 
+                           
+                              
+                                 
+                                    C
+                                 
+                                 
+                                    up
+                                 
+                              
+                              (
+                              x
+                              ,
+                              y
+                              )
+                           
+                        . We show the results of this modification in Fig. 13
+                        .
+
+The choice of K depends on the labelling’s density and the image resolution. For small images, a relatively small value of K can be used. Conversely, large images with a relatively low label density will need a larger value of K. The purpose of the resampling is to perform the propagation where the features are spatially closer together and where weak edges will have less of an impact on the filter.
+
+Because this process does not guarantee the complete elimination of 
+                           
+                              0
+                              /
+                              0
+                           
+                         regions, we apply the iterative method from [35] to “fill in” these areas if they still exist after performing the resampling. These regions are fairly small and so only a limited number of iterations are needed. We have found that convergence (all pixels are labelled) generally occurs within three iterations.
+
+The method described in the previous section operates on each frame individually. It does not make any attempt at inter-frame consistency, i.e. no sudden changes between frames. While this means that the process is relatively fast, it also means that slight changes between frames will cause noticeable artifacts in the generated depth maps. This is often noticeable as a strong flickering effect.
+
+Enforcing inter-frame consistency can be achieved by employing spatio-temporal filters instead of the purely spatial filters described in the prior section. For the DT filter this means that on top of the horizontal and vertical passes there is a third, temporal pass that filters across frames. Therefore, rather than obtaining one depth map per frame, as shown in (14), using the temporal DT filter allows us to obtain dense depth maps for all frames simultaneously. There is now less inter-frame variation because the temporal pass smooths out large changes between frames. The propagation procedure itself remains the same, only now the filter operates on the entire sequence.
+
+However, as discussed by Lang et al. [18], blindly filtering in time ignores the motion of objects in the scene. If object motion is ignored then the filter has a tendency to blur across object boundaries, something that is undesirable for sparse label propagation. Because Lang et al.’s method was developed with our type of application in mind, we utilize a variant of their long-range optical flow estimation technique to help enforce temporal consistency. We ask that the reader refer to [18] for more details as we only summarize the method here for completeness.
+
+We obtain our initial pair-wise optical flow estimates by utilizing the sparse feature correspondences generated by our tracking stage (Section 5) and and then propagating the sparse flow spatially using the sparse label propagation (Section 7.1). Because Lang et al.’s long-range optical flow method is bi-directional, we now also need to track backwards in time in order to obtain the pair-wise reverse optical flow. After this first pass through the frame sequence is complete we now have our sparse depth estimates along with the pair-wise forward and reverse optical flows. We filter the optical flow according to [18] in order to generate a temporally consistent, long-range optical flow. Finally we propagate the sparse depth estimates along the long-range optical flow vectors to obtain temporally consistent dense depth maps for the entire sequence. As discussed, the propagation is performed using (14) with the only difference being the filter. Please note that the resampling discussed in the previous section is only performed spatially, not temporally.
+
+Utilizing temporal propagation imposes a noticeable overhead on the processing times (to be discussed in further detail in Section 8.3). However, as we will show, the processing times still remain competitive as the majority of the overhead is from estimating the pairwise optical flow and that there is significant room for improvement with regards to run time. Furthermore, there is a noticeable improvement in the quality of the depth maps as the temporal propagation is able to integrate information from multiple frames. This is why we are able to use a smaller value of K for temporal processing. In fact, it is almost always preferable to use over online processing. The only case where this is not true is if it not possible to have immediate access to all frames in a video.
+
+Once the depth maps are available, we rescale the values in the entire sequence so that they are between zero (far from the camera) and one (close to the camera). The rescaling is done with respect to the maximum and minimum depth values across all frames so that relative depth is constant with the closest and farthest objects in the scene. This effectively forces the closest object in the video to have a depth of one and the farthest to have a depth of zero. All other depths are scaled relative to that.
+
+This results from the choice to standardize the disparity values as part of the depth aggregation step (Section 6). There the final depth estimate has zero mean and unit variance but the actual range of values varies depending on the amount of disparity. The closer an object, the greater disparity it will have. By scaling relative to the extremal depth values, it ensures that all depth maps are scaled proportionally to the closest and farthest objects.
+
+@&#RESULTS@&#
+
+We have tested our method on several different test sequences; the depth maps can be seen in Fig. 14
+                     
+                      and synthesized left–right image pairs can be seen in Fig. 16
+                     . The only sequence not obtained by us is “Road”. For brevity, we only show select frames and we ask that you please go to http://www.ee.ryerson.ca/∼rrzeszut/depthest to see the full-length results.
+
+The results are shown for the two propagation methods (online and temporal) and against the results obtained through the ACTS software package
+                        5
+                        
+                           http://www.zjucvg.net/acts/acts.html
+                        
+                     
+                     
+                        5
+                     . ACTS implements the video depth recovery method of Zhang et al. [36] and it provides a useful benchmark for assessing the quality of our results. It also helps to demonstrate a few cases where our propagation approach is better than pure SfM/MVS.
+
+Unfortunately, the methods most similar to ours, Depth Director [8], Video Stereolization [10] and Movie Dimensionalization [11], do not provide reference implementations for testing. Furthermore, the authors do not provide access to their test sets for, at the very least, a rudimentary qualitative comparison between their results and ours. Therefore we compare our results to those of Zhang et al.’s method as it at least provides us with insight into how a purely rectification and disparity-driven approach compares to methods that perform full 3D reconstructions and use MVS to obtain their initial depth estimates.
+
+Ideally, 
+                           
+                              
+                                 
+                                    N
+                                 
+                                 
+                                    T
+                                 
+                              
+                              =
+                              2
+                           
+                         since the motion between two frames would be sufficient to establish a baseline for depth estimation. In practice this is often not the case due to erratic motion, such as what often occurs with hand held cameras, or a slow moving camera. Choosing a large value of 
+                           
+                              
+                                 
+                                    N
+                                 
+                                 
+                                    T
+                                 
+                              
+                           
+                         generates longer tracks and so increases the likelihood of obtaining a good baseline. Conversely, the number of tracked features decreases monotonically with larger values of 
+                           
+                              
+                                 
+                                    N
+                                 
+                                 
+                                    T
+                                 
+                              
+                           
+                         and reduces the number of available seed depths for the dense map generation. Therefore it is desirable to choose a value of 
+                           
+                              
+                                 
+                                    N
+                                 
+                                 
+                                    T
+                                 
+                              
+                           
+                         that balances the two requirements.
+
+To examine how features were lost, we applied just the tracking procedure onto our test sequences using different values of 
+                           
+                              
+                                 
+                                    N
+                                 
+                                 
+                                    T
+                                 
+                              
+                           
+                        . We initialized tracking with approximately
+                           6
+                           We adaptively changed the sensitivity of the FAST detector until the desired number of features was obtained to within 10%.
+                        
+                        
+                           6
+                         1000 features. To ensure a more representative sampling we also began tracking at four, equally-spaced positions in the footage, starting with the first frame.
+
+Because the number of initial features will vary depending on the footage and the sensitivity of the feature detector, we look at the relative feature count, or feature retention ratio. We define the relative feature count as
+                           
+                              (17)
+                              
+                                 
+                                    
+                                       R
+                                    
+                                    
+                                       C
+                                    
+                                 
+                                 (
+                                 i
+                                 )
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             N
+                                          
+                                          
+                                             p
+                                          
+                                       
+                                       (
+                                       i
+                                       )
+                                    
+                                    
+                                       
+                                          
+                                             N
+                                          
+                                          
+                                             p
+                                          
+                                       
+                                       (
+                                       0
+                                       )
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    N
+                                 
+                                 
+                                    p
+                                 
+                              
+                              (
+                              i
+                              )
+                           
+                         is the number of features at buffer position i. This represents the portion of initial features still visible after tracking for i frames.
+
+The results of our examination are presented in Fig. 15. The amount of feature retention depends on a number of factors, such as how close the features were to image boundaries, the number of occluding objects and overall amount of camera motion. As shown in Fig. 15a, this varies wildly not only between the different sequences but also depending on where the tracking began. Though, as is shown by the median decay in Fig. 15b, the rate is approximately linear.
+
+Using these results, we can infer the following. First, even after tracking for over a second (assuming 30fps footage), about 15% of the original features tend to be lost. Second, in the worst case scenario, over half of the features are lost after tracking for ten frames. Because the tracking is done simultaneously for multiple frames, we cannot prematurely terminate the tracking for any particular buffer as this will cause a “pipeline stall”. Therefore we chose 
+                           
+                              
+                                 
+                                    N
+                                 
+                                 
+                                    T
+                                 
+                              
+                              =
+                              10
+                           
+                         for our tests as it provides us with a retention rate of 
+                           
+                              
+                                 
+                                    R
+                                 
+                                 
+                                    C
+                                 
+                              
+                              (
+                              i
+                              )
+                              ≈
+                              0.95
+                           
+                         most of the time. In the worst case, this will at least let us retain around half of the original features.
+
+Coincidently, in our prior work we stopped tracking if 
+                           
+                              
+                                 
+                                    R
+                                 
+                                 
+                                    C
+                                 
+                              
+                              (
+                              i
+                              )
+                              <
+                              0.9
+                           
+                        . With our new tracking scheme, this corresponds to an 
+                           
+                              
+                                 
+                                    N
+                                 
+                                 
+                                    T
+                                 
+                              
+                              =
+                              20
+                           
+                        . We have found empirically that 
+                           
+                              
+                                 
+                                    N
+                                 
+                                 
+                                    T
+                                 
+                              
+                              =
+                              10
+                           
+                         provides results indistinguishable from 
+                           
+                              
+                                 
+                                    N
+                                 
+                                 
+                                    T
+                                 
+                              
+                              =
+                              20
+                           
+                         and avoids excess buffering.
+
+The duration and resolution of our test sequences are provided in Table 1
+                        . Of the six sample sequences, half of those are at 720p HD resolution, while the “Residence” and “Street” sequences, along with “Road” from Zhang et al.
+                           7
+                           This is publicly available at http://www.cad.zju.edu.cn/home/gfzhang/projects/videodepth/data/.
+                        
+                        
+                           7
+                         are at 480p SD, or slightly higher, resolution.
+
+Our runtime settings are provided in Table 2
+                        . We use two different downsampling factors for the online and temporal propagation versions, K and 
+                           
+                              
+                                 
+                                    K
+                                 
+                                 
+                                    T
+                                 
+                              
+                           
+                         respectively. We found that temporal version is less sensitive to the 
+                           
+                              0
+                              /
+                              0
+                           
+                         condition described in Section 7.1 and so it requires less downsampling prior to propagation.
+
+We report the processing times for each sequence in Table 3
+                        . For the online method, we report the total time as the sparse map propagation is performed as soon as a depth estimate is available for the current frame. For the temporal propagation, we report not just the total time, but the time to perform the estimation (first pass) and the propagation itself (second pass). We also report the run time for ACTS on all samples except “Road” as the authors have already provided that depth map sequence. Please note that ACTS only reports the time to generate the depth maps and not for performing the feature tracking and SfM. Therefore the time reported is equivalent to our propagation stage for our temporal method.
+
+The reported run times are for a desktop PC with an Intel Core i7-4771 3.5GHz processor, 16GB of RAM and a Nvidia GeForce 660 Ti GPU with 2GB of memory. The tracking and depth estimation code were implemented purely in Matlab with the use of the Computer Vision toolbox. The propagation (both online and temporal) was implemented as several OpenMP-accelerated MEX functions. All ACTS processing was performed with GPU acceleration enabled.
+
+The processing time depends on a number of different factors. First, if many features were detected then it will take longer to estimate 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                         because more features have to be processed by the RANSAC stage. Similarly, more features will need to be tracked during the tracking stage. The difference between the online and temporal estimation times is from the overhead of generating the forward and reverse optical flow needed for the temporal filtering. The actual temporal filtering time, which includes the time to filter the optical flow and the time to perform the propagation, is actually quite minimal.
+
+The processing times of both approaches compare favourably to ACTS. In each case, ACTS took longer than both the online and temporal methods even though GPU acceleration was enabled. Again, this does not take the feature tracking or SfM processing times into account. Our tracking was implemented purely through Matlab toolbox functions and was unoptimized as our primary intent was to develop the estimation pipeline. We profiled both the online and temporal methods using Matlab’s profile command to find bottlenecks and we have identified two key areas.
+
+First, Matlab’s built-in RANSAC implementation spends an inordinate amount of time finding inliers. Specifically, much of the time is spent determining if a feature’s error value was less than the provided distance threshold and not in actual computation. We found that for the online method estimating 
+                           
+                              
+                                 
+                                    F
+                                 
+                                 
+                                    k
+                                    ,
+                                    l
+                                 
+                              
+                           
+                         constituted approximately 70% of the total per-frame processing time while for the temporal method this was closer to 30%. Second, calculating the initial forward and reverse optical flows during the first pass of the temporal method takes approximately 50% of the per-frame processing time.
+
+Given this information, there are a number of ways to improve the processing time. Simply providing a more efficient RANSAC implementation would greatly speed up the depth estimation pipeline. Another optimization would be to perform the depth and optical flow estimation operations in parallel. These are independent from one another and so could be performed in parallel to better utilize modern multi-core CPUs. Similarly, many of the operations being performed, in particular the feature tracking and filter-based propagation, are easily parallelized and so amenable to implementation on a GPU. For example, Gastal and Oliviera reported a 23 times speed up in [20] when the DT-NC filter was implemented using CUDA.
+
+@&#DISCUSSION@&#
+
+As mentioned earlier our framework is primarily geared towards 2D-to-3D conversion. As such, our requirements are slightly different from obtaining metrically correct depth maps. Our key concern is how closely do our results approximate plausible depth maps. When the scenes are purely static, have plenty of easy-to-track features and the camera motion itself is steady (no significant motion blurring, for instance) then our results are close to those produced by Zhang et al. However, when this is not the case, we do see some divergence between our results and theirs.
+
+In Table 4
+                     , we list the absolute cross-correlation scores between our depth maps and those produced by ACTS, averaged across all frames. We use the absolute value as a negative correlation implies that the two signals are similar but mirror images of one another. Ignoring the sign, a cross-correlation score close to ‘1’ indicates a good match while a value close to ‘0’ indicates a very poor one.
+
+The information in Table 4 does not allow us to say that our method produces better results than [36]. Rather it allows us to say, with some certainty, that our depth estimation technique is producing depth values consistent with a full 3D reconstruction. It also allows us to say that regardless of whether we use the online or temporal method, we are able to, on average, obtain depth maps similar to Zhang et al.’s.
+
+There are a few situations where the results of our method and Zhang et al.’s differ, as noticed by the low correlation scores for “Structure”, “Residence” and “Street”. First, our depth maps for the “Road” sequence are the exact opposite of those obtained through ACTS. This is a consequence of using disparity as a proxy for depth. We implicitly assume that the camera is moving forward or to the right. If this is not the case, we end up with the depths being inverted; this is a kind of “bas relief” ambiguity. While this is trivial for a user to fix, it can potentially complicate automatic processing.
+
+With the “Structure” sequence, our reliance on sparse propagation meant that when the number of tracked features was low, parts of the image were not labelled with the correct depth value. The dense estimation employed by ACTS, which uses loopy belief propagation to find the optimal disparity values given some cost volume, is able to estimate the depth at each pixel. But again, because we allow for user interaction, extra depth labels can be added as necessary. All that said, there are cases where sparse propagation is better even without any user interaction.
+
+In the “Residence” sequence, the camera passes by windows with noticeable reflections. This is where dense disparity methods, such as those used by ACTS tend to have difficulty, as shown in Fig. 17
+                        . Because the reflections in the window move opposite to the actual camera motion, the measured depth in these regions become inconsistent with the scene geometry. Because we are propagating sparse features, this only becomes an issue if a large number of reflected features were tracked. As such, our results better approximate the scene geometry.
+
+Something similar happens with the “Street” sequence, as we demonstrate in Fig. 18
+                        . The pedestrians move independently from the camera and so break the assumption that the scene is static. With ACTS (Fig. 18b), the result is that the pedestrians have depths wildly different from the scene itself. This problem was noted in [1] but their solution was to attempt to segment independently moving objects out of the depth map. They argue that these regions appear as “noise”. However, by enforcing temporal consistency, these regions are quite stable over the course of the sequence. Furthermore, this also causes the background estimates to become noticeably noisy. Our approach (Fig. 18c) is much more resilient to this by design and so moving objects have less of an impact.
+
+This is important as this is the same approach taken in [8,10,11]. As they have stated, a purely SfM/MVS approach is ill-suited for complex scenes with many moving objects. While the propagated results can suffer for purely static scenes, these methods are more flexible overall. Unlike the prior work, we have shown why this is the case rather than simply assuming it beforehand.
+
+Another advantage to our approach is the temporal processing option. Because we are propagating in time, we do not require that the camera is always moving. This process can transfer depth information from frames where the camera is moving to those where it is stationary. This can be best seen for the first few frames of the “Inuksuk” sequence (Fig. 19
+                        ), where the method of Zhang et al. has difficulty generating a depth map while the camera is stationary. This is something that was also noted by Karsch et al. [15], though in a slightly different context.
+
+Lastly, we would like to emphasize that we are presenting a modular framework. We have demonstrated this by showing how we can easily modify the quality of our results without fundamentally changing the framework as a whole. Further modifications can be made as necessary. For instance, we could easily send the output of the depth estimation to another method, such as Wang et al.’s StereoBrush [6]. We can easily generalize our method to other methods as well, such as using the automatic pre-processing of Liao et al.’s Video Stereolization [10] to produce our initial depth estimates. Because our approach is modular, we can adapt our method as needed.
+
+@&#LIMITATIONS@&#
+
+We have already noted some of the limitations in our qualitative comparison. Namely, the proposed approach is sensitive to the direction of camera motion and causes the depth reversal phenomenon. If the direction is constant then this is not a problem as it can be easily corrected as a post-processing step. However, if the camera’s direction changes midway through a sequence it will cause a depth reversal after the direction change. This can be problematic with temporal propagation as it attempts to enforce a consistent depth across the entire sequence. This in turn causes the depth to become distorted for frames that are near the location of the reversal. Correcting this error requires modifying the depth labels themselves and reapplying the temporal propagation.
+
+Another limitation is one inherent to using sparse feature tracking in general: the quality of the final depth maps after propagation is directly related to the number of tracked features. For example, in the “Street” sequence, there are very few features to track on the street itself and so there is very little variation in its depth even though it is not perpendicular to the camera. This is in comparison to the “Quad” sequence where the interlocking stones of the walkway are more easily tracked. Temporal propagation can help to alleviate this by bringing in depth information from other frames.
+
+However, temporal propagation can only provide that information if depth information is available at some point in the sequence. This is noticeable in “Quad”, “Structure” and “Residence” where certain linear structures, such as the post on the left-hand side of the “Residence” sequence was not detected by the feature tracker (Fig. 20
+                        ). Despite using temporal interpolation, no labels were ever tracked on that object and so no depth information could be brought in from other frames. This is where a dense method such as MVS is often more effective.
+
+@&#CONCLUSION@&#
+
+We have presented a framework for dense, relative depth map estimation from video. Our framework is composed of two parts: a depth estimation front-end and a sparse label propagation back-end. Our depth estimation method jointly performs tracking and depth estimation in an online manner so that after a certain buffering period, each new frame will have a set of depth estimates. We rely on epipolar rectification to allow us to handle arbitrary motion and obtain sparse depth estimates from tracked features. Once the estimates are available, we propagate them using edge-aware filters. The proposed method is able to produce depth maps of comparable quality to a more complicated MVS-based approach in a fraction of the time.
+
+We can further improve our results by applying the temporal filtering method proposed by Lang et al. [18] to our propagation stage. Furthermore, by treating this as a labelling problem, our system also has the ability to allow for user correction at some later time. We have also shown how our proposed method is resilient to complex scenes with multiple moving objects.
+
+There are a number of areas where we are pursuing research. First and foremost, our depth estimates exhibit sensitivity to the direction of camera motion. There are a number of possible avenues, up to and including performing a limited 3D reconstruction, rather than rectification. However, an alternate approach may be to utilize the optical flow-based perspective correction proposed by Liao et al. [10] to determine whether or not the depth estimates need to be inverted.
+
+Another research avenue is investigating methods for speeding up the depth estimation. We have described some low-level ways in order to accomplish this in Section 8.3. We are also investigating if there are ways to speed up the underlying depth estimation algorithm itself. For instance, because the tracking buffers have a significant amount of overlap with each other, it should be possible to utilize 
+                        
+                           
+                              
+                                 F
+                              
+                              
+                                 k
+                                 ,
+                                 l
+                              
+                           
+                        
+                      estimates from earlier tracks to speed up the estimation process. This is a similar problem to long term feature tracking in SLAM and similar methods could potentially be applied.
+
+@&#ACKNOWLEDGMENT@&#
+
+We would like to thank R. Phan for generously providing his MEX implementation of the DT-NC filter that was used in the online version of the depth estimation method.
+
+@&#REFERENCES@&#
+

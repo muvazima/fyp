@@ -1,0 +1,2727 @@
+@&#MAIN-TITLE@&#Hidden Markov model using Dirichlet process for de-identification
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We introduce a novel use of non-parametric Bayesian HMM for de-identification.
+
+
+                        
+                        
+                           
+                           The paper gives a thorough discussion of the motivation of designing the model.
+
+
+                        
+                        
+                           
+                           Our model understands local context cues without significant feature engineering.
+
+
+                        
+                        
+                           
+                           The model offers competitive performance comparing to the state-of-the-art CRF model.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+De-identification
+
+Natural language processing
+
+Hidden Markov model
+
+Dirichlet process
+
+Variational method
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  For the 2014 i2b2/UTHealth de-identification challenge, we introduced a new non-parametric Bayesian hidden Markov model using a Dirichlet process (HMM-DP). The model intends to reduce task-specific feature engineering and to generalize well to new data. In the challenge we developed a variational method to learn the model and an efficient approximation algorithm for prediction. To accommodate out-of-vocabulary words, we designed a number of feature functions to model such words. The results show the model is capable of understanding local context cues to make correct predictions without manual feature engineering and performs as accurately as state-of-the-art conditional random field models in a number of categories. To incorporate long-range and cross-document context cues, we developed a skip-chain conditional random field model to align the results produced by HMM-DP, which further improved the performance.
+               
+            
+
+@&#INTRODUCTION@&#
+
+De-identification allows record-level data collected for healthcare purposes to be available to researchers for secondary analysis while preserving the privacy of individual patients. Where it exists, privacy legislation usually deems de-identification as mandatory for the release of medical data. These retrospective data are attractive to researchers because they require no participant recruitment and provide a large participant pool compared to smaller sample sizes usually associated with prospective datasets. Because manual processing cannot meet the increasing demand for administrative data, automatic algorithms are receiving much attention. Many studies have adopted statistical natural language processing (NLP) methods and have achieved good results. In particular, conditional random field (CRF) models have demonstrated impressive performance in many tests [1,2]. However, CRF usually requires significant effort on feature engineering. The quality of designed features has a great impact on performance but features designed based on training data may not necessarily apply well to new data. Furthermore, a large number of features and parameters introduced through feature engineering increase model complexity which may also prevent the model from generalizing well to new data.
+
+Hidden Markov models (HMM) are simple generative models that have proven effective in many NLP tasks such as Part-of-Speech (POS) tagging and Named Entity Recognition (NER) [3]. These usually do not require much feature engineering. However, their strong independence assumption limits their performance. Recent studies have shown that the use of latent variables can relax the independence assumption, capture underlying semantic information, and provide meaningful features for NLP tasks [4]. In this challenge, we developed a standard HMM into a non-parametric Bayesian model with latent variables, named as HMM-DP, which requires minimum feature engineering for out-of-vocabulary words. In the model, latent variables categorize words into refined categories, which makes the model more expressive and enables the model to capture the variations in the data. Instead of using a pre-fixed number of latent variables, we assume there can be an infinite number of latent variables and let the data determine the optimal number by application of a Dirichlet process prior. The experiment on the 2014 i2b2/UTHealth data demonstrates that the model is effective in understanding local context cues and can be a close competitor to the state-of-the-art CRF models.
+
+Though HMM-DP works well with local context cue modeling, a close examination of the data reveals that long range and cross document context cue modeling are also helpful in improving performance. To take advantage of this observation, we develop a skip-chain CRF on the data produced by HMM-DP. Results of testing show that the system performance, especially recall, can be improved by combining the two models into a pipeline.
+
+@&#BACKGROUND@&#
+
+De-identification can be modeled as a sequence tagging problem where each word in a document is assigned a tag of ‘identifier’ or ‘non-identifier’. The identifier tag can be further categorized as, for example, NAME, PROFESSION, and LOCATION, as in this challenge. Well studied sequence tagging problems include POS tagging and NER, and in these studies HMM and CRF both have been widely used. However, HMM usually does not offer the same performance as CRF because of the independence assumption. CRF is more flexible because it models the joint probability of tags and words.
+
+There are many proposed improvements over HMM in NLP. One improvement is developed upon a common phenomenon in natural language whereby the words prior to and following a word have significant influence on the meaning of that word. Authors of a previous study introduced bi-direction emission, i.e., the emission probability depends on not only the current and previous tags but also the following tags [5]. In another study, they demonstrated an improvement through relaxing the independence assumption by introducing latent variables for each tag and using latent variables to capture the dependence of the context [6]. These authors have shown that bi-gram HMM with latent variables has been able to outperform tri-gram HMM with bi-directional emission in a POS tagging task. Our model follows this stream of study and employs latent variables to relax the independence assumption and to capture context cues.
+
+In the de-identification task, a context cue plays an important role because training data usually do not contain all identifier words and some words can be identifiers or not depending on the context. In CRF modeling, context cues are captured by examining a word window around the potential identifier word and modeling a joint probability among words and tags within the window. In HMM, context cues are modeled through transition probability between tags, and as a result the meaningfulness and detailedness of tags determine how well HMM can understand context cues. Ideal training data would not only provide tags for identifiers but also label cue words, for example, “Dr.” for the name identifier and “live” for the location identifier, but such data is unlikely to be available. Manually deriving all cue words would not be practical. A common automatic solution is to assign new tags to words that are specially positioned around identifiers, for example, assigning a non-identifier word with a special tag if it is immediately prior to or following an identifier. The effectiveness of this approach has been demonstrated previously [7] but it does not perform well if context cues are more than one position away or contain more than one word. Our model utilizes latent variables to classify words into more detailed sub-tags and the classification process considers surrounding words and sub-tags to allow it to capture more complicated context cues.
+
+HMM with latent variables constructs a mixture model and choosing the right number of latent variables is a difficult task. The likelihood of a general mixture model increases with the number of latent variables. However, a model with a large number of latent variables may appear to fit well with training data, although it is likely to be over-fitting and perform poorly with new data. An engineering approach is to use validation data to determine the optimum number of latent variables: test the model on validation data with different numbers of latent variables and pick the number with the best result. This problem can also be addressed by adding regularities, for example, adding a Bayesian prior to latent variables, like LDA [4]. The likelihood of such a Bayesian model is no longer a monotonic function of the number of latent variables. In practice, the optimal number is determined by running the estimation multiple times with different numbers of latent variables and choosing the number producing the maximum likelihood [8]. Non-parametric modeling introduces a different approach to the problem and we use a Dirichlet process as a prior for the number of latent variables. In this non-parametric model, we assume there can be an infinite number of sub-tags in the data and let the characteristics of the data determine the best number.
+
+In this section, we review the Dirichlet process, introduce the HMM-DP model, and then discuss how to learn the model and apply the model for prediction.
+
+In the model, a Dirichlet process (DP) is used as a Bayesian prior for latent variables represented with a stick-breaking process. The stick-breaking representation of DP contains two components. The first component is the stick-breaking process, which is achieved by first generating a countable infinite collection of stick-breaking portions 
+                           
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    1
+                                 
+                              
+                              ,
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    2
+                                 
+                              
+                              ,
+                              …
+                           
+                        , where each 
+                           
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    i
+                                 
+                              
+                              ∼
+                              Beta
+                              (
+                              1
+                              ,
+                              α
+                              )
+                           
+                         and then letting
+                           
+                              
+                                 
+                                    
+                                       
+                                          π
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    =
+                                    
+                                       
+                                          v
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             j
+                                             <
+                                             i
+                                          
+                                       
+                                    
+                                    (
+                                    1
+                                    -
+                                    
+                                       
+                                          v
+                                       
+                                       
+                                          j
+                                       
+                                    
+                                    )
+                                 
+                              
+                           
+                        It can easily show 
+                           
+                              ∑
+                              
+                                 
+                                    π
+                                 
+                                 
+                                    i
+                                 
+                              
+                              =
+                              1
+                           
+                         and the stick-breaking process is denoted as 
+                           
+                              GEM
+                              (
+                              α
+                              )
+                           
+                        . The second component is a countable infinite collection of atoms, 
+                           
+                              
+                                 
+                                    η
+                                 
+                                 
+                                    1
+                                 
+                              
+                              ,
+                              
+                                 
+                                    η
+                                 
+                                 
+                                    2
+                                 
+                              
+                              ,
+                              …
+                           
+                        , matching with the stick-breaking portions, where each 
+                           
+                              
+                                 
+                                    η
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                         is generated from a probability distribution 
+                           
+                              β
+                           
+                        . Given these two components, DP defines a distribution:
+                           
+                              
+                                 
+                                    P
+                                    (
+                                    B
+                                    )
+                                    =
+                                    
+                                       ∑
+                                    
+                                    
+                                       
+                                          π
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    
+                                       
+                                          δ
+                                       
+                                       
+                                          
+                                             
+                                                η
+                                             
+                                             
+                                                i
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        where 
+                           
+                              
+                                 
+                                    δ
+                                 
+                                 
+                                    
+                                       
+                                          η
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                 
+                              
+                           
+                         equals 1 if 
+                           
+                              
+                                 
+                                    η
+                                 
+                                 
+                                    i
+                                 
+                              
+                              ∈
+                              B
+                           
+                        , else 0. DP is denoted as 
+                           
+                              DP
+                              (
+                              α
+                              ,
+                              β
+                              )
+                           
+                        . Notice a sample 
+                           
+                              π
+                           
+                         from stick-breaking process 
+                           
+                              GEM
+                              (
+                              α
+                              )
+                           
+                         can define a parameter of an infinite multinomial distribution since it sums to 1. In the model a tag has an infinite number of sub-tags that form an infinite multinomial distribution. We use the stick-breaking process as a prior for the distribution of the sub-tags. A sample 
+                           
+                              η
+                           
+                         from 
+                           
+                              DP
+                              (
+                              α
+                              ,
+                              β
+                              )
+                           
+                         also defines a parameter of an infinite multinomial distribution given 
+                           
+                              β
+                           
+                         is a stick-breaking process. The transition probability from sub-tags to sub-tags forms an infinite multinomial distribution and the transition probability should be related to the distribution of the destination sub-tag, that is, it is more likely to transit to a sub-tag that is important in the tag. Here we use DP as a prior for the transition probability and 
+                           
+                              β
+                           
+                         is the distribution of destination sub-tag. This construction allows the transition probability to consider the relative importance of the sub-tags.
+
+The generative process of HMM-DP is defined as such: each tag contains an infinite number of sub-tags; the sub-tag of a tag determines the next tag; the sub-tag of a tag and the next tag determine the sub-tag of the next tag; the sub-tag of a tag determines the word at the position. The complete distribution is as follows,
+                           
+                              
+                                 
+                                    p
+                                    (
+                                    w
+                                    ,
+                                    s
+                                    ,
+                                    π
+                                    ,
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          E
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          T
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          t
+                                       
+                                    
+                                    ,
+                                    z
+                                    )
+                                    =
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             s
+                                          
+                                       
+                                    
+                                    p
+                                    (
+                                    
+                                       
+                                          π
+                                       
+                                       
+                                          s
+                                       
+                                    
+                                    |
+                                    α
+                                    )
+                                    ×
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             z
+                                          
+                                       
+                                    
+                                    p
+                                    (
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          sz
+                                       
+                                       
+                                          E
+                                       
+                                    
+                                    |
+                                    
+                                       
+                                          α
+                                       
+                                       
+                                          E
+                                       
+                                    
+                                    )
+                                    p
+                                    (
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          sz
+                                       
+                                       
+                                          T
+                                       
+                                    
+                                    |
+                                    
+                                       
+                                          α
+                                       
+                                       
+                                          T
+                                       
+                                    
+                                    )
+                                    ×
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             s
+                                             ,
+                                             z
+                                             ,
+                                             
+                                                
+                                                   s
+                                                
+                                                
+                                                   ′
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    p
+                                    (
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          s
+                                          ,
+                                          z
+                                          ,
+                                          
+                                             
+                                                s
+                                             
+                                             
+                                                ′
+                                             
+                                          
+                                       
+                                       
+                                          t
+                                       
+                                    
+                                    |
+                                    
+                                       
+                                          α
+                                       
+                                       
+                                          t
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          π
+                                       
+                                       
+                                          s
+                                       
+                                    
+                                    )
+                                    ×
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             d
+                                          
+                                       
+                                    
+                                    p
+                                    (
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          0
+                                       
+                                    
+                                    )
+                                    p
+                                    (
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          0
+                                       
+                                    
+                                    )
+                                    p
+                                    (
+                                    
+                                       
+                                          z
+                                       
+                                       
+                                          0
+                                       
+                                    
+                                    )
+                                    ×
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             n
+                                          
+                                       
+                                    
+                                    p
+                                    (
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          n
+                                       
+                                    
+                                    |
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          
+                                             
+                                                s
+                                             
+                                             
+                                                n
+                                                -
+                                                1
+                                             
+                                          
+                                          ,
+                                          
+                                             
+                                                z
+                                             
+                                             
+                                                n
+                                                -
+                                                1
+                                             
+                                          
+                                       
+                                       
+                                          T
+                                       
+                                    
+                                    )
+                                    ×
+                                    p
+                                    (
+                                    
+                                       
+                                          z
+                                       
+                                       
+                                          n
+                                       
+                                    
+                                    |
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          
+                                             
+                                                s
+                                             
+                                             
+                                                n
+                                                -
+                                                1
+                                             
+                                          
+                                          ,
+                                          
+                                             
+                                                z
+                                             
+                                             
+                                                n
+                                                -
+                                                1
+                                             
+                                          
+                                          ,
+                                          
+                                             
+                                                s
+                                             
+                                             
+                                                n
+                                             
+                                          
+                                       
+                                       
+                                          t
+                                       
+                                    
+                                    )
+                                    ×
+                                    p
+                                    (
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          n
+                                       
+                                    
+                                    |
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          
+                                             
+                                                s
+                                             
+                                             
+                                                n
+                                             
+                                          
+                                          ,
+                                          
+                                             
+                                                z
+                                             
+                                             
+                                                n
+                                             
+                                          
+                                       
+                                       
+                                          E
+                                       
+                                    
+                                    )
+                                 
+                              
+                           
+                        where s denotes tag, z denotes sub-tag, d denotes document, w denotes word, 
+                           
+                              π
+                           
+                         is the weight for sub-tags, 
+                           
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    E
+                                 
+                              
+                           
+                         is the emission probability of a sub-tag, 
+                           
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    T
+                                 
+                              
+                           
+                         is the transition probability from sub-tag to tag, and 
+                           
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    t
+                                 
+                              
+                           
+                         is the transition probability from sub-tag to sub-tag. The detail of the generative process is in Algorithm 1 and Dir denotes Dirichlet distribution and Mult denotes multinomial distribution. A graphical illustration is shown in Fig. 1
+                        .
+                           Algorithm 1
+                           Document generative process 
+                                 
+                                    
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+To learn the model we maximize the likelihood of the log joint distribution of words 
+                           
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    n
+                                 
+                              
+                           
+                         and tags 
+                           
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    n
+                                 
+                              
+                           
+                        . In learning HMM, optimal parameters can be computed with a closed form solution, but this does not apply to HMM with latent variables because the logarithmic function cannot break into summation for latent variables. An expectation maximization (EM) algorithm allows derivation of closed form expressions for updates and provides an iterative algorithm to find a local optimum. Learning a Bayesian model poses a more difficult computational challenge since it requires not only summing out the latent variables but also integrating out the priors. Some studies of sampling methods have provided an efficient tool for learning Bayesian models [9], however sampling methods need to perform the usually difficult task of diagnosing mixing to ensure the generated samples follow the intended distribution [10]. In addition, it is much more difficult to debug since different runs generate different samples.
+
+In this study, we introduce a variational method [4,11,12] to learn the model. The aim of the variational method is to use a tractable distribution, called variational distribution and denoted as 
+                           
+                              q
+                              (
+                              ·
+                              )
+                           
+                        , to approximate the intractable posterior distribution. The mean-field variational method uses a fully factored distribution that significantly simplifies the computation. The fully factored variational distribution 
+                           
+                              q
+                              (
+                              ·
+                              )
+                           
+                         to approximate the posterior 
+                           
+                              p
+                              (
+                              π
+                              ,
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    E
+                                 
+                              
+                              ,
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    T
+                                 
+                              
+                              ,
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    t
+                                 
+                              
+                              ,
+                              z
+                              )
+                           
+                         is defined as follows,
+                           
+                              
+                                 
+                                    q
+                                    (
+                                    π
+                                    ,
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          E
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          T
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          t
+                                       
+                                    
+                                    ,
+                                    z
+                                    )
+                                    =
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      ∏
+                                                   
+                                                   
+                                                      s
+                                                   
+                                                
+                                             
+                                             q
+                                             (
+                                             
+                                                
+                                                   π
+                                                
+                                                
+                                                   s
+                                                
+                                             
+                                             )
+                                             
+                                                
+                                                   
+                                                      ∏
+                                                   
+                                                   
+                                                      z
+                                                   
+                                                
+                                             
+                                             q
+                                             (
+                                             
+                                                
+                                                   ϕ
+                                                
+                                                
+                                                   s
+                                                   ,
+                                                   z
+                                                
+                                                
+                                                   E
+                                                
+                                             
+                                             )
+                                             q
+                                             (
+                                             
+                                                
+                                                   ϕ
+                                                
+                                                
+                                                   s
+                                                   ,
+                                                   z
+                                                
+                                                
+                                                   T
+                                                
+                                             
+                                             )
+                                             ×
+                                             
+                                                
+                                                   
+                                                      ∏
+                                                   
+                                                   
+                                                      s
+                                                      ,
+                                                      z
+                                                      ,
+                                                      
+                                                         
+                                                            s
+                                                         
+                                                         
+                                                            ′
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                             q
+                                             (
+                                             
+                                                
+                                                   ϕ
+                                                
+                                                
+                                                   s
+                                                   ,
+                                                   z
+                                                   ,
+                                                   
+                                                      
+                                                         s
+                                                      
+                                                      
+                                                         ′
+                                                      
+                                                   
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                    ×
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             d
+                                             ,
+                                             n
+                                          
+                                       
+                                    
+                                    q
+                                    (
+                                    
+                                       
+                                          z
+                                       
+                                       
+                                          d
+                                          ,
+                                          n
+                                       
+                                    
+                                    )
+                                 
+                              
+                           
+                        The variational distribution used in derivation is somewhat different from the above definition. We replace 
+                           
+                              π
+                           
+                         with v, a random variable of Beta distribution, and replace 
+                           
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    t
+                                 
+                              
+                           
+                        , a random variable of DP, with two random variables, 
+                           
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    t
+                                 
+                              
+                           
+                         and 
+                           
+                              
+                                 
+                                    η
+                                 
+                                 
+                                    t
+                                 
+                              
+                           
+                        . In addition, we replace z with c, which represents the index of the selected atom and 
+                           
+                              z
+                              =
+                              
+                                 
+                                    η
+                                 
+                                 
+                                    c
+                                 
+                                 
+                                    t
+                                 
+                              
+                           
+                        . This substitution is implemented because although 
+                           
+                              π
+                              ,
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    t
+                                 
+                              
+                           
+                         and z are simple for illustrative purposes, their replacements are better suited for derivation. The variational distribution 
+                           
+                              q
+                              (
+                              ·
+                              )
+                           
+                         in variables 
+                           
+                              v
+                              ,
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    t
+                                 
+                              
+                              ,
+                              
+                                 
+                                    η
+                                 
+                                 
+                                    t
+                                 
+                              
+                           
+                         and c is as follows,
+                           
+                              
+                                 
+                                    q
+                                    (
+                                    v
+                                    ,
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          E
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          ϕ
+                                       
+                                       
+                                          T
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          v
+                                       
+                                       
+                                          t
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          η
+                                       
+                                       
+                                          t
+                                       
+                                    
+                                    ,
+                                    c
+                                    )
+                                    =
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      ∏
+                                                   
+                                                   
+                                                      s
+                                                   
+                                                
+                                             
+                                             q
+                                             (
+                                             
+                                                
+                                                   v
+                                                
+                                                
+                                                   s
+                                                
+                                             
+                                             )
+                                             
+                                                
+                                                   
+                                                      ∏
+                                                   
+                                                   
+                                                      z
+                                                   
+                                                
+                                             
+                                             q
+                                             (
+                                             
+                                                
+                                                   ϕ
+                                                
+                                                
+                                                   s
+                                                   ,
+                                                   z
+                                                
+                                                
+                                                   E
+                                                
+                                             
+                                             )
+                                             q
+                                             (
+                                             
+                                                
+                                                   ϕ
+                                                
+                                                
+                                                   s
+                                                   ,
+                                                   z
+                                                
+                                                
+                                                   T
+                                                
+                                             
+                                             )
+                                             ×
+                                             
+                                                
+                                                   
+                                                      ∏
+                                                   
+                                                   
+                                                      s
+                                                      ,
+                                                      z
+                                                      ,
+                                                      
+                                                         
+                                                            s
+                                                         
+                                                         
+                                                            ′
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                             q
+                                             (
+                                             
+                                                
+                                                   v
+                                                
+                                                
+                                                   s
+                                                   ,
+                                                   z
+                                                   ,
+                                                   
+                                                      
+                                                         s
+                                                      
+                                                      
+                                                         ′
+                                                      
+                                                   
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                             )
+                                             q
+                                             (
+                                             
+                                                
+                                                   η
+                                                
+                                                
+                                                   s
+                                                   ,
+                                                   z
+                                                   ,
+                                                   
+                                                      
+                                                         s
+                                                      
+                                                      
+                                                         ′
+                                                      
+                                                   
+                                                
+                                                
+                                                   t
+                                                
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                    ×
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             d
+                                             ,
+                                             n
+                                          
+                                       
+                                    
+                                    q
+                                    (
+                                    
+                                       
+                                          c
+                                       
+                                       
+                                          d
+                                          ,
+                                          n
+                                       
+                                    
+                                    )
+                                 
+                              
+                           
+                        In the next step we derive the form of each factor in 
+                           
+                              q
+                              (
+                              ·
+                              )
+                           
+                        . Since 
+                           
+                              v
+                              ,
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    E
+                                 
+                              
+                              ,
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    T
+                                 
+                              
+                           
+                        , and 
+                           
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    t
+                                 
+                              
+                           
+                         are conjugate priors for the likelihood function, it can show their posterior is of the same family [8]. We restrict 
+                           
+                              q
+                              (
+                              v
+                              )
+                           
+                         and 
+                           
+                              q
+                              (
+                              
+                                 
+                                    v
+                                 
+                                 
+                                    t
+                                 
+                              
+                              )
+                           
+                         to the Beta distribution, 
+                           
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    E
+                                 
+                              
+                           
+                         and 
+                           
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    T
+                                 
+                              
+                           
+                         to the Dirichlet distribution, and 
+                           
+                              q
+                              (
+                              
+                                 
+                                    η
+                                 
+                                 
+                                    t
+                                 
+                              
+                              )
+                           
+                         and 
+                           
+                              q
+                              (
+                              c
+                              )
+                           
+                         to the multinomial distribution. After determining the form of 
+                           
+                              q
+                              (
+                              ·
+                              )
+                           
+                        , we can maximize the likelihood by maximizing the evidence lower bound (ELBO) or minimizing the Kullback–Leibler divergence 
+                           
+                              KL
+                              (
+                              q
+                              |
+                              |
+                              p
+                              )
+                           
+                        . ELBO is given as follows,
+                           
+                              
+                                 
+                                    L
+                                    (
+                                    π
+                                    ,
+                                    ϕ
+                                    ,
+                                    z
+                                    )
+                                    =
+                                    log
+                                    
+                                       
+                                          E
+                                       
+                                       
+                                          q
+                                          (
+                                          π
+                                          )
+                                          q
+                                          (
+                                          ϕ
+                                          )
+                                          q
+                                          (
+                                          z
+                                          )
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   p
+                                                   (
+                                                   w
+                                                   ,
+                                                   s
+                                                   ,
+                                                   π
+                                                   ,
+                                                   ϕ
+                                                   ,
+                                                   z
+                                                   )
+                                                
+                                                
+                                                   q
+                                                   (
+                                                   π
+                                                   )
+                                                   q
+                                                   (
+                                                   ϕ
+                                                   )
+                                                   q
+                                                   (
+                                                   z
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    ⩾
+                                    const
+                                    -
+                                    
+                                       
+                                          E
+                                       
+                                       
+                                          q
+                                          (
+                                          ·
+                                          )
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             log
+                                             
+                                                
+                                                   q
+                                                   (
+                                                   π
+                                                   )
+                                                   q
+                                                   (
+                                                   ϕ
+                                                   )
+                                                   q
+                                                   (
+                                                   z
+                                                   )
+                                                
+                                                
+                                                   p
+                                                   (
+                                                   w
+                                                   ,
+                                                   s
+                                                   |
+                                                   π
+                                                   ,
+                                                   ϕ
+                                                   ,
+                                                   z
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        ELBO is the lower bound of the likelihood; maximizing ELBO maximizes the likelihood and allows derivation of a closed form update equation for each factor in 
+                           
+                              q
+                              (
+                              ·
+                              )
+                           
+                        , given that other factors are fixed. Using a coordinate ascent algorithm [4,11,12] that cycles through each factor in turn updates them until ELBO converges to a local optimum.
+
+Making a prediction with the model is to find a tag assignment for a new sentence that has the maximum joint likelihood given the training data. Assuming the training data is independent from the new data given the parameters 
+                           
+                              π
+                           
+                         and 
+                           
+                              ϕ
+                           
+                        , we have the problem formulation as below.
+                           
+                              
+                                 
+                                    
+                                       
+                                          
+                                             arg
+                                             max
+                                          
+                                          
+                                             
+                                                
+                                                   s
+                                                
+                                                
+                                                   ′
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    log
+                                    P
+                                    (
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          ′
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          ′
+                                       
+                                    
+                                    |
+                                    s
+                                    ,
+                                    w
+                                    )
+                                    =
+                                    log
+                                    ∫
+                                    d
+                                    π
+                                    d
+                                    ϕ
+                                    
+                                    P
+                                    (
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          ′
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          ′
+                                       
+                                    
+                                    |
+                                    π
+                                    ,
+                                    ϕ
+                                    )
+                                    P
+                                    (
+                                    π
+                                    ,
+                                    ϕ
+                                    |
+                                    s
+                                    ,
+                                    w
+                                    )
+                                 
+                              
+                           
+                        In the learning process, we have computed the variational distribution 
+                           
+                              q
+                              (
+                              ·
+                              )
+                           
+                         that approximates the posterior distribution 
+                           
+                              P
+                              (
+                              π
+                              ,
+                              ϕ
+                              |
+                              s
+                              ,
+                              w
+                              )
+                           
+                        , and 
+                           
+                              log
+                              P
+                              (
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    ′
+                                 
+                              
+                              ,
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    ′
+                                 
+                              
+                              |
+                              s
+                              ,
+                              w
+                              )
+                           
+                         can be computed with this approximation. However, the integration is still intractable and again we resort to ELBO as before, which uses the same coordinate ascent algorithm by fixing 
+                           
+                              q
+                              (
+                              π
+                              ,
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    E
+                                 
+                              
+                              ,
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    T
+                                 
+                              
+                              ,
+                              
+                                 
+                                    ϕ
+                                 
+                                 
+                                    t
+                                 
+                              
+                              )
+                           
+                         while updating 
+                           
+                              q
+                              (
+                              z
+                              )
+                           
+                        . We first use a brute force method that tries all possible tag assignments and selects the best one. Because of the sparsity in de-identification tasks whereby many words do not correspond with certain tags, we can prune the candidate significantly. However, the brute force method is not always practical since there may still exist a large number of candidates after pruning.
+
+To address the computational difficulty, we try directly applying the Viterbi algorithm to compute a solution. The Viterbi algorithm requires that 
+                           
+                              P
+                              (
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    1
+                                    …
+                                    i
+                                    +
+                                    1
+                                 
+                              
+                              ,
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    1
+                                    …
+                                    i
+                                    +
+                                    1
+                                 
+                              
+                              )
+                           
+                         can be computed from 
+                           
+                              P
+                              (
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    1
+                                    …
+                                    i
+                                 
+                              
+                              ,
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    1
+                                    …
+                                    i
+                                 
+                              
+                              )
+                           
+                        . However, in HMM-DP the computation of 
+                           
+                              P
+                              (
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    1
+                                    …
+                                    i
+                                    +
+                                    1
+                                 
+                              
+                              ,
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    1
+                                    …
+                                    i
+                                    +
+                                    1
+                                 
+                              
+                              )
+                           
+                         involves summing over latent variables z as below.
+                           
+                              
+                                 
+                                    P
+                                    (
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          1
+                                          …
+                                          i
+                                          +
+                                          1
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          1
+                                          …
+                                          i
+                                          +
+                                          1
+                                       
+                                    
+                                    )
+                                    =
+                                    
+                                       
+                                          
+                                             ∑
+                                          
+                                          
+                                             z
+                                          
+                                       
+                                    
+                                    P
+                                    (
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          1
+                                          …
+                                          i
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          1
+                                          …
+                                          i
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          z
+                                       
+                                       
+                                          1
+                                          …
+                                          i
+                                       
+                                    
+                                    )
+                                    P
+                                    (
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          i
+                                          +
+                                          1
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          i
+                                          +
+                                          1
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          z
+                                       
+                                       
+                                          i
+                                          +
+                                          1
+                                       
+                                    
+                                    )
+                                 
+                              
+                           
+                        Since the precondition of the Viterbi algorithm is not satisfied, this algorithm only provides an approximate answer. During the challenge, if the brute force algorithm was intractable, we applied this Viterbi algorithm to the data. Though the Viterbi algorithm is efficient, when we apply both algorithms separately to data that the brute force algorithm can solve in a reasonable time, there are noticeable differences in the answers.
+
+As directly applying the Viterbi algorithm is not ideal, we use a different approach by constructing a distribution 
+                           
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    ̂
+                                 
+                              
+                              (
+                              s
+                              ,
+                              w
+                              )
+                           
+                         to approximate 
+                           
+                              p
+                              (
+                              s
+                              ,
+                              w
+                              )
+                           
+                         while minimizing Kullback–Leibler divergence 
+                           
+                              KL
+                              (
+                              p
+                              |
+                              |
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    ̂
+                                 
+                              
+                              )
+                           
+                        . This idea is introduced previously [13]. 
+                           
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    ̂
+                                 
+                              
+                              (
+                              s
+                              ,
+                              w
+                              )
+                           
+                         is defined as a standard HMM,
+                           
+                              
+                                 
+                                    
+                                       
+                                          p
+                                       
+                                       
+                                          ̂
+                                       
+                                    
+                                    (
+                                    s
+                                    ,
+                                    w
+                                    )
+                                    =
+                                    
+                                       
+                                          
+                                             ∏
+                                          
+                                          
+                                             n
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          p
+                                       
+                                       
+                                          ̂
+                                       
+                                    
+                                    (
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          n
+                                          +
+                                          1
+                                       
+                                    
+                                    |
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          n
+                                       
+                                    
+                                    )
+                                    
+                                       
+                                          p
+                                       
+                                       
+                                          ̂
+                                       
+                                    
+                                    (
+                                    
+                                       
+                                          w
+                                       
+                                       
+                                          n
+                                       
+                                    
+                                    |
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          n
+                                       
+                                    
+                                    )
+                                 
+                              
+                           
+                        Here 
+                           
+                              p
+                              (
+                              s
+                              ,
+                              w
+                              )
+                           
+                         is defined as,
+                           
+                              
+                                 
+                                    p
+                                    (
+                                    s
+                                    ,
+                                    w
+                                    )
+                                    =
+                                    
+                                       
+                                          
+                                             ∑
+                                          
+                                          
+                                             z
+                                          
+                                       
+                                    
+                                    exp
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   E
+                                                
+                                                
+                                                   q
+                                                   (
+                                                   π
+                                                   ,
+                                                   ϕ
+                                                   )
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      log
+                                                      p
+                                                      (
+                                                      w
+                                                      ,
+                                                      s
+                                                      ,
+                                                      z
+                                                      ,
+                                                      …
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        Thus 
+                           
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    ̂
+                                 
+                              
+                              (
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    n
+                                    +
+                                    1
+                                 
+                              
+                              |
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    n
+                                 
+                              
+                              )
+                           
+                         and 
+                           
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    ̂
+                                 
+                              
+                              (
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    n
+                                 
+                              
+                              |
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    n
+                                 
+                              
+                              )
+                           
+                         can be derived as follows,
+                           
+                              
+                                 
+                                    
+                                       
+                                          
+                                          
+                                             
+                                                
+                                                   
+                                                      p
+                                                   
+                                                   
+                                                      ̂
+                                                   
+                                                
+                                                (
+                                                
+                                                   
+                                                      s
+                                                   
+                                                   
+                                                      n
+                                                      +
+                                                      1
+                                                   
+                                                
+                                                |
+                                                
+                                                   
+                                                      s
+                                                   
+                                                   
+                                                      n
+                                                   
+                                                
+                                                )
+                                                =
+                                                
+                                                   
+                                                      
+                                                         
+                                                            ∑
+                                                         
+                                                         
+                                                            z
+                                                         
+                                                      
+                                                      
+                                                         
+                                                            ∑
+                                                         
+                                                         
+                                                            (
+                                                            
+                                                               
+                                                                  s
+                                                               
+                                                               
+                                                                  n
+                                                                  +
+                                                                  1
+                                                               
+                                                            
+                                                            ,
+                                                            
+                                                               
+                                                                  s
+                                                               
+                                                               
+                                                                  n
+                                                               
+                                                            
+                                                            )
+                                                            ∈
+                                                            s
+                                                         
+                                                      
+                                                      p
+                                                      (
+                                                      s
+                                                      ,
+                                                      w
+                                                      ,
+                                                      z
+                                                      )
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            ∑
+                                                         
+                                                         
+                                                            z
+                                                         
+                                                      
+                                                      
+                                                         
+                                                            ∑
+                                                         
+                                                         
+                                                            
+                                                               
+                                                                  s
+                                                               
+                                                               
+                                                                  n
+                                                               
+                                                            
+                                                            ∈
+                                                            s
+                                                         
+                                                      
+                                                      p
+                                                      (
+                                                      s
+                                                      ,
+                                                      w
+                                                      ,
+                                                      z
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                          
+                                             
+                                                
+                                                   
+                                                      p
+                                                   
+                                                   
+                                                      ̂
+                                                   
+                                                
+                                                (
+                                                
+                                                   
+                                                      w
+                                                   
+                                                   
+                                                      n
+                                                   
+                                                
+                                                |
+                                                
+                                                   
+                                                      s
+                                                   
+                                                   
+                                                      n
+                                                   
+                                                
+                                                )
+                                                =
+                                                
+                                                   
+                                                      
+                                                         
+                                                            ∑
+                                                         
+                                                         
+                                                            z
+                                                         
+                                                      
+                                                      
+                                                         
+                                                            ∑
+                                                         
+                                                         
+                                                            (
+                                                            
+                                                               
+                                                                  w
+                                                               
+                                                               
+                                                                  n
+                                                               
+                                                            
+                                                            ,
+                                                            
+                                                               
+                                                                  s
+                                                               
+                                                               
+                                                                  n
+                                                               
+                                                            
+                                                            )
+                                                            ∈
+                                                            (
+                                                            w
+                                                            ,
+                                                            s
+                                                            )
+                                                         
+                                                      
+                                                      p
+                                                      (
+                                                      s
+                                                      ,
+                                                      w
+                                                      ,
+                                                      z
+                                                      )
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            ∑
+                                                         
+                                                         
+                                                            z
+                                                         
+                                                      
+                                                      
+                                                         
+                                                            ∑
+                                                         
+                                                         
+                                                            
+                                                               
+                                                                  s
+                                                               
+                                                               
+                                                                  n
+                                                               
+                                                            
+                                                            ∈
+                                                            s
+                                                         
+                                                      
+                                                      p
+                                                      (
+                                                      s
+                                                      ,
+                                                      w
+                                                      ,
+                                                      z
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+Once 
+                           
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    ̂
+                                 
+                              
+                              (
+                              s
+                              ,
+                              w
+                              )
+                           
+                         is computed for a sentence, we can use the standard Viterbi algorithm to decode the sequence. Notice that the efficiency of the algorithm comes from efficiently computing the numerators and denominators in 
+                           
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    ̂
+                                 
+                              
+                              (
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    n
+                                    +
+                                    1
+                                 
+                              
+                              |
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    n
+                                 
+                              
+                              )
+                           
+                         and 
+                           
+                              
+                                 
+                                    p
+                                 
+                                 
+                                    ̂
+                                 
+                              
+                              (
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    n
+                                 
+                              
+                              |
+                              
+                                 
+                                    s
+                                 
+                                 
+                                    n
+                                 
+                              
+                              )
+                           
+                         using dynamic programming. The time complexity of the prediction algorithm is 
+                           
+                              O
+                              (
+                              |
+                              s
+                              
+                                 
+                                    |
+                                 
+                                 
+                                    2
+                                 
+                              
+                              ·
+                              |
+                              z
+                              
+                                 
+                                    |
+                                 
+                                 
+                                    2
+                                 
+                              
+                              ·
+                              n
+                              )
+                           
+                         where 
+                           
+                              |
+                              s
+                              |
+                           
+                         is the number of tags, 
+                           
+                              |
+                              z
+                              |
+                           
+                         is the number of sub-tags, and n is the sentence length, on par with a simple chain CRF examining a 2-word window. Our experiment shows the algorithm produces more reliable answers than the previous algorithm.
+
+@&#IMPLEMENTATION@&#
+
+In de-identification, it is important to deal with out-of-vocabulary words because training data can never cover all identifier words. Here we solve the problem by introducing a number of feature functions to model out-of-vocabulary words. Every token in the document is first classified as: alphabetic word, punctuation, numerical number, numerical date, or numerical phone number, where numerical dates and numerical phone numbers are detected by using regular expression templates. Feature functions are then developed based on the token category (see Table 1
+                        ). Every combination of feature function output defines an out-of-vocabulary word. To collect the statistics of out-of-vocabulary words, any word with less than 5 occurrences in training data is replaced with an out-of-vocabulary word by applying feature functions.
+
+The system was implemented using Python 2.7 with Numpy and Scipy. Each document was split into sentences by a period or line separator and both learning and prediction occured at the sentence level. Because we had trouble with the computational cost of HMM-DP at the time of the challenge, we applied HMM-DP to the large identifier categories, i.e., NAME, PROFESSION, LOCATION, AGE, DATE, CONTACT, and IDs, but not to sub-categories. In the system submitted to the challenge, HMM-DP only predicted the highest level category of a token. A set of hand crafted classification rules, shown in Table 2
+                        , were used to determine the sub-category after HMM-DP predicted the category. The classification rules were developed based on intuition and a number of documents that we examined in the training data. They were used as a last resort to produce the results required by the challenge. After developing the efficient prediction algorithm for HMM-DP after the challenge, we applied HMM-DP to predict sub-categories directly without referring back to the classification rules.
+
+The Dirichlet process theoretically models an infinite number of latent variables but it is impossible to compute an infinite number and, in practice, Dirichlet process is truncated at K 
+                        [11,12]. The truncation is different than choosing a fixed number of latent variables. When computing the posterior distribution of Dirichlet process, not all K posteriors receive noticeable updates if K is large enough and some posteriors will only have minimum updates, indicating less than K latent variables are needed. In the challenge, we set 
+                           
+                              K
+                              =
+                              20
+                           
+                         for non-identifier tags and 
+                           
+                              K
+                              =
+                              8
+                           
+                         for large category identifier tags to limit the computational cost, and all posteriors of non-identifier have received noticeable updates, suggesting more latent variables are needed. After the challenge, with the efficient prediction algorithm we set 
+                           
+                              K
+                              =
+                              100
+                           
+                         for non-identifier tag and 
+                           
+                              K
+                              =
+                              8
+                           
+                         for all sub-category identifier tag.
+
+In the challenge HMM-DP has shown its capability of understanding a local context cue and in many cases correctly labeling an unknown identifier based on a local context cue. However, the model will fail when no significant local context cue is available. Our key observation is an identifier may have multiple occurrences in the data and HMM-DP may correctly label some occurrences but not all of them, especially when the identifier is an out-of-vocabulary word. For example, “Welder” as a profession identifier has appeared in two documents of one patient and nowhere else. When the patient’s documents are not in the training data, “Welder” is an unknown identifier to the model. In this example, HMM-DP successfully recognizes “Welder” as a profession identifier in one document because of an existing strong context cue, “retired”, but it fails to recognize the other “Welder”. We realize the system performance can be improved by aligning the tag assignment of a word with multiple occurrences. To achieve the goal we used a skip-chain CRF. The skip-chain CRF only applies to the tokens that have multiple occurrences in the documents of a patient and at least one occurrence has been labeled as an identifier by HMM-DP. Every node in the CRF represents one occurrence of the token, each node examines an additional 2-token window before and after the token, and every pair of nodes is connected. As the number of occurrences of the token satisfying the criteria is relatively small, the computation of the CRF does not pose any difficulty.
+
+@&#RESULTS AND ANALYSIS@&#
+
+We used token evaluation instead of strict entity evaluation because our implementation did not distinguish between the beginning and the continuation of an identifier. Since in the challenge we used a two-step approach that first applied HMM-DP to predict the large category of a token and then used classification rules to label the token to its sub-category, we list the performance of HMM-DP on large categories in Table 3
+                     , that is, a DOCTOR token is considered as correctly identified even if the system labels it as PATIENT since both DOCTOR and PATIENT are in the large NAME category. The table also shows the results from the HMM-DP and CRF alignment we developed after the challenge. The updated HMM-DP uses 
+                        
+                           K
+                           =
+                           100
+                        
+                      for non-identifier tags, 
+                        
+                           K
+                           =
+                           8
+                        
+                      for sub-category identifier tags, and the updated prediction algorithm discussed in Section 3.3. The HMM-DP used in the challenge is denoted as “HMM-DP submitted”, the HMM-DP developed after the challenged is denoted as “HMM-DP updated”, and the HMM-DP with CRF alignment is denoted as “HMM-DP+CRF”. We list the number of tokens in each identifier category in Tables 3 and 4
+                     . More detailed statistics of the data set can be seen in the summary paper of this issue [14].
+
+
+                     Table 3 shows that the HMM-DP used in the challenge offered a good overall performance (F1=0.910) when examining only large categories. The updated HMM-DP and CRF alignment further improved the performance. The performance gain in the updated HMM-DP comes from three areas. First, the updated model better captured context cues by significantly increasing the number of latent variables in the non-identifier tags. It gave sufficient sub-tags to accommodate more kinds of context cues. For example, the word “as”, as a non-identifier, is most likely to have a sub-tag and leads to another non-identifier. But when “worked” appears before “as”, the sub-tag of “worked” forces “as” to have a different sub-tag that leads to PROFESSION. This enables the model to correctly label “invest cons” in “worked as invest cons” as PROFESSION. This has helped to improve recall in most cases especially in PROFESSION. Secondly, sub-category data reduced the variance. For example, USERNAME has a very different pattern than DOCTOR and PATIENT. It is also true in the categories of LOCATION, CONTACT, and IDs. The model no longer needs to distinguish such variance when applied to sub-category data, which has helped to improve precision. Finally, a better approximation algorithm for prediction employed in the updated system contributed to an overall performance gain. As we expected, the CRF alignment was helpful in improving recall. One problem we noticed is that HMM-DP does not perform well in AGE. In our implementation, we didn’t have a special template for AGE and all occurrences of AGE have been modeled as a general two-digit number. As two-digit numbers have numerous occurrences in the data and most of them are not AGE, it has a strong tendency towards not being AGE. Also nearby words such as “year(s)” are not reliable context cues as there exist sentences such as “at TLC for 40years” in which the two-digit number is not AGE. A reliable context cue such as “years of age” is 3 token away and has limited influence. Though CRF alignment can alleviate the problem, it does not address the problem entirely. In this situation, manual feature engineering such as a template would be more effective.
+
+
+                     Table 4 lists the sub-category performance of classification rules applied to HMM-DP output on the large categories. It is the original system submitted to the challenge, denoted as “Rules”. The table also includes the results from the updated HMM-DP and CRF alignment for comparison. Because the classification rules are developed based on intuition and a number of documents we examined, the rules are not comprehensive and do not generalize well for the testing data. Having a default sub-category in classification rules, such as STREET in LOCATION and IDNUM in ID, the default sub-category is likely to have low precision as the classification rules for the rest of the sub-categories are not comprehensive. This seriously damages the system performance, for example, at the category level of ID the system demonstrates recall of 0.874 but at the sub-category level the recall dropped to 0.623, which is caused by incorrectly assigning MEDICALRECORD to IDNUM. Also the 0 scores for LOCATION-OTHER, FAX, and DEVICE occurred because no rule has been developed for these sub-categories. A better way of developing classification rules would be first generating candidate rules from data with a machine learning model such as a decision tree, and then deriving the classification rules by combining and pruning the candidate rules manually or automatically. It has been proven effective in a previous study [15]. We did not use this approach because of the time constraint of the challenge and our focus of this study being on HMM-DP.
+
+The updated HMM-DP offers very competitive performance in NAME, PROFESSION, LOCATION, and DATE categories and may even outperform CRF in PROFESSION and LOCATION. It is likely because HMM-DP adjusts to the data adaptively and captures more local context cues given a large number of latent variables. In these categories local context cues play an important role in identification, while in the ID, AGE, and CONTACT categories, HMM-DP falls behind CRF significantly. This may indicate that local context cues are sometimes not obvious in the ID and CONTACT categories and the feature functions for out-of-vocabulary words are not effectively targeting these categories. For instance, our feature functions do not cover tokens such as “37947241ZGJ” or “3194S62727” where their format is a strong indicator. For these categories, the context cue such as where they appear and certain templates are more effective. All models score 0 in the LOCATION-OTHER sub-category due to lacking training data: there are only 4 occurrences of LOCATION-OTHER, in total 12 tokens, in the training data. The data of LOCATION-OTHER are very general like “GOLDEN GATE BRIDGE” and different from other small sample size categories such as FAX, EMAIL and DEVICE, the data of which exhibit a very unique format. Though the updated HMM-DP fails to identify all occurrences of LOCATION-OTHER, it correctly classifies them to one of the LOCATION sub-categories based on the context cues such as “live” and “visit”.
+
+We note that de-identification could benefit from a reliable parsing/tokenization algorithm. In de-identification, a document is split into a number of sentences by period punctuation or line separators and each sentence is independently fed into the model for training or prediction. One difficulty in the challenge was that the real world data contained spelling and formatting problems, and they may impair the model performance if the parsing/tokenization algorithm does not process them correctly. For example, a sentence “…with Dr. Whittaker.” breaks into two lines after “Dr.”. The parsing/tokenization algorithm treats this one sentence as two individual sentences: “…with Dr.” and “Whittaker”. As each sentence is processed independently, the model cannot avail of the context cue “Dr.” to predict confidently when processing the sentence “Whittaker”. It would be worthwhile to develop a reliable parsing/tokenization algorithm.
+
+In the study we designed a number of feature functions to model out-of-vocabulary words. However, they were not sufficient in some situations and produced mistakes, for instance, labeling “Reading” as NAME and “Nitro” as CITY. This is because feature functions only consider whether a word is in a name or city list but does not consider how frequently the word is used as name or city. As a result the model was unable to distinguish “Smith” from “Reading”, because both of them are out-of-vocabulary words, and resulted in errors. It would be helpful to combine additional information to better model out-of-dictionary words.
+
+Though the performance of HMM-DP falls behind the top performing CRF models in the challenge, our model offers an alternative solution to CRF with close performance and many potential areas of further exploration. As a generative model, it is possible to apply re-ranking techniques to enhance performance, which has been successful in many other NLP tasks [16]. Furthermore, the model may incorporate additional feature functions introduced in other studies [14] since currently it only uses uni-gram features.
+
+@&#CONCLUSION@&#
+
+In this challenge we propose a new non-parametric Bayesian hidden Markov model. Compared to CRF, our model reduced task-specific feature engineering work. In the paper we discuss the motivation of designing the model, and introduce a variational method to learn the model and an approximation algorithm to make predictions. The algorithms can learn the model and make predictions as efficient as a standard simple chain CRF. To solve the problem of out-of-vocabulary words, a number of feature functions were developed to model these words. To further improve the system performance, a skip-chain CRF model was designed to align the labels of multiple occurrences of a word. The results demonstrate the model is capable of understanding local context cues and offers competitive performance compared to the state-of-the-art CRF model, especially in the LOCATION and PROFESSION categories. It can be an alternative to the already popular CRF approaches. A comprehensive error analysis identified the strengths and weaknesses of the model and suggested that the model will benefit from manual feature engineering in certain situations. The model has potential for incorporating additional feature functions and external knowledge base. Possible future directions to improve this model include introducing template and multi-gram feature functions, better modeling the external knowledge base, and applying re-ranking techniques.
+
+The authors Tao Chen, Richard Cullen and Marshall Godwin certify that they have NO affiliations with or involvement in any organization or entity with any financial interest (such as honoraria; educational grants; participation in speakers’ bureaus; membership, employment, consultancies, stock ownership, or other equity interest; and expert testimony or patent-licensing arrangements), or non-financial interest (such as personal or professional relationships, affiliations, knowledge or beliefs) in the subject matter or materials discussed in this manuscript.
+
+@&#REFERENCES@&#
+

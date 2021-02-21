@@ -1,0 +1,3367 @@
+@&#MAIN-TITLE@&#The LIR space partitioning system applied to the Stokes equations
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We present an efficient approach to numerically solve the Stokes equations.
+
+
+                        
+                        
+                           
+                           The LIR-tree is used as adaptive data structure for spatial partitioning.
+
+
+                        
+                        
+                           
+                           We introduce a conservative cellular structure to discretize the Stokes equations.
+
+
+                        
+                        
+                           
+                           The method is compared to other state of the art solvers to verify the results.
+
+
+                        
+                        
+                           
+                           The method has very low memory requirements and is very fast.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+LIR-tree
+
+Stationary Stokes equations
+
+Direct numerical simulation
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  We introduce a novel approach to solve the stationary Stokes equations on very large voxel geometries. One main idea is to coarsen a voxel geometry in areas where velocity does not vary much while keeping the original resolution near the solid surfaces. For spatial partitioning a simplified LIR-tree is used which is a generalization of the Octree and KD-tree. The other main idea is to arrange variables in a way such that each cell is able to satisfy the Stokes equations independently. Pressure and velocity are discretized on staggered grids. But instead of using one velocity variable on the cell surface we introduce two variables. The discretization of momentum and mass conservation yields a small linear system (block) per cell that allows to use the block Gauss–Seidel algorithm as iterative solver. We compare our method to other solvers and conclude superior performance in runtime and memory for high porosity geometries.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Simulation of materials received great attention in the last decades. Expensive and time-consuming construction of prototypes used in real experiments can be replaced by virtual material design and simulation of physical equations. Numerical simulations are suited for material engineering. They can be accomplished in a short amount of time and are considerably cheaper than real experiments. The spatial size of simulated domains can range from the nanometer- to the meter-scale. Engineers are interested in effective material properties (e.g., permeability) of virtual materials or computed tomographies.
+
+The permeability (in fluid mechanics) can be predicted based on the stationary Stokes equations. Velocity and pressure are considered to vary in space only but not in time. Numerical computations allow to determine effective permeability and point-wise values based on CT images or discretized analytical descriptions. Better resolution of 3D images improves the quality of these predictions dramatically.
+
+Efficient memory approaches and fast algorithms are needed to solve the Stokes equations on very large domains. We use a simplified version of the LIR-tree as the data structure for discretization that is described in [11] and [10]. In this paper, we introduce an efficient numerical approach to solve the stationary Stokes equations suited for LIR-trees. The method is called conservative cellular structure and reduces the number of tree traversals to a minimum.
+
+@&#RELATED WORK@&#
+
+The LIR-tree is a generalization of the Octree [6,7,13,14] and KD-tree [3] and allows more choices of partitioning. It is possible to restrict the way of partitioning to the direction of interest. A detailed description can be found in [11].
+
+The Stokes equations can be solved in numerous ways. For a regular grid one can use the Explicit-Jump immersed interface method [18]. It is a very fast finite difference method to solve partial differential equations. Velocity and pressure values are considered in all cells of a regular grid even in the solid phase. Additional fictitious forces are applied on the interfaces to satisfy the no-slip boundary condition [17]. The fast convergence rate is achieved by using fast Fourier transforms (FFT) on four Poisson problems.
+
+The Semi implicit methods for pressure linked equations (SIMPLE) described in [12,16] are used in computational fluid dynamics to solve the Navier–Stokes equations. For the Stokes equations the method is decomposed into the following steps: guess a pressure field, solve the momentum conservation equation, correct the pressure field with respect to the mass conservation equation and correct the velocity field. These steps are iterated until a stationary state is achieved. There exist several enhancement of the original algorithm, e.g., SIMPLEC, SIMPLER, or SIMPLE-FFT [4].
+
+The Lattice Boltzmann methods (LB) can also be used to solve the stationary Stokes equations [9]. It is based on molecular dynamics and solves the Lattice–Boltzmann equation rather than solving the (Navier–)Stokes equations itself [8]. The method has low memory and computational requirement per cell.
+
+We do not use the referred methods on the LIR-tree since they are either designed for regular grids or the number of tree traversals (with expensive neighborhood retrievals) per iteration is high. But we use implementations of these methods for comparison.
+
+The Navier–Stokes equations describe the motion of Newtonian fluids. More specifically, the Navier Stokes equations describe the momentum conservation. Together with the mass conservation, energy conservation and state equation we get a system of non-linear partial differential equations of second order. They are the fundamental base of computational fluid dynamics.
+
+The Stokes equations are a simplification of the general Navier–Stokes equations. They are used when the fluid velocity is very slow, i.e., the Reynolds number is low (Re ≪ 1). The influence of temperature is neglected and a constant density is assumed. Therefore, we consider only the pressure and the velocity of a fluid. We also restrict to the steady state case where no unsteady acceleration is present. The convective acceleration is also omitted in the formulation.
+
+                           Definition 1
+                           Stokes equation
+
+
+                           Let 
+                                 
+                                    Ω
+                                    ⊂
+                                    
+                                       R
+                                       n
+                                    
+                                 
+                               be a domain then we define the two variables
+
+                                 
+                                    (1)
+                                    
+                                       
+                                          u
+                                          :
+                                          Ω
+                                          →
+                                          
+                                             R
+                                             n
+                                          
+                                          
+                                          velocity
+                                       
+                                    
+                                 
+                              
+                              
+                                 
+                                    (2)
+                                    
+                                       
+                                          p
+                                          :
+                                          Ω
+                                          →
+                                          R
+                                          
+                                          pressure
+                                       
+                                    
+                                 
+                              The Stokes equations are then defined by
+
+                                 
+                                    (3)
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   η
+                                                   
+                                                      ∇
+                                                      2
+                                                   
+                                                   u
+                                                   −
+                                                   ∇
+                                                   p
+                                                   +
+                                                   f
+                                                
+                                             
+                                             
+                                                
+                                                   =
+                                                   0
+                                                   
+                                                   momentum
+                                                   
+                                                   conservation
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                              
+                                 
+                                    (4)
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   ∇
+                                                   ·
+                                                   u
+                                                
+                                             
+                                             
+                                                
+                                                   =
+                                                   0
+                                                   
+                                                   mass
+                                                   
+                                                   conservation
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                              
+                                 
+                                    (5)
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   u
+                                                   
+                                                      |
+                                                      ∂
+                                                      Ω
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   =
+                                                   0
+                                                   
+                                                   no
+                                                   
+                                                   slip
+                                                   
+                                                   condition
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              where 
+                                 
+                                    η
+                                    ∈
+                                    
+                                       R
+                                       +
+                                    
+                                 
+                               describes the dynamic viscosity constant.
+
+Engineers and researchers are interested in homogenized material constants and laws. The linear relation between velocity and pressure through porous medium is described by Darcy’s law.
+
+                           Definition 2
+                           Darcy’s law
+
+
+                           Darcy’s law describes the flow of a fluid substance through a porous medium. It is defined by
+
+                                 
+                                    (6)
+                                    
+                                       
+                                          η
+                                          ·
+                                          u
+                                          =
+                                          −
+                                          K
+                                          ·
+                                          ∇
+                                          p
+                                       
+                                    
+                                 
+                              where K is a tensor. The effective permeability of a representative periodic volume element in the three-dimensional case is described by the tensor 
+                                 
+                                    K
+                                    ∈
+                                    
+                                       R
+                                       
+                                          3
+                                          ×
+                                          3
+                                       
+                                    
+                                 
+                              . The law was introduced by Henry Darcy based on experiments.
+
+The tensor K can be determined by applying three axis aligned pressure drops and evaluation of the corresponding mean velocity.
+
+The LIR-tree is a generalization of the Octree and KD-tree and first described in [11]. It is used to partition the computational domain and serves as framework for numerical computations. In this section we summarize the most important structures concerning the tree definition and its iterative construction.
+
+For a one-dimensional finite interval there exist three choices: no partitioning, partition and take the left part of the interval, or partition and take the right part of the interval. These choices are used to define the alphabet:
+
+                           Definition 3
+                           
+                              A is called the ternary alphabet defined by
+
+                                 
+                                    (7)
+                                    
+                                       
+                                          A
+                                          :
+                                          =
+                                          {
+                                          L
+                                          ,
+                                          I
+                                          ,
+                                          R
+                                          }
+                                       
+                                    
+                                 
+                              that contains the three symbols that denote: L—left, R—right, and the neutral symbol I—identity. An equivalence relation can be defined by
+
+                                 
+                                    (8)
+                                    
+                                       
+                                          a
+                                          ∼
+                                          b
+                                          :
+                                          ⇔
+                                          (
+                                          a
+                                          =
+                                          I
+                                          ⇔
+                                          b
+                                          =
+                                          I
+                                          )
+                                          .
+                                       
+                                    
+                                 
+                              Vectors of symbols v, w ∈ An
+                               are parallel iff identity symbols are at the same position.
+
+The equivalence relation allows to define the equivalence classes 
+                           
+                              
+                                 A
+                                 n
+                              
+                              /
+                              ∼
+                           
+                        .
+
+                           Definition 4
+                           The parallel sets of vectors defined by 
+                                 
+                                    
+                                       A
+                                       n
+                                    
+                                    /
+                                    ∼
+                                 
+                               are partitions of unity and the set of binary vectors 
+                                 
+                                    B
+                                    n
+                                 
+                               describes their representatives by
+
+                                 
+                                    (9)
+                                    
+                                       
+                                          Ψ
+                                          :
+                                          
+                                             B
+                                             n
+                                          
+                                          →
+                                          
+                                             A
+                                             n
+                                          
+                                          /
+                                          ∼
+                                          
+                                          s
+                                          ↦
+                                          
+                                             {
+                                             v
+                                             ∈
+                                             
+                                                A
+                                                n
+                                             
+                                             :
+                                             
+                                                ∃
+                                                
+                                                   i
+                                                   =
+                                                   1
+                                                
+                                                n
+                                             
+                                             
+                                                s
+                                                i
+                                             
+                                             ⇔
+                                             
+                                                v
+                                                i
+                                             
+                                             ∈
+                                             I
+                                             }
+                                          
+                                          .
+                                       
+                                    
+                                 
+                              A one corresponds to a split in that direction. The inverse function of Ψ exists and is defined by
+
+                                 
+                                    (10)
+                                    
+                                       
+                                          
+                                             Ψ
+                                             
+                                                −
+                                                1
+                                             
+                                          
+                                          :
+                                          
+                                             A
+                                             n
+                                          
+                                          /
+                                          ∼
+                                          →
+                                          
+                                             B
+                                             n
+                                          
+                                          
+                                          v
+                                          ↦
+                                          
+                                             
+                                                (
+                                                
+                                                   ∃
+                                                   
+                                                      v
+                                                      ∈
+                                                      v
+                                                   
+                                                
+                                                
+                                                   v
+                                                   i
+                                                
+                                                ∈
+                                                I
+                                                )
+                                             
+                                             
+                                                i
+                                                =
+                                                1
+                                             
+                                             n
+                                          
+                                          .
+                                       
+                                    
+                                 
+                              Hence, 
+                              Ψ is a bijective function.
+
+In contrast to [11], we do not use arbitrary sets of vectors that satisfy the partitions of unity property. The restriction to axis aligned partitions of unity leads to a simpler and faster implementation.
+
+The equivalence classes 
+                           
+                              
+                                 A
+                                 n
+                              
+                              /
+                              ∼
+                           
+                         are the basis of a simplified LIR-tree. They describe the set of successors for each node inside a tree structure.
+
+                           Definition 5
+                           Let (I
+                              * × n
+                              , ·, I) be the vector-word monoid. The generator function
+
+                                 
+                                    (11)
+                                    
+                                       
+                                          Ω
+                                          :
+                                          
+                                             I
+                                             
+                                                *
+                                                ×
+                                                n
+                                             
+                                          
+                                          →
+                                          
+                                             A
+                                             n
+                                          
+                                          /
+                                          ∼
+                                       
+                                    
+                                 
+                              maps vector-words to a partition of unity. Then we define a tree with respect to Ω by
+
+                                 
+                                    (12)
+                                    
+                                       
+                                          G
+                                          =
+                                          
+                                             (
+                                             X
+                                             ,
+                                             E
+                                             )
+                                          
+                                          
+                                          X
+                                          ⊆
+                                          
+                                             I
+                                             
+                                                *
+                                                ×
+                                                n
+                                             
+                                          
+                                          
+                                          E
+                                          ⊆
+                                          X
+                                          ×
+                                          X
+                                       
+                                    
+                                 
+                              such that elements are constructed by the structural induction
+
+                                 
+                                    (13)
+                                    
+                                       
+                                          I
+                                          ∈
+                                          X
+                                          
+                                          w
+                                          ∈
+                                          X
+                                          ⇒
+                                          
+                                             ∀
+                                             
+                                                v
+                                                ∈
+                                                Ω
+                                                (
+                                                w
+                                                )
+                                             
+                                          
+                                          
+                                             {
+                                             
+                                                
+                                                   
+                                                      
+                                                         w
+                                                         ·
+                                                         v
+                                                         ∈
+                                                         X
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         (
+                                                         w
+                                                         ,
+                                                         w
+                                                         ·
+                                                         v
+                                                         )
+                                                         ∈
+                                                         E
+                                                         .
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              These trees are simplified LIR-trees. The set of leafs are denoted by 
+                                 
+                                    C
+                                    =
+                                    {
+                                    w
+                                    ∈
+                                    X
+                                    :
+                                    Ω
+                                    (
+                                    w
+                                    )
+                                    =
+                                    {
+                                    I
+                                    }
+                                    }
+                                 
+                              .
+
+A tree is constructed and modified by iterative tree refinement that can be described as a sequence of generator functions 
+                           
+                              
+                                 (
+                                 
+                                    Ω
+                                    i
+                                 
+                                 )
+                              
+                              
+                                 i
+                                 ∈
+                                 N
+                              
+                           
+                        . The generator function 
+                           
+                              Ω
+                              
+                                 i
+                                 +
+                                 1
+                              
+                           
+                         is a composition of the predecessor function Ωi
+                         and a modifier function that describes the changes.
+
+                           Definition 6
+                           A modifier function returns a vector of splits for each leaf of the tree and is defined by
+
+                                 
+                                    (14)
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   ι
+                                                   :
+                                                   C
+                                                
+                                             
+                                             
+                                                
+                                                   →
+                                                   
+                                                      B
+                                                      n
+                                                   
+                                                   
+                                                   user
+                                                   
+                                                   defined
+                                                   
+                                                   function
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                              
+                                 
+                                    (15)
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   ι
+                                                   :
+                                                   X
+                                                   ∖
+                                                   C
+                                                
+                                             
+                                             
+                                                
+                                                   →
+                                                   
+                                                      B
+                                                      n
+                                                   
+                                                   
+                                                   w
+                                                   ↦
+                                                   
+                                                      
+                                                         (
+                                                         
+                                                            v
+                                                            i
+                                                         
+                                                         =
+                                                         I
+                                                         ∧
+                                                         
+                                                            ⋁
+                                                            
+                                                               v
+                                                               ∈
+                                                               Ω
+                                                               (
+                                                               w
+                                                               )
+                                                            
+                                                         
+                                                         ι
+                                                         
+                                                            
+                                                               (
+                                                               w
+                                                               v
+                                                               )
+                                                            
+                                                            i
+                                                         
+                                                         )
+                                                      
+                                                      
+                                                         i
+                                                         =
+                                                         1
+                                                      
+                                                      n
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              The domain of cells 
+                                 C
+                               is extended to the domain of nodes 
+                                 X
+                               by recursive evaluation and merging of splits. A split is merged if an identity symbol occurs in the leading vector v ∈ Ω(w). We end up with 
+                                 
+                                    ι
+                                    :
+                                    X
+                                    →
+                                    
+                                       B
+                                       n
+                                    
+                                 
+                              .
+
+There are two ways of iterative tree refinement: degenerative and non-degenerative. For flow simulations we restrict to the non-degenerative case that leads to the best numerical stability.
+
+                           Definition 7
+                           Let 
+                                 
+                                    
+                                       ι
+                                       i
+                                    
+                                    :
+                                    
+                                       C
+                                       i
+                                    
+                                    →
+                                    
+                                       B
+                                       n
+                                    
+                                 
+                               be a sequence of modifier functions then we define the sequence of generator functions by
+
+                                 
+                                    (16)
+                                    
+                                       
+                                          
+                                             Ω
+                                             
+                                                i
+                                                +
+                                                1
+                                             
+                                          
+                                          
+                                             (
+                                             w
+                                             )
+                                          
+                                          =
+                                          
+                                             {
+                                             
+                                                
+                                                   
+                                                      
+                                                         Ψ
+                                                         (
+                                                         
+                                                            Ψ
+                                                            
+                                                               −
+                                                               1
+                                                            
+                                                         
+                                                         
+                                                            (
+                                                            
+                                                               Ω
+                                                               i
+                                                            
+                                                            
+                                                               (
+                                                               w
+                                                               )
+                                                            
+                                                            )
+                                                         
+                                                         ∨
+                                                         
+                                                            ι
+                                                            i
+                                                         
+                                                         
+                                                            (
+                                                            w
+                                                            )
+                                                         
+                                                         )
+                                                      
+                                                   
+                                                   
+                                                      
+                                                         if
+                                                         
+                                                         w
+                                                         ∈
+                                                         
+                                                            C
+                                                            i
+                                                         
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         
+                                                            Ω
+                                                            i
+                                                         
+                                                         
+                                                            (
+                                                            q
+                                                            )
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      else
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              The first case applies for nodes that are element of the previous and the succeeding tree. The set of children is determined by merging previous splits and the modifier function. The words of vectors q arises from
+
+                                 
+                                    (17)
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   q
+                                                   =
+                                                   l
+                                                   d
+                                                   r
+                                                   ∈
+                                                   
+                                                      C
+                                                      i
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   d
+                                                   ∈
+                                                   
+                                                      Ω
+                                                      i
+                                                   
+                                                   
+                                                      (
+                                                      l
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                              
+                                 
+                                    (18)
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   w
+                                                   =
+                                                   l
+                                                   v
+                                                   r
+                                                   ∉
+                                                   
+                                                      C
+                                                      i
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                   v
+                                                   ∈
+                                                   
+                                                      Ω
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   
+                                                      (
+                                                      l
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              where w is element of the previous tree and q is element of the succeeding tree. They consist of the same prefix 
+                                 
+                                    l
+                                    ∈
+                                    
+                                       C
+                                       i
+                                    
+                                    ,
+                                    
+                                       C
+                                       
+                                          i
+                                          +
+                                          1
+                                       
+                                    
+                                 
+                               and postfix r ∈ I
+                              * × n
+                              . They differ in one vector v and d such that v⊂d.
+
+The LIR-tree can also be balanced or unbalanced. In a balanced LIR-tree all leafs are on the same level. This can be achieved by treating I as non-neutral symbol in words up to the maximal depth, e.g., the words LL and LLI represent the same subinterval but different nodes inside the tree. We use a balanced tree structure that is more suited for Multigrid methods.
+
+Neighborhood retrieval is a time-critical problem. Therefore, we use an efficient approach that is not influenced by the maximal depth of the tree, i.e., climbing up the tree is not necessary. Fig. 1 shows the principle where a neighborhood of nodes is determined from the neighborhood of its parent node.
+
+@&#ANALYSIS@&#
+
+Three modifier functions are used to construct an LIR-tree with numerically suited properties. Fig. 2
+                         shows the application of these modifiers functions on a geometry with a spherical obstacle.
+
+In the first phase of tree construction we analyze the geometrical properties of the computational domain. The domain is described with a binarized voxel geometry that consist of solid and empty voxels. The basic idea is to split in each direction where the corresponding segments of voxels contain both solid and empty voxels. A segment of voxels is a finite straight chain of voxels that is used for analysis. The domain of analysis is embed by one voxel in each direction to increase the number of cells at interfaces. Fig. 3
+                            illustrates the splitting rule in x-direction.
+
+The preservation of a maximal neighbor size ratios increases the numerical stability and accuracy. Therefore, we use a modifier function that converges a given tree structure until a maximal 2: 1 size ratio for all neighborhood of cells is reached. For each cell we visit all neighboring cells and check whether for any direction the cell size ratio exceeds the 2: 1 ratio. Fig. 4
+                            shows two examples of that methods.
+
+A velocity gradient reduction approach is used to predict where a higher numerical accuracy is needed. The basic idea is to split in a direction where one of the corresponding absolute velocity gradients differ more than a certain threshold. The threshold is based on the maximum over all gradients. Fig. 5
+                            shows the considered velocity gradients for a split in x-direction.
+
+The fundamental idea of discretization in an LIR-tree is that each cell (finite volume) has to individually satisfy a certain physical law, in our case the Stokes equations. In each cell momentum and mass are conserved, where mass conservation is crucial. Differently from standard methods on staggered [5] or collocated grids, a single cell stores one velocity value for each voxel face and a pressure value in the center. The two velocity values for each face that can be viewed as left-sided and right-sided limit. In this section we present a one-dimensional derivation of the method.
+
+Let 
+                           
+                              1
+                              <
+                              j
+                              <
+                              k
+                              ∈
+                              N
+                           
+                         then we can describe the locations of velocity variables vj
+                         and pressure variables pj
+                         with their corresponding neighbors by 
+                           
+                        
+                     
+
+The lengths of the cells are denoted by hj
+                        . The Stokes equations, i.e., the jth mass conservation equation, the jth and 
+                           
+                              j
+                              +
+                              1
+                           
+                        th momentum conservation equation can be discretized as follows
+
+                           
+                              (19)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   v
+                                                   
+                                                      j
+                                                      +
+                                                      1
+                                                   
+                                                
+                                                −
+                                                
+                                                   v
+                                                   j
+                                                
+                                             
+                                             
+                                                h
+                                                j
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             0
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (20)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             μ
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            v
+                                                            
+                                                               j
+                                                               +
+                                                               1
+                                                            
+                                                         
+                                                         −
+                                                         
+                                                            v
+                                                            j
+                                                         
+                                                      
+                                                      
+                                                         h
+                                                         j
+                                                      
+                                                   
+                                                   −
+                                                   
+                                                      
+                                                         
+                                                            v
+                                                            j
+                                                         
+                                                         −
+                                                         
+                                                            v
+                                                            
+                                                               j
+                                                               −
+                                                               1
+                                                            
+                                                         
+                                                      
+                                                      
+                                                         h
+                                                         
+                                                            j
+                                                            −
+                                                            1
+                                                         
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      1
+                                                      2
+                                                   
+                                                   
+                                                      (
+                                                      
+                                                         h
+                                                         j
+                                                      
+                                                      +
+                                                      
+                                                         h
+                                                         
+                                                            j
+                                                            −
+                                                            1
+                                                         
+                                                      
+                                                      )
+                                                   
+                                                
+                                             
+                                             −
+                                             
+                                                
+                                                   
+                                                      p
+                                                      j
+                                                   
+                                                   −
+                                                   
+                                                      p
+                                                      
+                                                         j
+                                                         −
+                                                         1
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      1
+                                                      2
+                                                   
+                                                   
+                                                      (
+                                                      
+                                                         h
+                                                         j
+                                                      
+                                                      +
+                                                      
+                                                         h
+                                                         
+                                                            j
+                                                            −
+                                                            1
+                                                         
+                                                      
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                j
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (21)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             μ
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            v
+                                                            
+                                                               j
+                                                               +
+                                                               2
+                                                            
+                                                         
+                                                         −
+                                                         
+                                                            v
+                                                            
+                                                               j
+                                                               +
+                                                               1
+                                                            
+                                                         
+                                                      
+                                                      
+                                                         h
+                                                         
+                                                            j
+                                                            +
+                                                            1
+                                                         
+                                                      
+                                                   
+                                                   −
+                                                   
+                                                      
+                                                         
+                                                            v
+                                                            
+                                                               j
+                                                               +
+                                                               1
+                                                            
+                                                         
+                                                         −
+                                                         
+                                                            v
+                                                            j
+                                                         
+                                                      
+                                                      
+                                                         h
+                                                         j
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      1
+                                                      2
+                                                   
+                                                   
+                                                      (
+                                                      
+                                                         h
+                                                         
+                                                            j
+                                                            +
+                                                            1
+                                                         
+                                                      
+                                                      +
+                                                      
+                                                         h
+                                                         j
+                                                      
+                                                      )
+                                                   
+                                                
+                                             
+                                             −
+                                             
+                                                
+                                                   
+                                                      p
+                                                      
+                                                         j
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   −
+                                                   
+                                                      p
+                                                      j
+                                                   
+                                                
+                                                
+                                                   
+                                                      1
+                                                      2
+                                                   
+                                                   
+                                                      (
+                                                      
+                                                         h
+                                                         
+                                                            j
+                                                            +
+                                                            1
+                                                         
+                                                      
+                                                      +
+                                                      
+                                                         h
+                                                         j
+                                                      
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   j
+                                                   +
+                                                   1
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+Without loss of generality we simplify the equations with 
+                           
+                              μ
+                              =
+                              
+                                 h
+                                 
+                                    j
+                                    −
+                                    1
+                                 
+                              
+                              =
+                              
+                                 h
+                                 j
+                              
+                              =
+                              
+                                 h
+                                 
+                                    j
+                                    +
+                                    1
+                                 
+                              
+                              =
+                              1
+                           
+                         and get the set of equations
+
+                           
+                              (22)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                v
+                                                
+                                                   j
+                                                   +
+                                                   1
+                                                
+                                             
+                                             −
+                                             
+                                                v
+                                                j
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             0
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (23)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   −
+                                                   
+                                                      v
+                                                      j
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      v
+                                                      j
+                                                   
+                                                   −
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                         −
+                                                         1
+                                                      
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   j
+                                                
+                                                −
+                                                
+                                                   p
+                                                   
+                                                      j
+                                                      −
+                                                      1
+                                                   
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                j
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (24)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                         +
+                                                         2
+                                                      
+                                                   
+                                                   −
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   −
+                                                   
+                                                      v
+                                                      j
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   
+                                                      j
+                                                      +
+                                                      1
+                                                   
+                                                
+                                                −
+                                                
+                                                   p
+                                                   j
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   j
+                                                   +
+                                                   1
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        First, we introduce two velocity variables for each face. They represent the left and right sided limit and do not have to be equal. 
+                           
+                        
+                     
+
+Twice the number of velocity variables led to twice the number of equations. We choose these equations such that the left and right sided limit are forced to the same value.
+
+                           
+                              (25)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                v
+                                                
+                                                   j
+                                                   +
+                                                   1
+                                                
+                                                −
+                                             
+                                             −
+                                             
+                                                v
+                                                
+                                                   j
+                                                
+                                                +
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             0
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (26)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                         +
+                                                         1
+                                                      
+                                                      −
+                                                   
+                                                   −
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                      
+                                                      +
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                      
+                                                      −
+                                                   
+                                                   −
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                         −
+                                                         1
+                                                      
+                                                      +
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   j
+                                                
+                                                −
+                                                
+                                                   p
+                                                   
+                                                      j
+                                                      −
+                                                      1
+                                                   
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   j
+                                                
+                                                +
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (27)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             v
+                                             
+                                                j
+                                             
+                                             −
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                v
+                                                
+                                                   j
+                                                
+                                                +
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (28)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                         +
+                                                         2
+                                                      
+                                                      −
+                                                   
+                                                   −
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                         +
+                                                         1
+                                                      
+                                                      +
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                         +
+                                                         1
+                                                      
+                                                      −
+                                                   
+                                                   −
+                                                   
+                                                      v
+                                                      
+                                                         j
+                                                      
+                                                      +
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   
+                                                      j
+                                                      +
+                                                      1
+                                                   
+                                                
+                                                −
+                                                
+                                                   p
+                                                   j
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   j
+                                                   +
+                                                   1
+                                                
+                                                −
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (29)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             v
+                                             
+                                                j
+                                                +
+                                                1
+                                             
+                                             +
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                v
+                                                
+                                                   j
+                                                   +
+                                                   1
+                                                
+                                                −
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        Second, we change the way of indexing such that velocity variables corresponding to the same ith cell have the same subscript index. 
+                           
+                        The upper-script signs 
+                           +
+                         and 
+                           −
+                         are replaced by L and R, respectively. The denotation of velocity variables vj
+                         is also changed to ui
+                        . Thus, we get the set of equations
+
+                           
+                              (30)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                u
+                                                
+                                                   i
+                                                
+                                                R
+                                             
+                                             −
+                                             
+                                                u
+                                                
+                                                   i
+                                                
+                                                L
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             0
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (31)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   i
+                                                
+                                                −
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      −
+                                                      1
+                                                   
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   i
+                                                
+                                                L
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (32)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             u
+                                             
+                                                i
+                                                −
+                                                1
+                                             
+                                             R
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                u
+                                                
+                                                   i
+                                                
+                                                L
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (33)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      +
+                                                      1
+                                                   
+                                                
+                                                −
+                                                
+                                                   p
+                                                   i
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   i
+                                                
+                                                R
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (34)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             u
+                                             
+                                                i
+                                                +
+                                                1
+                                             
+                                             L
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                u
+                                                
+                                                   i
+                                                
+                                                R
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        Third, the momentum conservation equation and the equality equation are merged to two momentum conservation equations. This is done by substitution of 
+                           
+                              u
+                              
+                                 i
+                                 −
+                                 1
+                              
+                              R
+                           
+                         by 
+                           
+                              u
+                              
+                                 i
+                              
+                              L
+                           
+                         and then 
+                           
+                              u
+                              
+                                 i
+                              
+                              L
+                           
+                         by 
+                           
+                              u
+                              
+                                 i
+                                 −
+                                 1
+                              
+                              R
+                           
+                         in Eq. (31). The same procedure is done with Eq. (33) and leads to
+
+                           
+                              (35)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                u
+                                                
+                                                   i
+                                                
+                                                R
+                                             
+                                             −
+                                             
+                                                u
+                                                
+                                                   i
+                                                
+                                                L
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             0
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (36)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      L
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   i
+                                                
+                                                −
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      −
+                                                      1
+                                                   
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   i
+                                                
+                                                L
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (37)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                      R
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   i
+                                                
+                                                −
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      −
+                                                      1
+                                                   
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   i
+                                                   −
+                                                   1
+                                                
+                                                R
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (38)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      R
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      +
+                                                      1
+                                                   
+                                                
+                                                −
+                                                
+                                                   p
+                                                   i
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   i
+                                                
+                                                R
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (39)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                      L
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      +
+                                                      1
+                                                   
+                                                
+                                                −
+                                                
+                                                   p
+                                                   i
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   i
+                                                   +
+                                                   1
+                                                
+                                                L
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        Finally, we gather all equations that belong to the ith cell, i.e., Eqs. (35), (36), and (38). The system of equations can be described as block linear system
+
+                           
+                              (40)
+                              
+                                 
+                                    
+                                       (
+                                       
+                                          
+                                             
+                                                
+                                                   −
+                                                   2
+                                                
+                                             
+                                             
+                                                1
+                                             
+                                             
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                1
+                                             
+                                             
+                                                
+                                                   −
+                                                   2
+                                                
+                                             
+                                             
+                                                1
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                             
+                                                1
+                                             
+                                             
+                                                0
+                                             
+                                          
+                                       
+                                       )
+                                    
+                                    ·
+                                    
+                                       (
+                                       
+                                          
+                                             
+                                                
+                                                   u
+                                                   
+                                                      i
+                                                   
+                                                   L
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   u
+                                                   
+                                                      i
+                                                   
+                                                   R
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   p
+                                                   i
+                                                
+                                             
+                                          
+                                       
+                                       )
+                                    
+                                    =
+                                    
+                                       (
+                                       
+                                          
+                                             
+                                                
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                      L
+                                                   
+                                                   −
+                                                   
+                                                      p
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                      R
+                                                   
+                                                   +
+                                                   
+                                                      p
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                0
+                                             
+                                          
+                                       
+                                       )
+                                    
+                                 
+                              
+                           
+                        The block matrix can be inverted and the solution of the linear system is obtained by
+
+                           
+                              (41)
+                              
+                                 
+                                    
+                                       (
+                                       
+                                          
+                                             
+                                                
+                                                   u
+                                                   
+                                                      i
+                                                   
+                                                   L
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   u
+                                                   
+                                                      i
+                                                   
+                                                   R
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   p
+                                                   i
+                                                
+                                             
+                                          
+                                       
+                                       )
+                                    
+                                    =
+                                    
+                                       (
+                                       
+                                          
+                                             
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                             
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                             
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                             
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                             
+                                                1
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                             
+                                                1
+                                             
+                                             
+                                                3
+                                             
+                                          
+                                       
+                                       )
+                                    
+                                    ·
+                                    
+                                       (
+                                       
+                                          
+                                             
+                                                
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                      L
+                                                   
+                                                   −
+                                                   
+                                                      p
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                      R
+                                                   
+                                                   +
+                                                   
+                                                      p
+                                                      
+                                                         i
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                0
+                                             
+                                          
+                                       
+                                       )
+                                    
+                                 
+                              
+                           
+                        This allows to use a block Gauss–Seidel algorithm to solve the global block linear system.
+
+At solid interfaces we replace the momentum conservation equations by no-slip equations. The discretizations of the Stokes equations at 
+                           
+                        are defined by the set equations
+
+                           
+                              (42)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                u
+                                                
+                                                   i
+                                                
+                                                R
+                                             
+                                             −
+                                             
+                                                u
+                                                
+                                                   i
+                                                
+                                                L
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             0
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (43)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                (
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      R
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                −
+                                                
+                                                   (
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                      
+                                                      L
+                                                   
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                      L
+                                                   
+                                                   )
+                                                
+                                                )
+                                             
+                                             −
+                                             
+                                                (
+                                                
+                                                   p
+                                                   i
+                                                
+                                                −
+                                                
+                                                   p
+                                                   
+                                                      i
+                                                      −
+                                                      1
+                                                   
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             
+                                                f
+                                                
+                                                   i
+                                                
+                                                L
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                        
+                           
+                              (44)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             u
+                                             
+                                                i
+                                             
+                                             R
+                                          
+                                       
+                                       
+                                          
+                                             =
+                                             0
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        The momentum conservation equation assigned to the right velocity variable 
+                           
+                              u
+                              
+                                 i
+                              
+                              R
+                           
+                         is replaced by a no-slip equation. The corresponding block linear system is
+
+                           
+                              (45)
+                              
+                                 
+                                    
+                                       (
+                                       
+                                          
+                                             
+                                                
+                                                   −
+                                                   2
+                                                
+                                             
+                                             
+                                                1
+                                             
+                                             
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                0
+                                             
+                                             
+                                                1
+                                             
+                                             
+                                                0
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   −
+                                                   1
+                                                
+                                             
+                                             
+                                                1
+                                             
+                                             
+                                                0
+                                             
+                                          
+                                       
+                                       )
+                                    
+                                    ·
+                                    
+                                       (
+                                       
+                                          
+                                             
+                                                
+                                                   u
+                                                   
+                                                      i
+                                                   
+                                                   L
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   u
+                                                   
+                                                      i
+                                                   
+                                                   R
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   p
+                                                   i
+                                                
+                                             
+                                          
+                                       
+                                       )
+                                    
+                                    =
+                                    
+                                       (
+                                       
+                                          
+                                             
+                                                
+                                                   −
+                                                   
+                                                      u
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                      L
+                                                   
+                                                   −
+                                                   
+                                                      p
+                                                      
+                                                         i
+                                                         −
+                                                         1
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                0
+                                             
+                                          
+                                          
+                                             
+                                                0
+                                             
+                                          
+                                       
+                                       )
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+A one-dimensional example of discretization the Stokes equations for a geometry with three empty and one solid voxels is shown in Fig. 6
+                        . This approach can easily be extended to higher dimensions. A two-dimensional example of the method on a similar geometry is shown in Fig. 7
+                        
+                        .
+
+The described method can be directly applied to regular grids. However, the symmetric structure of the method allows to use an adaptive data structure if we provide a proper way of determining representative neighbor values for velocity and pressure. For solving the Stokes equation we do not assemble the system matrix due to the huge memory requirement. All coefficients are determined on the fly. Since this is a very time-critical problem we have to use linear interpolation and extrapolation approaches
+
+The subscript index is changed from natural numbers 
+                           
+                              i
+                              ∈
+                              N
+                           
+                         to vectors of word w ∈ I
+                        * × n
+                         for velocity and pressure, i.e., 
+                           
+                              
+                                 u
+                                 i
+                                 v
+                              
+                              →
+                              
+                                 u
+                                 w
+                                 v
+                              
+                           
+                         and pi
+                         → pw
+                        . Assume we traveled to a cell 
+                           
+                              w
+                              ∈
+                              C
+                           
+                         and inspect the neighbor cells at a given direction v ∈ An
+                        . Then we can distinguish three cases:
+
+                           
+                              •
+                              One neighbor with the same tangential sizes → Use the neighbor values.
+
+One neighbor with different tangential sizes → Interpolate to the tangential planes of w along v.
+
+More than one neighbor → Average neighbor values and extrapolate to tangential planes of w along v.
+
+An examples of the last two cases are shown in Fig. 8. With simple averaging and linear interpolation we can see the neighborhoods in an LIR-tree as local tensor product grid. Numerous experiments showed sufficient numerical accuracy of this approach.
+
+@&#RESULTS@&#
+
+In this section we describe experiments where the LIR-tree and the conservative cellular structure is applied on different kinds of datasets to analyze runtime, memory requirements,
+                      and numerical properties. Two computers were used: AMD Opteron 6282 SE, 2.6 GHz, 32 Cores with 512 GB RAM and Intel Xeon E5-2690, 2.9 GHz, 16 Cores with 128GB RAM.
+
+A widely accepted geometry for convergence analysis are periodic arrays of spheres. The exact permeabilities for different diameters are known and can be found in [15]. Numerical experiments showed a first order convergence to the exact solution under grid refinement.
+
+The first example is a computer generated fiber microstructure. The dataset consists of two different types of fibers in micrometer scale. The first type are curved circular fibers with 10 μm diameter and a volume fraction of 2.23%. The second type are curved hollow fibers with (3.4 μm, 0.935 μm) inner diameters, (17 μm, 4.675 μm) outer diameters and a volume fraction of 8.68%. The fiber orientation is anisotropic distributed but more isotropic in 
+                        
+                           x
+                           −
+                           y
+                        
+                      direction and layered in z-direction. The porosity with approximately 88% is very high. The dataset has a size of 1024 × 1200 × 1024 voxels and a voxel length of 1 μm. Fig. 9 shows a two- and three-dimensional views of the geometry with velocity and pressure fields. Fig. 10 shows a cut of the adaptive discretization of the LIR-tree.
+
+The second example
+                      is a segmented CT-scan from a Berea sandstone, see [1] and [2]. The dataset consists of a very complex pore network with many connections and dead ends. These pores are distributed inhomogeneous and are challenging for every flow solver. The geometry has a size of 720 × 720 × 1024 voxels with a voxellength of 0.74 μm and a low porosity of 18%. Fig. 11 shows different views of the Berea sandstone dataset with velocity and pressure fields.
+
+
+                     Table 1 shows the comparison of five solvers with respect to permeability in flow-direction, memory consumption and runtime after reaching the same termination condition. The permeabilities are very close with a difference of less than 1%. In the high porosity fiber dataset our method is superior compared to the EJ and SIMPLE-FFT method by a factor of 10. This can be explained by the small number of cells and the presence of many large cells. These large cells increase the speed of spatial information propagation, thus a low number of iterations. But in the low porous Berea sandstone dataset our method cannot benefit from the presence of large cells. Together with the complex pore structure the number of iterations is much greater. Here we can profit from the small number of cells and low memory requirements. However, the runtime of our method and the SIMPLE-FFT are similar.
+
+@&#CONCLUSIONS@&#
+
+The combination of LIR-tree and conservative cellular structure allows to numerically solve the Stokes equations on very large voxel geometries. In high porosity geometries we need 10 times less runtime and memory compared to other state of the art solvers. In low porous geometries we need 10 times less memory and have similar runtimes compared to the other methods.
+
+@&#ACKNOWLEDGMENTS@&#
+
+This work is sponsored by Math2Market GmbH, the Fraunhofer ITWM and the University of Kaiserslautern under the project (P3) Applied System Modeling for Engineering of Stochastic Processes.
+
+@&#REFERENCES@&#
+

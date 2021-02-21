@@ -1,0 +1,1176 @@
+@&#MAIN-TITLE@&#Improving record linkage performance in the presence of missing linkage data
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           Three novel methods were validated to solve missing data problem in record linkage.
+
+
+                        
+                        
+                           
+                           Two variants of the Linkage Extension method were implemented.
+
+
+                        
+                        
+                           
+                           All three new methods produce better results than existing methods.
+
+
+                        
+                        
+                           
+                           Weight Distribution and Distance Imputation produce no false positive cases.
+
+
+                        
+                        
+                           
+                           Full Linkage Extension detected more match pairs than Compact Linkage Extension.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Record linkage
+
+Missing data
+
+Data quality
+
+Comparative effectiveness research
+
+Quasi-identifiers
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  Introduction
+                  Existing record linkage methods do not handle missing linking field values in an efficient and effective manner. The objective of this study is to investigate three novel methods for improving the accuracy and efficiency of record linkage when record linkage fields have missing values.
+               
+               
+                  Methods
+                  By extending the Fellegi–Sunter scoring implementations available in the open-source Fine-grained Record Linkage (FRIL) software system we developed three novel methods to solve the missing data problem in record linkage, which we refer to as: Weight Redistribution, Distance Imputation, and Linkage Expansion. Weight Redistribution removes fields with missing data from the set of quasi-identifiers and redistributes the weight from the missing attribute based on relative proportions across the remaining available linkage fields. Distance Imputation imputes the distance between the missing data fields rather than imputing the missing data value. Linkage Expansion adds previously considered non-linkage fields to the linkage field set to compensate for the missing information in a linkage field. We tested the linkage methods using simulated data sets with varying field value corruption rates.
+               
+               
+                  Results
+                  The methods developed had sensitivity ranging from .895 to .992 and positive predictive values (PPV) ranging from .865 to 1 in data sets with low corruption rates. Increased corruption rates lead to decreased sensitivity for all methods.
+               
+               
+                  Conclusions
+                  These new record linkage algorithms show promise in terms of accuracy and efficiency and may be valuable for combining large data sets at the patient level to support biomedical and clinical research.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Electronic health records (EHRs) are being adopted across diverse clinical practice settings, enabling clinical investigators to access detailed longitudinal patient- and practice-level data not previously available [1–3]. Rapidly evolving sources of rich health and wellness data include personal medical records, electronic diaries, online social media, disease-specific virtual communities, registries, and real-time personal health monitoring devices. Important data for research also exists in operational, administrative, and financial systems, hence, relevant clinical and financial data often exist in many independent organizations [4,5] and these data sources represent both enormous opportunities for and significant challenges to clinical practice and research. Without an accurate and universal patient identifier, the full spectrum of available patient data is not easily linked, creating barriers to an integrated, comprehensive view of treatments, outcomes, and costs.
+
+Record linkage methods combine independent data sources so that data belonging to the same patient are assigned a common identifier. Current record linkage methods use one or more non-unique fields, called quasi-identifiers, to link two records belonging to the same individual [6]. Quasi-identifiers are defined as fields that, when combined, may be able to uniquely identify an individual, such as date of birth and last name [7]. In medical settings, missing data, including quasi-identifiers, can occur due to multiple reasons, creating challenges for record linkage. For instance, patients may not provide required information or clinical workflows may not ensure complete and accurate data collection and documentation. In a study about data quality in electronic medical records of HIV patients, Forster found that the median missing data rate across six observed variables – age, sex, CDC or WHO clinical stage at baseline and follow-up, CD4+ lymphocyte (CD4) counts and year of ART initiation – was about 10.9% [8].
+
+Current record linkage methods determine match results based on the calculated similarity between two linking fields’ values and a set of weights which determines the relative contribution of each linking field’s similarity or dissimilarity to a final match score [9]. A number of methods for calculating distance measures that have different properties or optimizations for specific data types can be used to calculate similarity scores. However, it is not possible to calculate a distance if either of the two values is missing.
+
+While multiple methods have been proposed to solve the problem of missing data in traditional statistical analytic settings [10], much less research has focused on solving missing-data problems in fields that are used to perform record linkage. A common approach is to remove record pairs that have any missing data in any record linking field. Another approach is to simply ignore the field with missing data in the linkage-scoring algorithm. In both cases, valid record pairs may be missed due to the removal of information available for linkage determination.
+
+We have developed novel algorithms with the objective to correctly identify matching records despite the occurrence of missing data in record linkage fields. We sought to accomplish two key goals: (1) maintain computational efficiency and (2) maximize the accuracy (sensitivity and positive predictive value (PPV)) of the linkage mechanism. We adapted solutions used to resolve missing data in standard classification methods to the problem of missing data in record linkage [11,12]. The three novel approaches: Weight Redistribution, Distance Imputation, and Linkage Expansion, better leverage the data available and discard less data, thereby preserving more information for record linkage. Weight Redistribution removes fields with missing data from the set of quasi-identifiers and redistributes the weight from the missing attribute based on relative proportions across the remaining available linkage fields. Distance Imputation imputes the distance between the missing data fields rather than imputing the missing data value. Linkage Expansion adds previously considered non-linkage fields to the linkage field set to compensate for the missing information in a linkage field. This study implements and compares the performance of all three approaches.
+
+@&#BACKGROUND@&#
+
+In a relational database, two records are linked using a common primary key that must be unique for every distinct object and can never be missing. An always-present universal patient identifier would represent a common primary key to link patient-related data across relational tables and different data sources. However, in the United States, a universal patient identifier is not available so a combination of quasi-identifiers is used to link records across different data sources.
+
+There are two main approaches to matching two records using quasi-identifiers: deterministic and probabilistic. Deterministic record linkage methods establish the linkage between two records based on the exact agreement/disagreement of a combination of fields [13]. The strength of the deterministic approach is simplicity, transparency, and acceptable results [13,14]. The pitfall of the deterministic approach is its inability to account for the similarity between quasi-identifier values during field comparison [15]. Deterministic approaches are unable to match records with typographical or phonetic errors.
+
+Probabilistic methods determine the likelihood two records refer to the same person. The most widely used probabilistic record linkage method was initially proposed by Fellegi and later extended by Sunter [6,16]. The Fellegi–Sunter (FS) method requires each linkage field be assigned both a match and an unmatch weight, numeric values, which represents the ability of that field to discriminate correctly matched from correctly nonmatched records. In its original formulation, FS examines the two field values in a record pair, determines if the values are a match or unmatch, and assigns either the full match weight or the full unmatch weight for that linkage field. The same binary determination (match or unmatch) and assignment of the full match/unmatch weight is performed for all pairs of values for all linkage fields in a record pair. The final FS score is the sum of the assigned matched and unmatched weights. This final score is compared to arbitrarily set thresholds, based on linkage purpose, to determine matched, possibly matched, and unmatched record pairs. Possibly matched record pairs usually require human review and adjudication. A recent addition to the FS method determines optimal match and unmatch weights for linkage variables using the Expectation Maximization (EM) algorithm, replacing tedious manual methods for determining these critical values [17].
+
+The original FS method considered each pair of quasi-identifier in a record pair to be either a match or a non-match and assigned the full match or unmatch weight accordingly [9]. Over the past 20years, a number of distance measures for comparing strings and dates have been developed which have been used to calculate similarity scores for a pair of quasi-identifier values used in record linkage fields [18,19]. The original FS method has been extended to include distance methods, such as edit distance [20] and dice-coefficients [21,22] allowing quasi-identifiers to be considered a partial match if they are approximately similar 
+                        [9]. In many record linkage algorithms, similarity measures are normalized to a 0–100 scale where 0 represents no similarity (infinite distance) and 100 represents identical values (zero distance). For a pair of variable values in a record-linking field, the similarity score is combined with normalized field weights, which map the original FS match and unmatch weights, onto a 0–1 continuous scale to calculate a field’s relative contribution to the total linkage score. Using normalized similarity measures and normalized field weights, a perfect match on all record-linkage fields results in a match score=100. A similarity score less than 100 reduces a field’s normalized weight contribution, yielding a final match score less than 100. Including similarity measures into record linkage algorithms creates flexibility for errors such as typographical and phonetic errors [23]. Methods that combine field similarity (distance) measures with probabilistic scoring have been found to have better performance in comparison to the deterministic methods [9,15].
+
+In addition to the probabilistic methods, more complex methods using naïve Bayes classifier have been developed for record linkage [24]. However, similar to probabilistic methods, naïve Bayes-based methods depend on the assumption that the linking fields are independent [25]. An advanced record linkage method using neural network and complex features rather than individual fields was proposed by Wilson [26]. A complex feature is formed by considering multiple fields simultaneously. For instance, instead of comparing only birth dates of the two records, death dates can be used to identify if a person in one record died before the person in the other record was born. Wilson claims that using both complex features and a complex classifier (e.g. neutral network) outperforms the traditional probabilistic method. Because the focus of this study is on approaches for improving the performance of existing record linkage methods in the presence of missing data rather than on developing completely new record linkage methods, we opted to use the most commonly implemented record linkage method (FS).
+
+When missing data occur in a quasi-identifier field used in record linkage calculations, one can choose to ignore the record (record elimination). Since an eliminated record will never be matched, record elimination will always increase the number of unmatched records. Although record elimination is simple, it fails to take advantage of other available data to match records.
+
+Two common missing-data algorithms, FRIL-0 and FRIL-100 (described in Section 3.2), that do not involve record elimination, assume that the missing quasi-identifier value is either exactly identical to or completely different than the corresponding value in the record pair. By assuming complete similarity, the former algorithm assigns the full agreement weight; by assuming complete dissimilarity the later algorithm assigns the full disagreement weight to the FS scoring calculation. The performance of our new missing-value linking methods is compared against these existing algorithms.
+
+Missing data are the fact of life in medical research [27–29]. Missing data can result in reduced sample sizes and erroneous results [10,29]. Multiple ad hoc and statistical remedies for missing data across multiple cases in a data set have been proposed in the literature. The most extreme solution is to ignore missing data. Ignoring missing data may be acceptable when “the allowances for missing data are inherent in the techniques used” [30]. As a statistical rule of thumb, if the level of random missing data in an attribute across a data set is less than 10%, it can be ignored [31]. If the level of missing data is 50% or more, the attribute should not be used in statistical models [10]. In data classification studies, the reduced-feature approach ignores fields with missing data [12]. In record linkage, the impact of missing data is evaluated within individual record-pairs rather than across all records. Therefore, a missing value in high-weight linkage field has a much greater impact on linkage performance than a missing value in a low-weight field. Thus, in record linkage, the total impact of all missing data is best quantified by the sum weight of fields with missing data.
+
+A major class of methods to deal with missing data is imputation, defined as “the process of estimating the missing value based on values of other variables in the sample” [10]. In traditional analytic data sets, a missing field value is imputed using either data trend or imputation models [10,32–36]. Classic imputation methods are only rarely applied in record linkage. Most patient quasi-identifiers in medical records are strings. It is difficult to impute the value of text fields; none of the methods for imputing numerical values are easily modified for string values. For example, the value of string fields such as first name or phone number cannot be accurately imputed because these fields have too many distinct values and no obvious estimation method.
+
+Let A and B be two records that need to be linked.
+                           
+                              •
+                              
+                                 n is number of fields that are quasi-identifiers.
+
+
+                                 
+                                    
+                                       |
+                                       A
+                                       |
+                                       =
+                                       
+                                          
+                                             N
+                                          
+                                          
+                                             A
+                                          
+                                       
+                                       
+                                       where
+                                       
+                                       
+                                          
+                                             N
+                                          
+                                          
+                                             A
+                                          
+                                       
+                                       ⩾
+                                       n
+                                       ;
+                                       
+                                       where
+                                       
+                                       
+                                          
+                                             N
+                                          
+                                          
+                                             B
+                                          
+                                       
+                                       ⩾
+                                       n
+                                    
+                                 .
+
+
+                                 
+                                    
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                       ,
+                                       …
+                                       ,
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             n
+                                          
+                                       
+                                       
+                                       ∈
+                                       
+                                       A
+                                       
+                                       and
+                                       
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                       ,
+                                       …
+                                       ,
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             n
+                                          
+                                       
+                                       
+                                       ∈
+                                       
+                                       B
+                                    
+                                  are data fields representing the same quasi-identifiers in record A and record B.
+
+Field m(m
+                                 ∊[1,
+                                 n]) has missing data if:
+                                    
+                                       –
+                                       
+                                          Am
+                                           has missing data, OR,
+
+
+                                          Bm
+                                           has missing data.
+
+In record linkage, the missing data problem occurs when there is missing data in any quasi-identifier field used to match the records. Missing data can be represented in different forms such as a null value, an empty string, or a notation indicating that the data of the field is missing.
+
+@&#METHODS@&#
+
+We extended the distance algorithms and FS scoring implementations available in the open-source Fine-grained Record Linkage (FRIL) software system [37,38] to provide new methods for computing linkage scores in the presence of missing data in linkage variables. Numerous popular distance measurements, such as edit distance, date distance, and phonetic distance are available in FRIL. Weights capture the relative importance of a field to accurate record linkage compared to other linkage fields. FRIL uses normalized weights where the sum of field weights across all linkage fields must always equal 1. Missing-data methods that alter field weights must satisfy this constraint.
+
+To test the proposed methods, two groups of paired datasets were created. Each group has two initial datasets containing 5000 records with 9 fields per record and simulated values for each field. Four fields were designated prime quasi-identifiers and four fields were considered non-prime backup fields for record linkage. These fields were used as backup identifiers in the Linkage Extension method. The ninth field (ID) was used as the “gold standard” linkage field for producing known matches/unmatches. Using the ID field, three thousand record pairs were constructed to be true matches; the remaining 2000 record pairs were constructed to be non-matches. For true matches, a record in one data set correctly matched only one record from the second data set.
+
+A derivative version of each of the four initial datasets was created. To simulate typographical errors, we applied the data corruption methods suggested by Pudjijono [23,39]. Table 1
+                         describes the data corruption methods applied.
+
+We varied the corruption rate for each dataset, for example, in Group 1 we set corruption for Data Set 1 at 10% of values per field and at 5% of values per field for Data Set 2. Corruption could occur in any of the 8 fields, not just the four quasi-identifier fields. In both Group 1 data sets, we also randomly deleted 10% of values in all fields to create simulated data sets that approximate estimated error and missing data rates [8,39]. Group 2 was created using higher rates: Data Set 1 had 20% corruption and 20% missing data; Data Set 2 had 15% corruption and 15% missing data. We refer to the paired data sets in Group 1 as the “Low Rate Group” and the paired data sets in Group 2 as the “High Rate Group.” Table 2
+                         shows the actual rates of the random data corruption and missing data generation processes in the final four datasets that were used for performance testing. In each group, records in Data Set 1 are linked to records in Data Set 2. All simulated datasets are provided as online Supplemental materials.
+
+Distance measures compare two field values and determine the degree to which their values are similar. In FRIL, distance measures are converted to a normalized similarity score using a 0–100 scale (0=no similarity; 100=identical values). Table 3
+                         lists the distance measurements within FRIL that were used in this study to calculate similarity scores.
+
+FRIL includes the two missing data algorithms introduced in Section 2.2 that are used as our comparison base cases. FRIL-0 assumes all missing linking values are completely different than the corresponding value in the record pair and always assigns a similarity measure=0. FRIL-100 assumes all missing linking values are identical to the corresponding value in the record pair and always assigns a similarity measure=1. The original standardized field weights are used in these algorithms. The user must decide if FRIL-0 or FRIL-100 algorithm will be used before starting the record linkage process. FRIL allows the user to select FRIL-0 or FRIL-100 for each record-linking field independently. In our experiments with these methods, we assigned either FRIL-0 or FRIL-100 to all fields.
+
+Weight Redistribution (WR) is the process of redistributing field weights to linking variable pairs that do not contain missing data, and assigning zero weight to pairs with missing data. The pseudo-code in Fig. 1
+                         describes the WR algorithm. For a single record, the WR sequentially examines linkage fields for missing data. When missing data are found, WR removes the weight currently assigned to the field and redistributes that weight to all other fields (Fig. 1 – Line 4). The process continues until the weight of all the fields with missing data is redistributed. The weight of the field with missing data is set to 0 (Fig. 1 – Line 5). The algorithm ensures that the sum of the redistributed weights always remains equal to 1.
+
+The amount of redistributed weight assigned to non-missing fields is based on the missing-data field’s relative importance in the linkage process. Without Weight Redistribution, the linkage match score is calculated as the weighted sum of the similarity (distance) score of all n linkage variables, including those with missing values:
+                           
+                              
+                                 match
+                                 _
+                                 score
+                                 =
+                                 
+                                    
+                                       
+                                          ∑
+                                       
+                                       
+                                          i
+                                          =
+                                          1
+                                       
+                                       
+                                          n
+                                       
+                                    
+                                 
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 
+                                 ∗
+                                 
+                                 
+                                    
+                                       d
+                                    
+                                    
+                                       i
+                                    
+                                 
+                              
+                           
+                        However if data for field m is missing, new weights are calculated for the remaining fields where the weight of the variable with the missing value, wm
+                         is distributed to the remaining variables with non-missing values based on the proportional weight wi
+                         it had originally, as represented in the following formula:
+                           
+                              (1)
+                              
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       i
+                                    
+                                    
+                                       ′
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 +
+                                 
+                                    
+                                       
+                                          
+                                             w
+                                          
+                                          
+                                             i
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             ∑
+                                          
+                                          
+                                             j
+                                             =
+                                             1
+                                             ,
+                                             j
+                                             ≠
+                                             m
+                                          
+                                          
+                                             n
+                                          
+                                       
+                                       
+                                          
+                                             w
+                                          
+                                          
+                                             j
+                                          
+                                       
+                                    
+                                 
+                                 
+                                 ∗
+                                 
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       m
+                                    
+                                 
+                                 ,
+                                 
+                                 i
+                                 =
+                                 
+                                    
+                                       1
+                                       ,
+                                       n
+                                       ,
+                                    
+                                    
+                                       ‾
+                                    
+                                 
+                                 
+                                 i
+                                 
+                                 ≠
+                                 
+                                 m
+                              
+                           
+                        The new match score is calculated in the same manner as before using the redistributed weights (w′):
+                           
+                              
+                                 match
+                                 _
+                                 score
+                                 =
+                                 
+                                    
+                                       
+                                          ∑
+                                       
+                                       
+                                          i
+                                          =
+                                          1
+                                          ,
+                                          i
+                                          ≠
+                                          m
+                                       
+                                       
+                                          n
+                                       
+                                    
+                                 
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       i
+                                    
+                                    
+                                       ′
+                                    
+                                 
+                                 
+                                 ∗
+                                 
+                                 
+                                    
+                                       d
+                                    
+                                    
+                                       i
+                                    
+                                 
+                              
+                           
+                        where wi
+                         is the original EM weight or manual weight of field i, 
+                           
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    i
+                                 
+                                 
+                                    ′
+                                 
+                              
+                           
+                         the redistributed weight of field i from Eq. (1) and di
+                         is the standardized distance between field i from Data Set 1 and field i from Data Set 2.The process continues until the weights of all fields with missing values are redistributed to fields with data.
+
+The principle of WR is to respect the original relative weights of the fields. The weight of fields with missing data is redistributed to fields with data in proportion to their original relative weights. Therefore, the relative importance of the fields without missing data will not change after the redistribution process.
+
+The linkage result may not be significantly affected if the fields with missing data are of relatively low important (fields with low weights). But if the fields with missing values have high weights, the reliability of the linkage can be severely compromised by redistributing weights across low-weight fields, resulting in a high rate of false positive matches. To avoid using only low weight fields to link, we created a rule to eliminate record pairs that have missing data in highly weighted linkage fields. We apply the heuristic constraint in Eq. (2), which requires that the sum weights of linkage fields with data is greater than the sum weights of fields without data. Record pairs that do not meet this inequality are eliminated from the linkage algorithm and are labeled as non-matches.
+                           
+                              (2)
+                              
+                                 
+                                    ∑
+                                 
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       with
+                                       
+                                       data
+                                    
+                                 
+                                 -
+                                 
+                                    ∑
+                                 
+                                 
+                                    
+                                       w
+                                    
+                                    
+                                       without
+                                       
+                                       data
+                                    
+                                 
+                                 >
+                                 0
+                              
+                           
+                        
+                     
+
+Distance Imputation imputes the distance between two corresponding fields in a record pair, when one or more is missing, rather than attempting to impute the value of a missing field. A key observation for the Distance Imputation method is that irrespective of what data types exist in the record pair, the normalized distance between two fields is always a number. Using the FRIL model, the normalized distance between two values is a real number ranging from 0 to 100. If the data of one of or both of the matching fields is missing, the distance is unknown. In the extreme, there are two cases: the values are either a non-match or a match. The goal of the Distance Imputation algorithm is to assign a non-match or match similarity score based on the imputed distance of a specific record pair. Although actual similarity scores can vary continuously between 0 and 100, our current Distance Imputation algorithm only assigns a similarity score equal to 0 or 100 based on the probability that the two fields are likely to be similar (described below).
+
+Our Distance Imputation method includes two steps. The first step creates a comprehensive imputation rule set and the second step applies the appropriate imputation rule instance when missing data occur. Fig. 2
+                         contains the pseudo code for constructing the imputation rule set.
+
+The imputation rule set contains association rules identifying the imputation value when missing data occur. An imputation rule has three parts:
+                           
+                              •
+                              <Field set with data: Linkage fields with data in both members of the record pair>.
+
+<Field with missing data: A linkage field with missing data in at least one member of the record pair>.
+
+<Imputed similarity score (distance): Either 0 or 100>.
+
+The field set with data contains one or more fields with complete data. Only one field with missing data is included in each imputation rule. The imputation rule contains the calculated probability that the missing value is likely to be similar to the value present in the other record (Eq. (3)). If that probability exceeds the threshold parameter r, the imputed distance value is set to 100, else the imputed distance is set to 0 (Fig. 2 Lines 28–31). Each rule represents a unique situation of missing data. There are two cases to consider creating imputation rules. We provide an example of each case using the notation introduced in Section 2.4:
+                           
+                              •
+                              Case 1 – One linkage field in a record pair with missing data:
+                                    
+                                       –
+                                       
+                                          n
+                                          =4
+
+
+                                          A
+                                          ={A
+                                          1,
+                                          A
+                                          2,
+                                          A
+                                          3,
+                                          A
+                                          4},
+                                          B
+                                          ={B
+                                          1,
+                                          B
+                                          2,
+                                          B
+                                          3,
+                                          B
+                                          4}
+
+
+                                          m
+                                          =3
+
+Imputation rule
+                                             
+                                                •
+                                                Field set with data={A
+                                                   1, A
+                                                   2, A
+                                                   4}
+
+Field with missing data={A
+                                                   3}
+
+Imputed value=
+                                                   TBD (to be determined)
+
+Case 2 – Two fields in a record pair with missing data:
+                                    
+                                       –
+                                       
+                                          n
+                                          =4
+
+
+                                          A
+                                          ={A
+                                          1,
+                                          A
+                                          2,
+                                          A
+                                          3,
+                                          A
+                                          4},
+                                          B
+                                          ={B
+                                          1,
+                                          B
+                                          2,
+                                          B
+                                          3,
+                                          B
+                                          4}
+
+
+                                          m
+                                          ={3, 4}
+
+Imputation rules:
+                                             
+                                                •
+                                                Rule 1
+                                                      
+                                                         •
+                                                         Field set with data={A
+                                                            1, A
+                                                            2}
+
+Field with missing data={A
+                                                            3}
+
+Imputed value=
+                                                            TBD
+                                                         
+
+Rule 2
+                                                      
+                                                         •
+                                                         Field set with data={A
+                                                            1, A
+                                                            2}
+
+Field with missing data={A
+                                                            4}
+
+Imputed value=
+                                                            TBD
+                                                         
+
+One imputation rule is needed for Case 1 where there is one field with missing data (A3) and three fields with data (A1, A2, A4). In Case 2, there are two fields with missing data (A3 and A4). Therefore, in Case 2, two imputation rules are generated. Because each rule represents a unique missing data context, the number of unique missing data instances in the data set determines the number of rules in the final imputation rule set.
+
+The imputed distance value of each imputation rule is calculated using only records with no missing data in both data sets. For each rule, a conditional probability is calculated using all possible record pairs with complete data:
+                           
+                              (3)
+                              
+                                 P
+                                 (
+                                 
+                                    
+                                       A
+                                    
+                                    
+                                       m
+                                    
+                                 
+                                 ∼
+                                 
+                                    
+                                       B
+                                    
+                                    
+                                       m
+                                    
+                                 
+                                 |
+                                 
+                                    
+                                       A
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 ∼
+                                 
+                                    
+                                       B
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 )
+                                 =
+                                 
+                                    
+                                       P
+                                       (
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             m
+                                          
+                                       
+                                       ∼
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             m
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                       ∼
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                       ∼
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                       ,
+                                       …
+                                       ,
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             n
+                                          
+                                       
+                                       ∼
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             n
+                                          
+                                       
+                                       )
+                                    
+                                    
+                                       P
+                                       (
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                       ∼
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             1
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                       ∼
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                       ,
+                                       …
+                                       ,
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             n
+                                          
+                                       
+                                       ∼
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             n
+                                          
+                                       
+                                       )
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+with
+                           
+                              •
+                              
+                                 
+                                    
+                                       
+                                          
+                                             i
+                                             =
+                                             1
+                                          
+                                          
+                                             ‾
+                                          
+                                       
+                                       ,
+                                       n
+                                       ,
+                                       i
+                                       ≠
+                                       m
+                                    
+                                 
+                              
+
+(A
+                                 1
+                                 ∼
+                                 B
+                                 1) is the event of field A
+                                 1 of record A approximately matching field B
+                                 1 of record B
+                              
+
+
+                                 A
+                                 1 approximately matches B
+                                 1 if Similarity Score(A
+                                 1,
+                                 B
+                                 1)⩾
+                                 r,
+                                 r is the similarity criteria for an approximated match (higher r
+                                 =more similarity)
+
+
+                                 
+                                    
+                                       imputed
+                                       _
+                                       distance
+                                       (
+                                       
+                                          
+                                             A
+                                          
+                                          
+                                             m
+                                          
+                                       
+                                       ,
+                                       
+                                          
+                                             B
+                                          
+                                          
+                                             m
+                                          
+                                       
+                                       )
+                                       =
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         100
+                                                      
+                                                      
+                                                         if
+                                                         
+                                                         P
+                                                         (
+                                                         
+                                                            
+                                                               A
+                                                            
+                                                            
+                                                               m
+                                                            
+                                                         
+                                                         ∼
+                                                         
+                                                            
+                                                               B
+                                                            
+                                                            
+                                                               m
+                                                            
+                                                         
+                                                         |
+                                                         
+                                                            
+                                                               A
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                         ∼
+                                                         
+                                                            
+                                                               B
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                         )
+                                                         ≥
+                                                         threshold
+                                                      
+                                                   
+                                                   
+                                                      
+                                                         0
+                                                      
+                                                      
+                                                         Otherwise
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+
+In our experiments, the similarity measure r was set to 80 and the probability (P(Am
+                        
+                        ∼
+                        Bm
+                        |Ai
+                        
+                        ∼
+                        Bi
+                        )) threshold was set to 0.8. These parameters were derived empirically using performance measures obtained from trial runs that used various combinations of values for each parameter.
+
+The Distance Imputation method estimates the distance of fields with missing value based on the distance of other fields within the record pair. However, fields with data may not discriminate enough to estimate the distance of fields with missing data. As an example, assume gender is the field with data and social security number is the field with missing data. Gender usually has a very low weight since it only has two different values. If we use the distance between genders to estimate the distance between social security numbers, the result will not be accurate. To avoid this situation, the heuristic constraint for record pair elimination (Eq. (2)) must be met before the fields with data can be used to impute the distance of fields with missing data.
+
+When Step 1 of the algorithm is finished, all missing data instance in a data set will have a corresponding missing data imputation rule. During Step 2 in the imputation process (not shown in Fig. 2), each matching pair with missing data has one and only one corresponding rule in the imputation rule set. The rule’s imputed distance will be applied to the distance of the fields with missing data and the imputed distance is used to calculate the overall match score. Fields with data in both records must meet the approximately match threshold. Otherwise, the imputation rule will not be applied and the imputed distance will be set to zero. Using the above Distance Imputation method, distances between missing fields with similar contexts will have identical imputed value.
+
+None of the previous algorithms exploit the potential to use fields other than the prime quasi-identifiers to provide additional linkage information. Expanding the list of data fields used in record linkage could offset the loss of information that occurs with the previous methods.
+
+Linkage Expansion assumes that one or more variables that are not prime quasi-identifiers may have distributional characteristics similar to missing linking variables. These non-linking variables, which are not prime quasi-identifiers, are called backup fields. Backup fields are manually selected to have a “second best” linkage performance compared to the quasi-identifiers. There is no requirement about the number of backup fields although the quantity of backup fields does impact the performance of Linkage Expansion methods.
+
+Linkage Expansion uses two sets of linkage fields. The prime set contains the original quasi-identifiers. The backup set contains the original quasi-identifiers plus one or more backup fields. Using the standard expectation maximization procedures, field agreement and disagreement weights are calculated for both sets. During record linkage, when there are fields with missing data in the data set, the match score is calculated using the field values and weights from backup set. We describe two strategies for creating the backup linkage set.
+
+Full Linkage Expansion (FLE) always uses the complete set of backup fields. Consider the following example for the creation of the backup set using the FLE method.
+                              
+                                 •
+                                 Prime set: A
+                                    ={A
+                                    1,
+                                    A
+                                    2,
+                                    A
+                                    3,
+                                    A
+                                    4}
+
+Backup fields: BK
+                                    ={BK
+                                    1, BK
+                                    2, BK
+                                    3, BK
+                                    4}
+
+Backup set: ABK
+                                    
+                                    ={A
+                                    1,
+                                    A
+                                    2,
+                                    A
+                                    3,
+                                    A
+                                    4, BK
+                                    1, BK
+                                    2, BK
+                                    3, BK
+                                    4}
+
+In the above example, the backup set ABK
+                            contains all fields from prime set and backup fields. Weights are calculated for both A and ABK
+                           . During record linkage, if a record pair has fields from the prime set with missing data, the backup set will be used and the weight of the missing data will be redistributed using Weight Redistribution (Algorithm 1). The difference between FLE and WR is that the additional backup fields contained in ABK
+                            expand the linkage variables used in record linkage to compensate for prime fields that have missing data.
+
+In contrast to FLE which uses all backup fields no matter which linkage fields have missing values, Compact Linkage Expansion (CLE) finds the smallest set of backup attributes for a given pair of data sets to be linked. Fig. 3
+                            contains the CLE pseudo code.
+
+CLE attempts to minimize the number of backup attributes in the backup set while maximizing coverage level, which is defined as the number of missing value instances in a data set that can be resolved by CLE. To achieve the first objective, for every record in a data set, instead of using all backup attributes to compensate for the field(s) with missing value(s), all subsets of the backup fields are considered, if the total quantity of the backup fields is larger than or equal to the quantity of the prime fields that have missing data. At this step, the quality (e.g. the weight) of the backup field is not considered; we assume that backup fields can substitute for the prime fields. EM weights are calculated only after the minimal subset has been identified. During record linkage, the weight condition for record elimination rule (Eq. (2)) will apply, ensuring that low weight backup fields do not dominate the linkage score.
+
+For each subset of backup variables, the coverage score for that combination will increase by 1 for each record with a missing linkage variable that the subset contains no missing values in the backup variables (Fig. 3 – Line 12). For each data set, all combinations of backup variables will have a coverage score which reflects the number of unique combinations of missing values in the original quasi-identifiers that can be represented by that set of backup variables. To achieve the second objective of CLE, the smallest combination of backup variables with the best coverage is selected. Coverage score is calculated independently on data sets to be linked and the backup variable subset with the highest coverage score across both data sets is selected. In the example in Table 4
+                           , the backup subset, consisting of the single backup variable BK1, has a coverage score of 556 which means BK1 can be used as a backup variable for 556 records with missing values in Data Set 1. Although BK1 alone has the highest coverage score for Data Set 1, it is not selected as the backup set because its combined coverage score is not the highest when combined with the coverage scores obtained from Data Set 2. The overall CLE backup variables combination is the subset {BK1, BK3} because it has the highest combined coverage score. Combining the prime fields and the CLE backup fields creates the backup linkage set. When a missing quasi-identifier is detected during record linkage, the backup linkage set replaces the prime linkage set and the Weight Redistribution formula (Eq. (1)) is used to calculate new weights.
+
+@&#RESULTS@&#
+
+We evaluated the record linkage performance of the six methods previously described: FRIL-0, FRIL-100, Weight Distribution, Distance Imputation, and two versions of Linkage Expansion (FLE and CLE) against two data groups each of which includes two simulated data sets (Table 5
+                     ). The same expectation maximization algorithm was used to calculate match/unmatch field weights. For record linkage, a score of 80 or higher (0–100 scale) was required for accepting a pair as a match. To test the computational feasibility of our algorithms against a large number of comparisons, a nested loop join without blocking was used, which resulted in 25M potential record pairs.
+
+FRIL-0 is the most cautious method. By setting the distance to 0 for all missing data cases, this method implies that all fields with missing data are absolutely not similar. Because of its high caution, FRIL-0 produces a large number of false negative matches and low sensitivity. Record linkage algorithms that discard record pairs that have any missing linkage values are effectively executing FRIL-0. Table 6
+                         illustrates the impact of a missing value on one highly weighted field but with all other fields being identical.
+
+Whereas FRIL-0 is the most cautious, FRIL-100 is the most permissive by assuming that all field pairs with missing values are an exact match. Table 5 shows that the number of false positives (incorrect matches) is markedly larger with this method compared to all other methods. Table 7
+                         shows an example of two completely different records that are assigned a perfect match score (100) because fields with missing values were given perfect similarity scores with FRIL-100.
+
+Weight Redistribution removes linkage variables with missing data and proportionately redistributes their linkage weights to other linkage variables. WR, without employing the record elimination feature in Eq. (2), allows missing linkage variables with high weights to be redistributed to linkage variables with initially low weights. Record linkage performance can suffer significantly without protecting against this situation. Table 5 shows that without applying Eq. (2), in data group 1, 2,978 of 3000 match cases are effectively detected but there are also 461 false positive cases. An even larger number of false positive cases (2023 pairs) occurred in the Group 2 (High Rate Group) simulated dataset. Table 8
+                         illustrates how the redistribution of high weights to low-weighted variables generates false positive matches. In this example, the only field without missing data is first name whose weight is smaller than the sum weight of three other fields. If Eq. (2) is not applied, this record pair will not be eliminated and first name will be the only field used to calculate the linkage score. If William is a popular first name, a false positive match will occur. When Eq. (2) is applied, this record pair would be eliminated from consideration. In Table 5, WR with Eq. (2) had no false positive cases in either Group 1 or Group 2.
+
+
+                        Table 5 shows that the true positive performance of Distance Imputation is slightly worse than the performance of the Weight Redistribution. Table 9
+                         is an example of a false negative case generated by this Distance Imputation. In this example, the two records should be a match. The three fields with data are SSN, Last Name and Zip. Table 10
+                         is the imputation rule set generated from our simulated data sets. If Applying Rule 3 in Table 10, the imputed distance for FN would be 100. However, Rule 3 cannot be applied because the Zip values are different in the two records. The distance between two Zip fields is 0, which does not qualify as meeting the “same data” requirement for Rule 3. The inequality between the Zip fields makes SSN and Last Name ineligible to impute First Name.
+
+Full Linkage Expansion recruits backup fields to compensate for the missing linking information, leveraging information that could be contained within non-linking variables. Table 5 shows that, in both data groups, FLE is outstanding in detecting match cases. Although our simulation did not result in any false positive matches, Table 11
+                         illustrates how FLE could generate a false positive case. In this example, Record 1 and Record 2 are from two different persons. Because there is missing data in the SSN field of Record 2, the backup model with all backup fields is used. The data of a backup field in Record 2 (Address) is also missing. Using WR, the weight of SSN is transferred mostly to the Email field because Email has large weight in the backup model. In this particular case, email values from both records are nearly identical. FRIL Edit distance method rounds up the distance of nearly similar string to 100. Therefore, the match score of this pair of records is 80, which is equal to the acceptance level.
+
+
+                        Table 12
+                         shows the 3 best combinations of backup variables based on highest coverage scores for each dataset and the combined datasets within Group 1 (results for Group 2 not shown). In this example, the combination with the highest sum coverage score for both datasets is (Addr, Email) which has a combined coverage score of 2894, which means this combination of back up variables can cover 2894 cases of missing data from the two datasets.
+
+
+                        Table 5 shows that a smaller quantity of match cases was detected by CLE in comparison with the performance of FLE (Group 1: 2747 versus 2938; Group 2: 2596 versus 2302). However like FLE, CLE has a low false positive rate producing only one false positive case. The results show that the CLE method performs virtually as well as the FLE method with a smaller model that includes fewer fields.
+
+The two datasets in Group 1 had lower corruption and missing data rates than the two datasets in Group 2 (Table 2). Table 13
+                         reformats the sensitivity results from Table 5 to highlight differences in record linkage sensitivity performance by method across the two groups. In all cases, sensitivity was reduced in Group 2 (higher corruption and missing data rates). FRIL-100 and WR (without Eq. (2)) were not included because of extremely high number of false positive cases.
+
+@&#DISCUSSION@&#
+
+Missing data bring challenges to record linkage. While multiple methods to deal with missing data have been proposed in the statistics and data classification literature, there is little research about handling missing data in record linkage variables. In this study, we adapted methods used in data classification studies, such as Weight Redistribution and data imputation, to address missing data in record linkage. In addition, we also developed new methods such as two versions of Linkage Expansion (Full Linkage Expansion and Compact Linkage) that leverages non-linkage variables. Our results show that the performance of these methods is promising.
+
+Weight Redistribution is the easiest algorithm to implement because it does not require pre-computations, which are part of both DI and LE methods. Table 5 provides the performance measures for WR with and without the inclusion of Eq. (2). Eq. (2) prevents the WR algorithm from redistributing weights from highly-weighted linkage attributes to low-weighted linkage attributes. When this protection is not present (WR w/o Eq. (2)), the number of false positive linkages rises and PPV falls significantly. Across all measures, WR performs substantially better that the existing FRIL-0 and FRIL-100 algorithms with minimal additional computational overhead.
+
+Distance Imputation addresses missing linkage data by leveraging information present in record pairs that do not contain missing data. Distance Imputation creates association rules based on all patterns of missing values that are observed in the two data sets being linked. Distance Imputation extends WR by using the association rules to estimate the distance between fields before applying Weight Redistribution. Distance Imputation has two parameters that can alter its performance. The parameter r determines the similarity threshold for determining when two fields are sufficiently similar for approximate matching. The probability threshold is used to determine the final imputed distance value. Setting a large value for r (e.g., 90) would be appropriate where typographical errors were expected to be infrequent. If the rate of typographical errors were high, a large value for r would increase the false negative rate by incorrectly assigning typographical errors low similarity scores (Similarity Score=0). Setting the probability threshold to a high value (e.g. 0.9) means that there must be strong additional evidence in the non-missing linkage variables for the conditional probability to assign a high similarity score.
+
+Distance Imputation has two main weakness: (1) the cost of pre-computing the imputation rule set, which must be created anew for each pair of data sets to be linked and (2) the inability to precisely impute the distance of the missing value. The output of the current method has only two possible imputed values (0 or 100), which only approximately estimates the real distance of the fields with missing values. Additional Distance Imputation techniques, such as linear regression, might be a useful extension.
+
+Both Linkage Expansion methods have high sensitivity, detecting most match pairs, and generating no false positive matches. Within each group, CLE had lower sensitivity than FLE but both LE methods had higher sensitivities than Weight Redistribution or Distance Imputation when applied to the same data sets. Therefore, LE methods may be suitable for use where false positive match pairs are unacceptable. Although CLE might be less effective in detecting true match pairs, it may be less likely to produce false positive matches because only the most discriminating backup fields are used.
+
+One desirable characteristic of FLE is the ease of creating the backup set. Another advantage is the high coverage level. FLE can handle a record with missing data as long as the sum weight of the backup fields is larger than or equal to the sum weights of the prime fields with missing data (Eq. (3)). This heuristic is important to ensure that weak backup fields are not being used as substitutes for highly-weighted missing fields.
+                        
+                           (4)
+                           
+                              
+                                 ∑
+                              
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    i
+                                 
+                                 
+                                    BK
+                                 
+                              
+                              ⩾
+                              
+                                 ∑
+                              
+                              
+                                 
+                                    w
+                                 
+                                 
+                                    j
+                                 
+                                 
+                                    m
+                                 
+                              
+                           
+                        
+                     A weakness of FLE is the use of a linkage model that includes a large number of backup fields. Large linkage models might include redundant fields in the linkage calculations. The mathematics of the Fellegi–Sunter record linkage methodology assumes linkage variables are independent. As the number of linkage fields increases, the likelihood of dependence between fields also increases, which could degrade the performance of the FS method. Offsetting this concern are studies that have shown the FS algorithm to be reasonably robust to violations of the independence assumption [41,42].
+
+The strength of CLE is its ability to select the smallest set of backup fields while maximizing the coverage level. With CLE, one can initially include many proposed backup fields in the backup field list because the minimal selection process will only select fields that are suitable for the missing data situation in a given data set. The pitfall of CLE is that the minimal backup field selection process might require high computation cost, especially when there are a large number of possible backup fields available.
+
+As shown in Table 13, the sensitivity of all the methods declined with increased data corruption and missing data rates. Among all methods, FRIL-0 was most impacted by higher corruption and missing data rates because it is the most conservative method. Other methods, such as WR and DI, which also do not utilize supplemental data, suffered similar negative changes in sensitivity. Although sensitivity also decreased with increased data corruption and missing data, FLE and CLE maintained the highest sensitivity rates. PPV rates were not changed because all methods, with the exception of WR w/o Eq. (2) and FRIL-100, produced zero or very small number of false positive cases.
+
+This study has several limitations. First, the data sets used in this study consist of simulated data that were corrupted for the purpose of this study and the data sets are relatively small. Large data sets may cause performance problems for the chosen linkage approaches and for EM weight calculations or record pairing. We used nested loop join without blocking to force the algorithms to execute against all 25M record pairs to test the execution feasibility. In actual practice, blocking is used to eliminate large number of record pairs from consideration. For large data sets, data blocking methods must be used [6,43]. It is necessary to make sure that the current missing data methods will work as expected along side with these data blocking techniques.
+
+Second, backup fields used in FLE and CLE were manually selected. The selection of backup fields is important because weak backup fields jeopardize the reliability of the linkage result. As expected, the EM algorithm assigned very small weights to backup fields, reflecting that they are not as strong as the original quasi-identifiers. There currently is no automated or empirical process to select variables to be used as original quasi-identifiers or backup variables, and these decisions may be based on experience regarding the weight and completeness of a variable.
+
+Third, the three proposed methods were evaluated only against datasets with data missing at random. The presence of non-random “missingness” might raise new problems. For example, the DI method uses records with data available to impute the distance of records with missing data. If the missingness is not random, the records with data might not be representative of the records with missing data.
+
+Additional future work include evaluating the three methods against real clinical data sets to explore the potential impact of non-random missingness, exploring solutions to missing linkage data in privacy-preserving (encrypted) record linkage (PPRL), improving the efficiency and continuity of Distance Imputation method, and deploying missing data handling methods along with data blocking techniques. Although PPRL is distinct from the missing data handling processes, it is important to study the performance of the missing data methods using of the most common PPRL distance measure, the Dice coefficient [21]. The current Distance Imputation method is inefficient, resulting in long run times. Better data structures or data processing techniques may solve this problem.
+
+@&#CONCLUSIONS@&#
+
+We developed three new algorithms for modifying the most common record linkage methods to respond to missing values in record linkage variables. We compared the linkage performance of these algorithms and two existing algorithms using two pairs of simulated data sets with known corruption properties. None of the existing methods had 100% sensitivity with 100% specificity, and differences in accuracy were observed. Given the enhanced focus on big data analytics and the potential benefits of combining data from disparate sources, the ability to accurately link patient records is crucial. Additional research in this record linkage may result in heuristics that enable selecting optimal algorithms based on the characteristics of the data and the desired trade-offs in the performance goals of the record linkage process.
+
+@&#ACKNOWLEDGMENTS@&#
+
+Funding was provided by AHRQ 1R01HS019908 (Scalable Architecture for Federated Translational Inquiries Network) Contents are the authors’ sole responsibility and do not necessarily represent official AHRQ or NIH. Mr. Vijay Thurmella and P. Brandon Abbott provided programming support for early versions of the record linkage algorithms. We thank the developers of FRIL for making their software package available to other investigators.
+
+Source code, data sets and documentation can be obtained from an open-access github repository at: https://github.com/recordlinkagerep/missingdataproject. Supplementary data associated with this article can be found, in the online version, at http://dx.doi.org/10.1016/j.jbi.2014.01.016.
+
+
+                     
+                        
+                           Supplementary data 1
+                           
+                        
+                     
+                     
+                        
+                           Supplementary data 2
+                           
+                        
+                     
+                     
+                        
+                           Supplementary data 3
+                           
+                        
+                     
+                     
+                        
+                           Supplementary data 4
+                           
+                        
+                     
+                  
+
+@&#REFERENCES@&#
+

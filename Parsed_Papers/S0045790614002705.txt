@@ -1,0 +1,322 @@
+@&#MAIN-TITLE@&#CSTORE: A desktop-oriented distributed public cloud storage system
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           A desktop-oriented distributed public cloud storage system is proposed.
+
+
+                        
+                        
+                           
+                           Three-level mapping hash method is used to distribute and locate data.
+
+
+                        
+                        
+                           
+                           Using migration and rank extension to implement load balancing and fault recovery.
+
+
+                        
+                        
+                           
+                           Sequence numbers are used to guarantee consistency.
+
+
+                        
+                        
+                           
+                           Implement data deduplication and use Bloom filter to recycle rubbish.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Desktop-oriented
+
+Metadata
+
+Hash-rule
+
+Bucket
+
+Storage
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  Previous distributed file systems aim at storing very large data sets. Their architectures are often designed to support large-scale data-intensive applications, which cannot cope with massive daily users who want to store their data on the Internet. In this paper, CSTORE is proposed to support mass data storage for a large number of users. The user-independent metadata management can ensure data security through assigning an independent namespace to every user. Operating logs are applied to synchronize simultaneous sessions of the same user and resolve conflicts. We also implement a block-level deduplication strategy based on our three-level mapping hash method for the large quantity of repeated data. The migration and rank extension on the hash rules are defined to achieve load balancing and capacity expansion. Performance measurements under a variety of workloads show that CSTORE offers the better scalability and performance than other public cloud storage systems.
+               
+            
+
+@&#INTRODUCTION@&#
+
+In the booming Internet, the requirement of dealing with huge amounts of data is very common. For traditional storage solutions cannot accommodate the multi-petabyte of data, large-scale distributed storage systems are introduced [1–6]. However, the way of using data is changing today. Especially, an Internet user can read or write files on PC, mobile device and even web with many online sessions at the same time. Moreover, in the area of cloud computing [7,8], a large number of end users begin to move their desktop data [9,10] to the backend cloud service system, and storage system metadata operations account for as many as half of the workloads of typical file systems [11]. Desktop users will continually access the metadata rather than actual data, such as renaming, moving, and looking up filenames. Therefore, the metadata of user files should be separated efficiently and operated safely. Previous distributed storage systems fail to consider these application scenes. In Ceph with the object-based storage architecture, the metadata are not completely separated from actual data [1]. PVFS [2] with compatible POSIX API, cannot access the data with different sessions at the same time and the only metadata server limits the throughput when there are a large number of access requests. Though some new distributed storage systems with special client library (non-POSIX API), such as Google file systems [3], Apache HDFS [4], Amazon Dynamo [5], and Amazon S3 [6], propose some design architectures to resolve the problems above, the design goal of those systems do not focus on the considerable desktop data problem of a large number of Internet users. Additionally, the storage systems with the locating mechanism such as DHT [12] take much overhead either in stabling the structured overlay network, or in storing and searching the mapping table. Therefore, it is necessary to develop a new storage system for the considerable desktop data.
+
+In the paper, we design a desktop-oriented distributed public cloud storage system, namely CSTORE, to resolve the above problems. First, a storage system is required to deal with a large number of users and their tree-based directories. For this purpose, we adopt a metadata cluster to provide the separated namespace service. We also introduce the update on version and operation log methods to face the multiple-sign-on challenges. Furthermore, on the basis of logical sequence number, the replication and data synchronization guarantee the availability and reliability of data. Inspired by object-based storage [13], we store actual data as blocks in SU (storage unit). In order to initialize hash rule, and load balance, SU is controllable by RS (rule server).
+
+We present the architecture and implementation of CSTORE, a cloud storage system with high performance and scalability. CSTORE can provide users with independent namespaces that can be accessed from multiple devices. The replication on file system level makes the file data reliable and available. Moreover, CSTORE is compatible to most of the UNIX/Linux file systems for its support of POSIX semantics. We compare performance of CSTORE with a public cloud storage system in accessing metadata and different size of data.
+
+The rest of this paper is organized as follows: In Section 2, previous work and motivation are summarized; In Section 3, the system architecture overview of CSTORE is presented; In Section 4, the solution to our goals is provided. In Section 5, we evaluate the performance of CSTORE and compare it with other public cloud storage systems in different data scales.
+
+Distributed file systems, such as Ceph, HDFS, and PVFS, have been studied for years. The focus of these file systems is to meet various requirements, such as scalability and throughput under heavy concurrency. But all of these systems fail to resolve the massive small independent namespaces and multiple-sign-on problems. Consequently, some commercial data storage services for desktop users have emerged, e.g., Riak CS [14].
+
+In Ceph, the CRUSH algorithm [15] is introduced to distribute object replicas to the structured storage cluster, which eliminates the workload of metadata cluster and improves the locating efficiency for clients. In Ceph, sub-tree partitioning [16] is also introduced to improve the scalability and decrease the load balance difficulty of the system. In addition, the replicas are adopted to guarantee data safety during failure detection. However, in Ceph, the metadata are stored in memory cache in MDS (metadata server). As for safety, MDS must commit journal to the OSD [15]. The synchronous I/O fails to achieve the high performance when multiple clients upload or download thousands of files simultaneously. In CSTORE, MU (see Section 3.3) and SU (see Section 3.2) are adopted to store metadata and actual data respectively and we separate the metadata from actual data completely. MU is used to manage the metadata which contains a large number of users’ namespace and their tree-based directories.
+
+The architecture of HDFS has one namenode to handle metadata and multiple datanodes to store file chunks. The namenode exposes the mappings from files to chunks. And its 64-MB chunk size is designed for write-once read-many semantics, which is highly suitable for Hadoop/Map-Reduce applications [17] and rarely applied in common circumstances. Thus the consistency model is simplified because of the lack of concurrent writes. By locating the computation and storage on the same node, HDFS makes full use of the bandwidth and reduces the cost. The block in HDFS also has replicas. HDFS maintains the number of replicas. In addition, HDFS block placement strategy does not take into account datanode disk space utilization. Therefore, it adopts a balancer to balance disk space utilization. In order to meet the requirement of multiple desktop users, it is necessary to solve the issue that the major operations include modifying the metadata or uploading and downloading small files. In CSTORE, MU (metadata unit) is used to cope with the challenge of a large number of these operations. In addition, much little blocks are used to store data and deduplication was introduced to save the space of storage.
+
+A complete PVFS file system is composed of a metadata server and several storage servers. It adopts a united namespace and RAID [18] to guarantee the reliability of file data. Since PVFS clients usually involve scientific applications, concurrent file access is supported and the POSIX sequential consistency is guaranteed for non-conflicting writes. The clients can easily cache the file’s layout because the location of the stripe units can be algorithmically derived from its offset in the file. Besides, PVFS supports UNIX/Linux file system API with most POSIX semantics. As mentioned above, PVFS has only one metadata server which is prone to become the bottleneck. Meanwhile, PVFS has only one global namespace. Therefore, it hardly copes with the multiple users to access data at the same time. Moreover, CSTORE can deploy multiple MUs (see Section 3.3) to solve the metadata server bottleneck. Besides, CSTORE supports multiple namespace to satisfy access requests of different users.
+
+Riak CS is a cloud storage solution built on the open source distributed database Riak [19]. Riak CS handles the uploaded large files and exposes an S3-compatible API, user and administrative functions, and usage reporting. In Riak CS, there is no master node and each node has the same responsibility. It divides objects into different chunks associated with metadata storage. Under Riak CS, Riak node data is automatically distributed evenly across nodes with consistent hashing. Meanwhile, Riak stores data with a simple key/value model. Key/value pairs are logically grouped together in a namespace called bucket. As writing new keys to Riak, the data’s bucket/key pair is hashed. The resulting value is mapped into a 160-bit integer space. This integer space can be conceptualized as a ring to determine where data are placed.
+
+@&#MOTIVATION@&#
+
+We present CSTORE, a distributed public cloud storage system with excellent performance and reliability while providing service for desktop users. Our architecture is based on the assumption that the system supports massive data storage for a large amount of users. The system can manage different users’ namespace, address metadata fast, deal with simultaneous sessions, remove the duplicate, and balance the load.
+
+CSTORE has five main components: client, rules server (RS), metadata unit (MU), storage unit (SU), and gateway (GW), as shown in Fig. 1
+                     .
+
+Rules server (RS) stores two three-level mapping hash-rules (see Section 4.1). One rule helps to direct files into different SUs, the other maps metadata into different MUs. RS stores and replies to the rule requests from clients. RS may modify the hash rules as required by the administrator.
+
+We use the three-level mapping hash method to locate data objects. The method is very fast and flexible and can distribute data uniformly. In this method, some parameters affect the data distribution. They are called hash rules. The hash rules are maintained by RS. Therefore, RS can adjust these parameters to control the data distribution.
+
+When manipulating data, the client requires get the hash rules from RS firstly, and then uses the hash rules to locate the data with the three-level mapping hash method. After that, it can connect the backend servers to transmit file data. Therefore, the method is very simple and fast.
+
+To release the RS’s workloads from massive clients’ acquisitions, clients cache the rules, and update the rules until they find that the rules have expired. As another optimization, to further ensure the distribution uniformity, all the files in our system are split into small sized blocks.
+
+Storage units (SUs) form a storage cluster, which stores all file blocks. SU maintains data in its local file system. We are inspired by the object-based storage. Every file block stored in the system is associated with a key, with which our get/put semantics can work. All the file blocks are not necessarily in the same size. In general, unlike traditional file systems, the last block of each file does not require extra space to round it up to the nominal block size.
+
+During its running time, SU sends heartbeat messages to the RS to report its current running state, such as the total storage capacity, fraction of storage in use, and its workload. With the information, RS is able to acquire the status of the system, and to trigger load balancing or fault recovery. These commands on load balancing or fault recovery are included in the heartbeat reply from RS to SU.
+
+The metadata cluster is composed of all metadata units (MUs) which maintain namespaces and files’ attributes such as blocks’ keys, sizes, and permissions and cope with all the metadata operations from considerable end users. Taking into account the differences of the file system metadata and application data, in our system, we store the file system metadata and application data separately. However, for the purpose of supporting considerable end users, the minimal metadata storage and management unit is a single end user’s namespace. We cannot separately store the metadata of an end user in different MUs.
+
+MU stores the metadata in its local file system. The management of end users’ hierarchy of files and directories is similar to that in the local file system, so we can take advantages of cache of local file system. Furthermore, just like SUs, all metadata units also maintain heartbeats to RS under the RS’s management.
+
+The gateway (GW) module shields the access and accepts the requests from clients. It provides a RESTful API like Amazon S3 for clients. It plays a role in transmitting the protocol between clients and all the backend components in CSTORE. It converts RESTful style HTTP requests into the proprietary protocol between clients and backend components. This kind of design makes CSTORE more secure and more effective and easier to access. In the processing of communication between clients and the gateway, all the metadata and log following by HTTP (REST) head, which are encapsulated as XML, are transmitted as stream in bytes. The process of uploading and downloading the actual data is the same as the process of the metadata.
+
+Equipped with the GW module, we hide all backend components. All operations to the CSTORE cannot access these components directly but access them though GW. It can prevent all the hostile attacks to our system. Moreover, GW also is designed as a cluster in CSTORE, and every gateway node can independently provide services for clients. So, the GW cluster can release the pressure of hotspots. With the friendly HTTP protocol interface, GW can meet the requirements of heterogeneous terminals.
+
+In order to meet multiple users’ requirements on heterogeneous terminals, we provide the client application on Windows and Android, respectively. Users use the client to access the data in CSTORE just like the access to their own local data. The client monitors the manipulation of users to complete the process of access personal data. The interaction of data and operations between clients and GW is transparent to users.
+
+In addition, we have implemented the POSIX file system interface with FUSE [20] which implements a fully functional file system interface in user space program. In addition, we also provide an API library to meet some special upper requirements such as large-scale storage.
+
+Before a client read a file, hash rules should be contained in the cache (see Section 3.1). When a client reads a file, it firstly calls the GET interface in RESTful API, and then attaches the full path of the file as the parameter. After receiving the request, GW translates it into the proprietary protocol and sends it to a MU. After getting the file metadata, including file creating time, modification time, list of keys of file blocks, etc., from MU, GW forwards the file metadata to the client. Finally, the client can access file contents trough GW with keys of file blocks and assemble different file blocks together.
+
+When a client writes a file, it divides the file into blocks to generate the key of each file block firstly, and then sends the file block to SU located by the key through GW. After that, the client contacts MU to update the metadata of the file through GW.
+
+As mentioned above, CSTORE uses the hash method to distribute and locate data simply and fast. In our system, to ensure the scalability and availability, we use the three-level mapping hash method (TMHM).
+
+The top-level mapping delimits the huge key space into smaller ones, a set of buckets. Modular arithmetic algorithm is a good choice to dispatch the keys evenly. The middle-level mapping assigns the buckets to different virtual containers. In this level, we use a vector to maintain the assignment. With the vector, weight and replication can be implemented. The bottom level is a one-to-one mapping from virtual container to physical container. As shown in Fig. 2
+                        , with the three-level mapping method, all data objects can be distributed evenly to support weight and replication.
+
+In CSTORE, we use the SHA-1 (Secure Hash Algorithm 1) to generate a key. For metadata, a key stands for a file full path with its namespace. For actual data, a key stands for a file block. By using SHA-1, the magnitude of the key depends on the output of SHA-1. The magnitude of keys can reach 2160. The container is SU or MU. The modular number and the assign vector which can affect the data location are the rules maintained in RS.
+
+In order to avoid hotspots in CSTORE, we import load balancing. We define two operations on the rules: migration and rank extension. We use these two operations to achieve load balancing.
+
+Migration acts on the assigned vector. It simply moves a bucket from a container to another. The destination can be an existing container or a new one. Thus all the buckets in CSTORE can be configured dynamically. During the migration, another two copies (see Section 4.4) can still provide service to the client. The service will not pause owing to migration, so the load of migration will not have a negative effect on our service.
+
+Rank extension doubles the modular number m into 2m, indicating that the sum of our buckets is doubled too. Therefore, a data object in an old bucket either stays in the original bucket x, or belongs to a new bucket with bucket number (x
+                        +
+                        m). In our system, a bucket is split into two buckets. The two buckets are all maintained in the original container without data migration. Actually, with an arbitrary rank, it can avoid data migration. Taking avoiding hotspots into consideration, bucket migration may occur after the extension. Therefore, we choose the minimal integer as the rank of extension. It can increase the sum of bucket and control the quantity of buckets. By controlling the quantity of buckets, the load of migration will be reduced.
+
+With the two operations, our system can achieve very high flexibility. When a container is overloaded, migration operation is carried out to move some buckets to another with the lower load. We also can use rank extension operation to reduce the size of migration data or improve the balancing precision.
+
+CSTORE allows multiple-sign-on, which means that a client can login CSTORE from PC, mobile devices, and Web browsers. This requires the uniformity of the namespace when concurrent modification happens. Thus the updating on version and operation log comes up in time.
+
+Every operation by clients will result in a log item with a unique sequence number (SEQ). And only MUs are authorized to modify the log. Then the clients can read and apply the log in local namespace. Each time a client requests the operation log with the cached SEQ, and then MU replies to client with the log that happens afterwards. Typically, MU uses session token to filtrate the log. Both the new token and the token of last session will be retained to avoid duplicated fetching. The client will clear the cache and fetch the whole namespace again in the following two cases. Firstly, the client logins in CSTORE for the first time and the cache is empty. Secondly, the client does not login in for a long time, and another session has made a lot of changes in the namespace. In the second case, pulling the operating log and applying them in local namespace will take much overhead in both MU and the client. Relatively, fetching the whole namespace is simple and efficient.
+
+Let us consider the log synchronization example illustrated in Fig. 3
+                        A and B are the two sessions of the same client. They upload two files /c and /d at the same time. Now MU knows that the client has both /c and /d, but A does not know the existence of /d and B does not know /c either. Considering the non-simultaneity of pulling log of session A and session B, it is assumed that A will get log earlier. As soon as A gets the log “Put /d”, it will represent the metadata of /d that carries the log in its local namespace. Similarly, Session B will get the metadata of /c during its next periodical log pulling.
+
+While operating log solves the uniformity of namespaces, the updating on version gives a solution of conflicting writes. In CSTORE, the version of a new file is 0. When a client is to update a file, it is necessary to update it on its current version. The current version is passing by the operation log from an earlier GET request. In the conflict writing situation, the latter session is usually updated on its old version because of the log pulling interval. These out-dated operations will be reported with errors and delivered to users. Here we only deal with the conflicts among users to reduce the complexity of CSTORE.
+
+In CSTORE, files are divided into fixed blocks (except the last block) and then distributed to different buckets on multiple nodes. All the buckets maintain three copies by default. And the number of bucket copies can be configured. Only when all the copies become invalid, the data in the buckets will be lost. Therefore, the consistency of the copies is the key issue in this section.
+
+In order to recover the lost data when a failure happens to SU and to keep the consistency of SUs, the sequence number synchronization strategy is introduced. The strategy has been applied in CSTORE by keeping a heartbeat connection among the duplications of the same bucket. Each replica of a bucket has its own logic sequence number to preserve the order of file blocks. Every bucket has its own timer and every timer has the same timing. The sequence number is increased by 1 when timer expires, and the sequence number will be sent to other copies with heartbeat. When heartbeat arrives, after comparing the sequence numbers in heartbeat with local sequence number, the bigger one will be elected as local logical sequence number and be recorded into log so that the inconformity will only exist for one heartbeat period.
+
+In CSTORE, we use the sequence number to recover the lost data when a failure happens to SU. As mentioned above, a file is split into many blocks, and every block is directed to a bucket. Every bucket has three copies in different SUs. Therefore, once a failure of one SU occurs, some file blocks cannot be uploaded to the buckets on this failed SU. However, because of replication, other duplications of the buckets are running. We call the running buckets the working copy, and name the failed bucket for recovering data as the recovering copy. In order to fetch the lost blocks when SU is recovered from failures, the recorded logical sequence number is used as the basis. The start sequence number is the last synchronization, namely, the local sequence number, and the end is marked with the current logical sequence number. The blocks between the two sequence numbers will be retrieved from the working bucket as long as the heartbeat connection is reconstructed. In fact, to catch up with the working copy, the recovery bucket cannot be online until the recovery task of the bucket is completed. However, it can still receive the data pushed from the normal bucket during the recovery procedure. Additionally, a restarted SU may recover tens of buckets at the same time, thus leading to heavy data traffic among SUs. Considering this situation, these blocks are downloaded one by one. Even though the method is a little slower, the recovery bucket can turn into the working mode eventually.
+
+To explain the recovery process clearly, we illustrate the interactions between recovering SU (SU_1) and the working SU (SU_2). As shown in Fig. 4
+                        , Bucket_1 is taken as the example. SU_1 rebuilds the heartbeat connection for Bucket_1. Bucket_1 gets the its latest local sequence number b from disk before the last failure of SU_1, meanwhile it sends the request with the number b to SU_2 to ask for the current sequence number c. After that, SU_1 requests SU_2 to obtain the file blocks that should be stored in Bucket 1. Notice that before each data request, Bucket_1 will check whether it has the block. When all the data have been synchronized, SU_1 will turn the service status of Bucket_1 into the online status, which indicates the end of recovery.
+
+For a desktop-oriented distributed cloud storage system, there are considerable repeated data. Therefore, we propose one deduplication of our requirements and implementation as follows.
+
+Each block in CSTORE has a global unique block ID. It is the checksum of the block content which is computed by MD5 (Message-Digest Algorithm 5) or SHA-1. Thus two blocks with the same block ID will be regarded as the same block. In addition, the hash-rule guarantees that the same block ID will be mapped into the same bucket and stored in the same SU group. When a client wants to upload a file block to SU, SU pushes the check message to the others. If two out of the three SUs confirm the existence of the file block, the client will be notified that the block has been uploaded previously and sent the notice that the operation is successful, although the file block is not uploaded.
+
+Deduplication has some advantages, such as the shorter response time for clients and the lower storage cost. But the disadvantage is still obvious: it is difficult to maintain the relationship between files and data blocks when the CSTORE stores a large number of files. For example, many files with the same data content have the same blocks. When one of them is deleted, its data blocks should not be removed unless it is the last file with those blocks. To keep the consistency between files and blocks, CSTORE will scan the metadata namespace of users to check whether some data blocks should be recycled. For the number of the namespace is large, we adopt the Bloom filter algorithm [21] to check whether a file block is in the metadata set. Bloom filter exceeds some other algorithms in space utilization and search efficiency when handling massive data. Its drawback lies in the error judgment. Therefore, a data block of rubbish file may not be recycled. Luckily, in a file system without duplicated data, a file, that should be erased, may be uploaded again. So we adopt a delayed recycling strategy to solve the situation and the error judgment problem. A rubbish file block can be reclaimed as a normal file block if it is uploaded again.
+
+To present the calculation scale of Bloom filter, the two equations below are required. If we know the size of the set, n, the bits of the bitmap, m, and the number of the hash function, k 
+                        [22], the error rate can be computed according to Eq. (1). In addition, Eq. (2) represents the relation among m, n and the error rate p, if the optimal k has been provided.
+                           
+                              (1)
+                              
+                                 p
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             1
+                                             -
+                                             
+                                                
+                                                   e
+                                                
+                                                
+                                                   -
+                                                   
+                                                      
+                                                         k
+                                                         (
+                                                         n
+                                                         +
+                                                         0.5
+                                                         )
+                                                      
+                                                      
+                                                         m
+                                                         -
+                                                         1
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 ,
+                              
+                           
+                        
+                        
+                           
+                              (2)
+                              
+                                 m
+                                 =
+                                 -
+                                 
+                                    
+                                       n
+                                       ln
+                                       p
+                                    
+                                    
+                                       
+                                          
+                                             (
+                                             ln
+                                             2
+                                             )
+                                          
+                                          
+                                             2
+                                          
+                                       
+                                    
+                                 
+                                 ,
+                              
+                           
+                        
+                     
+
+We estimate the size of the bitmap for a petabyte scale file system. Typically, the fixed size of file block in CSTORE is 512kB. If we have the optimal k, which has 7 hash functions when the error rate is 0.01, the size of bitmap is about 2454MB according to Eq. (2). It is an acceptable result for such a large amount of file data.
+
+With the algorithm, we can develop the strategy based on the idea that MU collects the information of blocks and produces the bitmap, as shown in Table 1
+                        . Then SU gets the bitmap and judges whether block data should be recycled, as shown in Table 2
+                        .
+
+@&#EVALUATION@&#
+
+In this section, we present a range of micro-benchmarks to illustrate the performance of our CSTORE prototype and compare it with Riak CS. We cannot deploy commercial closed source public cloud storage system to achieve the same evaluating environment, such as Amazon and Google Drive. We choose Riak CS as the reference system because it is an open source public storage cloud, and its goal is to meet the uploading and downloading requirements of multiple users as CSTORE does. In addition, Riak CS, as a typical cloud storage system, is used by many different backgrounds companies, such as Google, Rovio, Dell, and Github. In all the tests, clients, SUs, and MUs are user processes on a Linux cluster. Each SU or MU runs on its own host, while tens of clients share the same host to generate workloads.
+
+These tests were carried out on an experimental cluster consisting of 14 nodes. All the nodes are commodity machines configured with two quad-core 2.4GHz Intel Xeon processors, 8GB of memory, a 300GB SAS 15000 RPM hard drive, and one Gigabit Ethernet connected to a TP-LINK Gigabit switch.
+
+Due to the 1Gps NIC configuration on all the nodes, the disk data transfer rate may become a key factor when measuring system throughput. We choose ext4 as the disk file system for performance evaluation. The ext4 file system [23,24] has some attractive features, such as extents and delayed allocation, which will dramatically improve the disk throughput.
+
+We deployed 1 node for metadata unit and 6 nodes for storage unit to store metadata and data. Gateway modules were deployed on all of the above 7 nodes. Other 7 nodes were deployed for clients in our small cluster. For Riak CS contained no master, we adopted 7 nodes to deploy it, and every node had a Riak and a Riak CS for its I/O daemons. Other 7 nodes were deployed for clients too. Furthermore, we installed nmon (short for Nigel’s Monitor) on every node to monitor disk and CPU utilization rate.
+
+We have clients for CSTORE to provide users an easy-to-use interface. In Riak we used S3cmd interface. In all tests, we mounted total 28 clients for each system on 7 nodes to generate workloads.
+
+CSTORE usually creates tens to hundreds of buckets during system initialization. These buckets are distributed uniformly among SUs or MUs. As described above, the clients decide the file location according to the hash rules. Therefore, the degree of dispersion of files directly influences the load on SU.
+
+We tested the file distribution in CSTORE. Fig. 5
+                         shows the degree of dispersion of files in buckets for the testing results of 1000 files and 100,000 files. The horizontal axis indicates the bucket number, and the vertical axis indicates the percentage of files in each bucket. The curve of 1000 files shows the greater fluctuation than the curve of 100,000 files. Thus, we can conclude that with the increase of the files, the dispersion of files tends to be hypo-dispersed. It is indicated that the hash rule actually can evenly dispatch files into buckets.
+
+Metadata operations often account for half of file system workloads. MU is critical to the performance of the overall system. We measured the metadata performance via a few of workloads without any I/O data. We setup only one MU to handle the whole system metadata because it can show the bottommost performance of processing metadata. If there are more MUs in the system, it will show the better performance.
+
+We generated 560,000 files with 28 clients in both CSTORE and Riak CS. After all files were generated, we obtained the metadata of files in every client. Each operation listed about 20,000 files. We measured the duration of the operation from the beginning to the end of the last client and computed the total throughput of the whole system. Riak CS reaches its maximum throughput at about 6300files/s, as shown in Fig. 6
+                           . Every read operation in Riak can find the Riak node where the metadata is located through two steps. Firstly, the Riak node is connected. Secondly, the Riak node finds the real Riak node which contains the metadata. Besides, Riak stores data with a simple key/value model and Riak has to traverse all the metadata to find the requirements of users. Therefore, the performance of Riak CS service is limited by the addressing process of metadata. On the contrary, CSTORE can locate the metadata directly with the three-level mapping hash method. Besides, the users’ hierarchy of files and directories are similar to the local file system in MU and users can find the metadata quickly. In addition, the CSTORE metadata service can be very scalable by adding new machines.
+
+We chose ext4 as the underlying file system of SU for its excellent performance. The Riak CS instance in our experimental cluster was also deployed on ext4 file system. Besides, we configured the Riak CS and CSTORE instance with only one replication in our data performance tests.
+
+In order to find out the write throughput of CSTORE, we tried to generate large files on N clients simultaneously. Every large file should consist of 2GB randomly generated data and each client wrote to its own file. To eliminate the effect of disks on clients, data were generated in memory and written to servers immediately. Therefore, disk data were not read on any client.
+
+
+                           Fig. 7
+                            shows the data performance results of CSTORE and Riak CS. As shown in Fig. 7, Riak CS reaches its maximum aggregate write performance at 154MB/s, which is increased to 301MB/s for CSTORE. The performance of CSTORE is up to about twice as fast as Riak CS. Both Riak CS and CSTORE partition large files into different small blocks, but CSTORE partitions the file in client, rather than in Riak CS node. When a large number of large files are uploaded, there will be massive partition tasks. In Riak CS, the file needs to be partitioned in Riak CS node. Therefore, the high load of CPU limits the performance of write large files. However, CSTORE divides the large files into various parts in clients. Therefore, the pressure of partition is dispersed to the clients and the disk becomes the limit of the whole system.
+
+We tried to demonstrate the read throughput of CSTORE through reading large files on N clients simultaneously. Our testing program on each client read a different 2GB file from CSTORE to generate read workloads. We got rid of the effect of disks on clients by simply dropping any incoming file data.
+
+As shown in Fig. 8
+                           , CSTORE is faster than Riak CS when considering reading large data. CSTORE reaches its maximum output at 383MB/s, while Riak CS’s maximum read throughput reaches 179MB/s. The main reason of the result is the same to the reason for the results of the write of large files in Section 5.3.1. CSTORE puts different blocks together in clients, but Riak CS has to do the task in Riak CS node. When there are a lot of tasks of reading large files, the rate of Riak CS’s CPU limits the reading performance of large files. Moreover, CSTORE can realize the high performance until the disk limit is reached. According to the above analysis, CSTORE can get the quicker writing and reading speeds of large files if there are more SUs. In addition, the advantage we get from the underlying storage layout of CSTORE is duplication. Because a CSTORE file block can be easily mapped to an independent file on SU, the data duplication feature can be implemented elegantly.
+
+Daily users may produce and manipulate a large number of small files. Therefore, CSTORE should be an efficient solution for the mass of small files.
+
+Our testing program running on each client created 2 threads and every thread uploaded 10,000 small files to CSTORE. Every small file carried 10-kB data. All the file data were generated randomly in memory and pushed into CSOTRE immediately. We increased the number of clients gradually and tried to find out the maximum throughput of the whole system. The same testing case was also carried out on Riak CS.
+
+Results described in Fig. 9
+                            show that CSTORE is up to four times as fast as Riak-CS. About 544 files can be uploaded to Riak CS within one second, while 2178 files can be uploaded to CSTORE within one second. During the test of the metadata performance (see Section 5.2), the Riak node holding the metadata is searched twice in every read operation. The write operation shows the same results. When there are multiple small files to be uploaded, Riak node has the heavy calculation load for locating data. Moreover, the CPU usage of every Riak node is above 85% during the tests. Therefore, the throughput of Riak CS is limited by the addressing process. With the three-level mapping hash method, addressing metadata in CSTORE will not become the bottleneck of the system. Throughput in CSTORE increases very fast due to the cache effect. Therefore, the hard disk becomes the performance bottleneck of the system and disk utilization rate is above 90% in this situation. As mentioned above, we can deploy more MUs to disperse the pressure, thus achieving the high performance.
+
+We also tested the read throughput of small files on both systems. A 2-thread program was run on each client and every thread read 10,000 small files from the system in the test. We simply dropped any incoming data in our testing program.
+
+As shown in Fig. 10
+                           , CSTORE is up to about four times as fast as Riak CS when reading lots of small files concurrently. CSTORE can transfer about 9000 files within one second, while Riak CS can serve clients with about 2000 files. It is worth noting that the performance of Riak-CS is also limited by its addressing process through the analysis of the utilization of CPU in writing small data and reading metadata. The throughput of CSTORE is still restricted by the disk. Disk utilization rate is between 85% and 95% in this case.
+
+We have developed the balance strategy and the recovery strategy. In order to measure the efficiency of the two strategies, we performed two tests on them. Their efficiency also indicates the flexibility and availability of CSTORE.
+
+An identity generator was used in our tests, which generated keys for objects that would be stored in bucket finally. It could also generate keys for a specified bucket. The identity generator offered us a load producer to achieve the desired situation.
+
+In our tests, the recovery strategy recovered the lost data immediately when a failure of a server was found. We did not differentiate SU from MU because these tests could be applied to both of them. Due to the limitation of the testing machines, 5 among the 6 clients were re-deployed as servers.
+
+
+                        Fig. 11
+                         illustrates the basic bucket distribution in the experiment. Eight servers are divided into four groups and each group has two servers with the same capacity and weight. Different groups have different capacities: the lowest was 1000 and the highest was 4000. The values indicate the number of the objects that a server can deal with. We simplify the overload condition by trigging the balance when the number of objects is exceeded. The weight is proportional to their capacity. As shown in Fig. 11, the weight of the first two servers is 1; the weight of the next two is 2; the weight of the last two is 4. The replication number is 3, and there are 16 buckets in the initial state. The threshold is set to 40%, so we can see the adjusting more clearly. Letters ‘a’ to ‘d’ are the code names of buckets that we are concerned on. Replicas of the same buckets are labeled with the same letter. The length of each bar presents the number of objects stored in a server, and each section in a bar presents the size of a bucket belonging to the server.
+
+In Fig. 12
+                        , the identity generator produces the keys that belong to only one bucket (bucket ‘b’). This action causes data growth in 3 servers (Servers_0, Server_6, Server_7). As expected, Server_0 with the lowest weight is overloaded firstly. The other two smaller buckets ‘a’ and ‘c’ on Server_0 are migrated to Server_5 and Server_4, and the system load is still balanced to their weights. The load of Server_0 is relatively high, but it still copes with its load well.
+
+Next we tested the failure of a server. Fig. 13
+                         shows the data distribution after server_1 fails. We can see that, the buckets stored in the failed servers (‘a’, ‘d’ and ‘c’) are rebuilt on Servers_2, Server_5 and Server_3. No more data migration happens and the system is still balanced.
+
+@&#CONCLUSIONS@&#
+
+We have presented CSTORE, a distributed public cloud storage system that allows users to efficiently store desktop files. CSTORE is built around several contributions: an independent namespace based on the three-level mapping hash method, the namespace and file data consistency mechanism and block-level deduplication strategy. These contributions let CSOTRE achieve high storage utilization, fast locating for metadata and file data. We have shown that CSTORE achieves better performance than Riak CS in terms of processing metadata, small files and large files. Besides, CSTORE can failover successfully when a failure happens.
+
+In the future work, we will study the physical storage model of metadata to reduce disk expenses and improve the performance. The I/O performance of CSTORE will be continuously optimized.
+
+@&#ACKNOWLEDGEMENT@&#
+
+This work was supported by the National Science and Technology Major Projects of China (Grant No. 20122012ZX03002-004-004).
+
+@&#REFERENCES@&#
+

@@ -1,0 +1,866 @@
+@&#MAIN-TITLE@&#DASH: Dynamic Approach for Switching Heuristics
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We introduce a learning framework for solving general mixed-integer problems (MIP).
+
+
+                        
+                        
+                           
+                           We analyze the tree-search and visualize the evolution of the problem structure.
+
+
+                        
+                        
+                           
+                           MIP instances gradually change structure as branching heuristics are applied.
+
+
+                        
+                        
+                           
+                           Tracing the sub-problems during search allows dynamic heuristic selection.
+
+
+                        
+                        
+                           
+                           Switching heuristics can improve the standard pure MIP branching.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Mixed-Integer Programming
+
+Algorithm selection
+
+Dynamic search heuristics
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  Complete tree search is a highly effective method for tackling Mixed-Integer Programming (MIP) problems, and over the years, a plethora of branching heuristics have been introduced to further refine the technique for varying problems. Yet while each new approach continued to push the state-of-the-art, parallel research began to repeatedly demonstrate that there is no single method that would perform the best on all problem instances. Tackling this issue, portfolio algorithms took the process a step further, by trying to predict the best heuristic for each instance at hand. However, the motivation behind algorithm selection can be taken further still, and used to dynamically choose the most appropriate algorithm for each encountered sub-problem. In this paper we identify a feature space that captures both the evolution of the problem in the branching tree and the similarity among sub-problems of instances from the same MIP models. We show how to exploit these features on-the-fly in order to decide the best time to switch the branching variable selection heuristic and then show how such a system can be trained efficiently. Experiments on a highly heterogeneous collection of hard MIP instances show significant gains over the standard pure approach which commits to a single heuristic throughout the search.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Mixed Integer Programming (MIP) is a powerful problem representation aimed at solving constrained optimization problems. The goal is to minimize (or maximize) a linear objective function subject to a set of linear inequalities while restricting a subset of variables to integer values only, the so-called integrality constraints, and allowing the remainder of variables to take real values within some predefined boundaries.
+
+                        
+                           
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   m
+                                                   i
+                                                   n
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      c
+                                                      T
+                                                   
+                                                   x
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                s.t.
+                                             
+                                             
+                                                
+                                                   A
+                                                   x
+                                                   ≤
+                                                   b
+                                                
+                                             
+                                          
+                                          
+                                             
+                                             
+                                                
+                                                   B
+                                                   x
+                                                   =
+                                                   d
+                                                
+                                             
+                                          
+                                          
+                                             
+                                             
+                                                
+                                                   l
+                                                   ≤
+                                                   x
+                                                   ≤
+                                                   u
+                                                
+                                             
+                                          
+                                          
+                                             
+                                             
+                                                
+                                                   
+                                                      x
+                                                      i
+                                                   
+                                                   ∈
+                                                   Z
+                                                   ∀
+                                                   i
+                                                   ∈
+                                                   I
+                                                
+                                             
+                                          
+                                          
+                                             
+                                             
+                                                
+                                                   
+                                                      x
+                                                      i
+                                                   
+                                                   ∈
+                                                   R
+                                                   ∀
+                                                   i
+                                                   ∈
+                                                   N
+                                                   ∖
+                                                   I
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                  
+
+Using this straight forward formulation, where A is a matrix 
+                        
+                           ∈
+                           
+                              R
+                              
+                                 m
+                                 x
+                                 n
+                              
+                           
+                           ,
+                        
+                      
+                     b is a right-hand-side vector 
+                        
+                           ∈
+                           
+                              R
+                              m
+                           
+                           ,
+                        
+                      
+                     c is an objective function vector 
+                        
+                           ∈
+                           
+                              R
+                              n
+                           
+                           ,
+                        
+                      
+                     l and u are lower and upper bound vectors 
+                        
+                           ∈
+                           
+                              R
+                              n
+                           
+                           ,
+                        
+                      and I is a subset of all variables 
+                        
+                           N
+                           =
+                           {
+                           1
+                           ,
+                           ⋯
+                           ,
+                           n
+                           }
+                           ,
+                        
+                      it is possible to define a wide variety of problems ranging from scheduling (Kadioglu, Malitsky, Sabharwal, Samulowitz, & Sellmann, 2011) to production planning (Wolsey & Pochet, 2006) to network design (Balakrishnan, Magnanti, & Mirchandani, 1997) to auctions (Zurel & Nisan, 2001) and many others.
+
+The most fundamental strategies to solve problems arising in constrained optimization are branch-and-bound and branch-and-cut techniques (Mitten, 1970; Padberg & Rinaldi, 1991). For both, the main idea is to recursively partition the problem into sub-problems (“branching”) and to systematically explore the resulting search spaces. When the objective of the problem is to maximize, a relaxation of the problem is used to compute an over-estimate of the best solution for a given sub-problem (“bounding”). By comparing this bound with the best previously found solution, it can be discovered that a given sub-problem is incapable of containing improving solutions, which allows us to discard (or “prune”) the sub-problem from further consideration. Branch-and-cut, is similar, but instead of utilizing bounds it adds additional constraints (“cuts”) to the original problem that remove suboptimal regions of the problem. Most modern MIP solvers use a combination of branch-and-bound-and-cut.
+
+Among the variety of relaxations which can be computed efficiently, the most commonly used are linear relaxations. When the inference mechanism is exhausted, the alternatives are tried (“search”) by selecting a variable and either adjusting its bounds or assigning it to a value based on a variable/value guiding heuristic. Once the decision is made, the inference engine can resume providing further reasoning, tightening the bounds of variables and the objective value. This process is repeated until an infeasible/sub-optimal solution is found. When such a point is reached, the search backtracks to try remaining alternatives.
+
+While the efficiency of a branch-and-bound approach depends heavily on the quality of the bounds, for many problems, standard relaxation techniques are reasonably accurate and they can be improved, for example, by automatically adding valid inequalities. Therefore, a key behind the success or failure of this complete search approach is the order in which the variables are selected. Choosing certain variables can have significant effects on the bounds of other variables and improve the objective value, allowing the inference engine to quickly conclude with an improving solution or with its nonexistence. On the contrary, choosing the “wrong” variables can have dire consequences to efficiency, and might lead to exponentially longer run times.
+
+Due to the importance of the selection of the branching variable, a number of heuristics with different characteristics have been designed (Achterberg, 2007; Achterberg, Koch, & Martin, 2004; Linderoth & Savelsbergh, 1997). Several of these are based on simple rules, e.g.; Most/Least Infeasible Branching base their decisions on an integer variable’s fractionality in the linear relaxation. Other heuristics, such as Strong Branching test which of the candidates gives the best progress before actually committing to any of them, and similarly, its less costly variant Pseudo-Cost Branching adapts itself as the search progresses by looking at how much the variables actually tightened the linear relaxation on average. There are also search heuristics geared toward feasibility, such as Active Branching (Patel & Chinneck, 2007). Furthermore, there are also hybrid techniques, e.g.; Reliability Branching, which brings together the positive aspects of Strong Branching and Pseudo-Cost Branching. A detailed overview of these and some other heuristics can be found in Achterberg (2007).
+
+While the majority of efficient MIP solvers employ these heuristics, they generally tend to only use one of them during search. There have of course been a number of proposed heuristics which collect information during search, e.g., the aforementioned Pseudo-Cost branching based search (Achterberg et al., 2004). Alternatively, there are approaches that employ portfolio algorithms to predict the best heuristic for the problem at hand (Gomes & Selman, 2001; Leyton-Brown, Nudelman, Andrew, Mcfadden, & Shoham, 2003). There are also approaches that switch heuristics after every restart (Fischetti & Monaci, 2011). Work in portfolios has already shown that there is often no single solver or approach that works optimally on every instance (Kadioglu, Malitsky, Sellmann, & Tierney, 2010; O’Mahony, Hebrard, Holland, Nugent, & O’Sullivan, 2008; Xu, Hutter, Shen, Hoos, & Leyton-Brown, 2012). It is also known that throughout the branching process, as certain variables are assigned and the bounds of others are changed, the underlying structure of the sub-problem changes. Therefore, the main idea behind this work is that the efficiency of the search can be much improved if we could use the correct heuristic at the right time during search.
+
+In this paper, we show how to identify changes in the problem structure, and based on that, how to make a decision of when it is the best time to switch the guiding heuristic. This study is focused on the variable selection heuristics, but the same idea can be readily extended to other ones, e.g., branching direction, node selection, local search. A preliminary version of this work was presented in Kadioglu, Malitsky, and Sellmann (2012) which only dealt with the well-known set partitioning problem (SPP). In this paper, we expand the research from the SPP with problem dependent heuristics to the much more general MIP solving. We also provide a detailed analysis of how the problem structure changes over time to bring some insights into this line of research. The effectiveness of the proposed approach is demonstrated on real benchmarks that are of interest to the community using state-of-the-art commercial and open-source MIP solvers; 
+                        
+                           IBM
+                           
+                           ILOG
+                           
+                           CPLEX
+                        
+                      (IBM, 2013) and 
+                        SCIP
+                      (Achterberg, 2004).
+
+Our approach is built-on the instance-specific learning framework which we review in the next section. Then we show how to go beyond instance-specific algorithm configuration and exploit dynamic heuristic selection in Section 3. To motivate our approach, we provide an analysis and visualization of the MIP solving process in Section 4. Our Dynamic Approach for Switching Heuristics is outlined in Section 5. We take advantage of a variety of variable/value selection heuristics listed in Section 7 with complementary strengths (e.g., an inexpensive-less-informed heuristic vs. an expensive-but-more-informed heuristic). Finally, given a feature space that can capture the underlying structure of a problem and a set of search heuristics, we show how to effectively train such a system and learn the best settings under specific conditions. We demonstrate the effectiveness of our approach by embedding it into two high-performance MIP solvers in Section 9.
+
+In recent years there has been a growing drive into research of algorithm selection. This includes approaches like SATzilla (Xu, Hutter, Hoos, & Leyton-Brown, 2008; Xu et al., 2012), 3S (Malitsky, Sabharwal, Samulowitz, & Sellmann, 2012), CPHydra (O’Mahony et al., 2008), ArgoSmart (Nikolic, Maric, & Janici, 2009), and many others. For a continuously updated list of relevant research we refer the reader to Kotthoff (2013). While potentially any of these approaches can be applied to dynamically switch heuristics, this paper utilizes Instance-Specific Algorithm Configuration (ISAC) (Kadioglu et al., 2010) which was successfully applied in the special case of the set partitioning problem in Kadioglu et al. (2012). In addition to being demonstrated effective in other domains, as we later demonstrate, the cluster based method naturally lends itself to visualizing and better understanding the underlying process.
+
+ISAC works as follows (see Algorithm 1
+                     ). In the learning phase, ISAC is provided with a portfolio of solvers P, a list of training instances I, their corresponding feature vectors F, and the minimum cluster size c. First, the gathered features are normalized (line 2) so that every feature ranges from 
+                        
+                           [
+                           −
+                           1
+                           ,
+                           1
+                           ]
+                           ,
+                        
+                      and the scaling and translation values for each feature (s, t) is recorded. This normalization helps keep all the features at the same order of magnitude, and thereby keeps larger values from being given more weight than lower ones. Then, the instances are clustered based on these normalized feature vectors (line 3). Clustering is advantageous for several reasons. First, selecting a solver based on a collection of instances generally provides a more robust choice than one could obtain when using individual instances. That is, selection on a collection of instances helps prevent over-tuning and allows generalization to similar instances. Secondly, clustering provides additional transparency on which solver is better for a particular region in the problem space. Tree-based algorithms can do this too while simultaneously providing a level of feature filtering, but clustering makes it easier to have non-linear boundaries without expressly introducing new features. This advantage can also be compensated for by using forests, but with a loss of interpretability.
+
+To avoid specifying the desired number of clusters beforehand, the g-means (Hamerly & Elkan, 2003) algorithm is used. This clustering approach assumes that a good cluster is one that has a Gaussian distribution around its center. Starting with all instances being in a single cluster, g-means iteratively calls 2-means, to split a cluster into two. If the new clusters are more Gaussian than the original, the split is accepted and the procedure continues. Once all the instances are grouped, the clusters with fewer instances than some threshold are absorbed by their larger neighbors. While other strategies are possible, a recent work has shown that this methodology often results in clusters that are superior to those resulting from standard approaches such as k-means, X-means, and hierarchical clustering (Collautti, Malitsky, Mehta, & O’Sullivan, 2013).
+
+Robust algorithm selections are obtained by not allowing clusters to contain fewer instances than some chosen threshold, a value which depends on the size of the dataset. In our case, we restrict clusters to have at least 50 instances. Beginning with the smallest cluster, the corresponding instances are redistributed to the nearest clusters, where proximity is measured by the Euclidean distance of each instance to the cluster’s center. The final result of the clustering is a number of k clusters Si
+                     , and a list of cluster centers Ci
+                      (line 3). Then, for each cluster of instances Si
+                     , a favorable solver Ai
+                      is chosen (line 5).
+
+When running algorithm A on an input instance x, ISAC first computes the features of the input (line 2) and normalizes them using the previously stored scaling and translation values for each feature (line 3). Then, the instance is assigned to the nearest cluster (line 4). Finally, ISAC runs the best solver for the cluster, Ai
+                     , on x (line 5).
+
+Algorithm selection techniques like ISAC, as described in the previous section, have been shown to improve solver performance in a number of domains by selecting the best solver or approach for a particular instance (for Constraint Satisfaction Problems (CSPs) (O’Mahony et al., 2008), for Boolean Satisfiability (SAT) (Malitsky et al., 2012; Xu et al., 2008; Xu et al., 2012), and for Mixed-Integer Problems (MIPs) (Kadioglu et al., 2012)). Here we argue that additional improvements can be achieved by designing solvers that can dynamically switch between search strategies, selecting the most appropriate heuristic for the sub-problem at hand. The key observation is that given a specific MIP instance, as the tree-search progresses branching on variables and updating bounds, each encountered sub-problem is an instance of the original MIP problem. However, as more decisions are made during search, the structure of the problem can change dramatically, such that the guiding heuristic that was deemed good for the original problem may no longer be the best strategy. Therefore, at a high level, our goal is to create a branch-and-bound solver that also analyzes the structure of the current sub-problem, which we refer to as a sub-instance. Based on a representative set of problem features, this analysis would predict which heuristic is likely to perform best and should thus be employed for subsequent decisions. We refer to such a strategy as a Dynamic Approach for Switching Heuristics (DASH). For this purpose, we would need a feature space and a similarity measure between problem instances.
+
+In order to monitor changes in a problem, we need a set of informative features that can capture as many aspects of the problem and its sub-problems as possible without becoming too expensive to compute on-the-fly. In Kadioglu et al. (2012) a set of problem features were proposed in the context of solving MIPs, similar to those used for CSPs (O’Mahony et al., 2008) and SAT Xu et al. (2008) 
+                        Xu et al. (2012). More specifically, we compute the:
+
+                           
+                              •
+                              Percentage of unset integer variables in the sub-instance;
+
+Percentage of unset integer variables in the objective function of the sub-instance;
+
+Percentage of active equality and inequality constraints;
+
+Statistics (min, max, avg, std) on the number of active variables in each constraint;
+
+Statistics on the number of active constraints in which each variable is used.
+
+Features of variables are further broken down by variable type; continuous, integer and binary. The resulting set is composed of 40 features. We also considered including features like the depth of a sub-instance in the branch-and-bound tree, but feature filtering using information gain typically showed these as being insignificant.
+
+As our computational results demonstrate, these 40 features can be tracked efficiently during tree-search and can distinctively characterize the sub-instances.
+
+The feature space together with the Euclidean distance metric offers a measure of “similarity” between instances. This can in turn be used to partition the data with g-means, a clustering approach employed by the original ISAC methodology. However, unlike for a regular algorithm selection approach, the clustering can not be solely comprised of a representative set of MIP instances. As shown in Kadioglu et al. (2012), the instances that are encountered during the tree-search are likely to be very different from those at the root node. Thus, it is possible to face radically different instances than those in the initial datasets. As a result, this necessitates the extension of the training set to include sub-instances that are sampled by running different heuristics.
+
+In particular, we create three such extended datasets. The first dataset, extDatasetC, is generated by running 
+                           
+                              IBM
+                              
+                              ILOG
+                              
+                              CPLEX
+                           
+                         on each instance of the training set. The actual implementation and the set of heuristics is different for 
+                           SCIP
+                        . Therefore a second set, extDatasetS is created which contains the sub-instances encountered when using that solver. For reasons explained later in Section 9.3, we also include a third dataset with only a subset of 
+                           SCIP
+                         heuristics, extDatasetSr.
+
+Our outline of switching heuristics dynamically so far raises a natural question: Do sub-instances fall far enough from an original instance that their cluster changes? To answer this question, we performed an initial analysis on the extended datasets and analyzed the clusters of the sub-instances. The results are presented in Table 1
+                     . In fact, more than half of the collected sub-instances belong to different clusters than those of the original problem instances.
+
+Furthermore, Fig. 1
+                      shows the evolution of the ISAC solving process in the feature space for two representative problem instances pmedcap_p3 and regions-goods200-bids1000. The feature space is projected onto two dimensions using Principal Component Analysis (PCA) (Abdi & Williams, 2010) for visualization purposes. The cluster boundaries are represented by solid lines, and the best heuristic for each cluster is represented by a unique symbol at its center. The nodes are colored based on the depth of the tree showing all observed sub-instances. Throughout the search, we commit to the same solver (heuristic) that ISAC found to be the best for the original cluster. Even though the same heuristic is used at all times, notice how the instances shift toward a different cluster as the depth increases. We argue that this behavior should be monitored, and when such significant change occurs, the search guidance should be switched to the heuristic that best fits the new problem structure.
+
+To provide further insight, Table 2
+                      shows the distribution of instances and sub-instances for each clusterization of the extended datasets. We can see which clusters contain the original instances, and which clusters emerge when sub-instances are created. Note that there is no relation between clusters of different datasets (for example, cluster 6 on extDatasetC and cluster 6 on extDatasetS have a void intersection).
+
+What emerges from the information presented in Table 2 is that the feature space for the extended datasets can be partitioned, demonstrating the highly dynamic aspect of the MIP solving process. For example, cluster 7 of extDatasetC contains 19 percent of the data, while, surprisingly, none of the original instances belong to it. This means that there is a chance that the sub-instances in cluster 7, that are “similar” due to being grouped together, could prefer a different solver than the one assigned for the original instances. Furthermore, the sub-instances of cluster 7 derive from instances that belong to several other clusters, therefore likely to exhibit a different preferred solver. The same observations can be made on cluster 5 of extDatasetS and on cluster 4 of extDatasetSr, that contain respectively 24 and 17 percent of the whole dataset but have no original instance that belong to them. This is exactly where the potential of this work lies; exploiting the fact that structural changes do occur during search, which we can characterize effectively, and react to.
+
+Motivated by the analysis presented in the previous section, we present the details of our Dynamic Approach for Switching Heuristics (DASH) in Algorithm 2
+                     . In accordance with the Instance-Specific Algorithm Configuration (ISAC) methodology (Kadioglu et al., 2010), DASH assumes that instances that have similar features share the same structure and so will yield to the same algorithm.
+
+As outlined in Algorithm 2, DASH is provided with a sub-instance, the heuristic employed by its parent, the centers of the known clusters, and a list of available heuristics. Because extracting features can be computationally expensive and because switching heuristics at lower depths of the search tree (further from the root node) has less impact on the quality of search, DASH only chooses to switch the guiding heuristic up to a certain depth and only at predetermined intervals (line 2), choosing the parent’s heuristic in all other cases (line 10). When a decision needs to be made, the approach computes the features of the provided sub-instance (line 3) and determines the nearest cluster based on the Euclidean distance (line 7). In theory, any distance metric can be used here, but in practice we found Euclidean distance to work well for the general case. Consequently, DASH employs the heuristic that has been assigned to that cluster (line 12). This assignment of heuristics is obtained by determining the best one for each cluster using a tuning algorithm, as later described.
+
+The key component of the algorithm that determines the success (or failure) of our approach is the correct assignment of heuristics to clusters. This information is learned during an off-line training phase. Following its success on set partitioning problems, we employ a similar procedure as was first proposed in Kadioglu et al. (2012). For each instance in the training set we compute an assortment of sub-instances that are observed when using each of our heuristics. This extended problem set (extDataset) allows us to get a better overview of the type of sub-instances DASH will be encountering, as opposed to using the original training instances alone. Computing the features of the extended problem set, the instances are clustered using g-means (Hamerly & Elkan, 2003) as described in Section 2.
+
+Once all the instances and sub-instances are clustered, a heuristic for each cluster needs to be determined. However, an important caveat in this scenario is that the selection of a certain heuristic for a cluster further affects other decisions. Namely, the sub-instances that will be observed during search heavily depend on the heuristic used at the parent node. Therefore, the learning strategy must consider its decision with respect to the type of problems such a decision would likely generate. That is, we want the selection of a heuristic to be made with the fore-knowledge of sub-problems it could generate. This can be achieved by employing a parameter tuner to simultaneously assign heuristics to all clusters. In our case we use GGA (Ansótegui, Sellmann, & Tierney, 2009), a genetic algorithm for finding parameter assignments that yield improved performance of a solver on a specific benchmark. The main reason for taking this approach is that configuration, and GGA in particular, is known to work well when the effect of changing parameters is a priori unknown.
+
+Specifically, the algorithm configurator searches for the best assignment of heuristics to clusters by directly seeing which such assignment leads to the best overall performance. This means that for training, the sub-instances are only used to find the clusters a solver is likely to encounter. Meanwhile the parameters of the solver are categorical values that specify the heuristic for each such cluster. The actual evaluation of assignment of heuristics to clusters, however, is performed only on the original set of training instances. Such an approach thus automatically takes into account the type of sub-instances that would be generated by selecting a particular heuristic at a particular point in the search tree.
+
+@&#RELATED WORK@&#
+
+The idea of adapting the search engine to the current sub-instance as outlined in Section 5, is by no means new. For example, in Boolean Satisfiability (SAT), the local search SAT solver SATenstein (Bukhsh, Ashiqur, Xu, Hoos, & Leyton-Brown, 2009) is aimed at parameterizing its search so that it can be adapted for particular problem instance distributions. Closer to our approach, the adaptive search engine designed for Constraint Satisfaction Problems in Epstein, Freuder, Wallace, Morozov, and Samuels (2002) tries to fit the search heuristic with the current search state. In Constraint Programming, the approach presented in Stergiou (2009) monitors propagation events in a constraint solver to decide whether to switch the level of consistency to enforce. Similarly, value heuristics can be learned using feature selection and machine learning (Chu & Stuckey, 2015). For Quantified Boolean Formulas, the authors of Samulowitz and Memisevic (2007) proposed a logistic regression method to predict the heuristic that results in the lowest runtime with highest probability. The issue of sub-problem distributions was addressed by adding such sub-problems to the training set that were encountered during previous runs. Similar empirical hardness models have been successfully used for solver portfolio generation (see e.g., Gagliolo & Schmidhuber, 2006; Gomes & Selman, 2001; Xu et al., 2008). For constrained optimization, machine learning techniques are applied in Carchrae and Beck (2004) for Scheduling Problems to make algorithm selection based on the observations of the improvement in solutions. Apart from these generic approaches, problem specific methods have also been studied. In Leventhal and Sellmann (2008) the authors investigated value selection for the Knapsack Problem and found that the accuracy of search guidance may heavily depend on earlier decisions during search.
+
+What sets this paper apart from its predecessors is that it directly integrates algorithm selection into the search strategy. Rather than employing manually configured decisions as to best time to switch methodologies, or doing so on the solver level, DASH makes the decision part of the solver itself. The ideas embraced in this paper were introduced in an earlier version of Kadioglu et al. (2012). But that paper only focused only on the set partitioning problem utilizing problem dependent heuristics. Here we expand the findings to the general case of MIP and provide analysis and visualizations of the tree-search which shed light on the dynamic nature of the search process justifying this and other similar approaches.
+
+Before evaluating the performance of DASH, let us provide a list of the branching heuristics that we utilized for MIPs.
+
+This Random Variable heuristic involves choosing the branching variable randomly among the candidates at the current node, using a uniform probability distribution.
+
+One of the simplest MIP branching techniques is to select the most fractional variable of the relaxed linear programming (LP) solution and try to round it first. The rationale behind this strategy is to make decisions on variables that deterministic analysis is least certain about. This heuristic strives to find infeasible solutions as quickly as possible.
+
+Alternatively to MF, this technique selects the fractional variable of the relaxed LP solution whose fractional part is closest to an integer value and to round it first. This is done to gently nudge the deterministic reasoning in whatever direction it is currently pursuing, with a smallest chance of making a mistake.
+
+This heuristic is based on the same motivation as the Less Fractional Branching. The idea is to have a small fractionality (fr) and a high objective value (obj). Such a variable can be found by iteratively looking for the minimum value of fr among all the infeasible variables, but updating the best found variable only if obj does not decrease. This means that, if we branch on a variable k in [1,n], the following property is guaranteed:
+
+                           
+                              
+                                 
+                                    
+                                       
+                                          
+                                             ∀
+                                             i
+                                             ∈
+                                             
+                                                [
+                                                1
+                                                ,
+                                                n
+                                                ]
+                                             
+                                             ,
+                                             
+                                             f
+                                             
+                                                r
+                                                k
+                                             
+                                             ≤
+                                             f
+                                             
+                                                r
+                                                i
+                                             
+                                             
+                                             o
+                                             r
+                                             
+                                             o
+                                             b
+                                             
+                                                j
+                                                k
+                                             
+                                             ≥
+                                             o
+                                             b
+                                             
+                                                j
+                                                i
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+We introduce a slight modification to the previous approach and this time we focus on the most fractional variables. In this case the guaranteed property is:
+
+                           
+                              
+                                 
+                                    
+                                       
+                                          
+                                             ∀
+                                             i
+                                             ∈
+                                             
+                                                [
+                                                1
+                                                ,
+                                                n
+                                                ]
+                                             
+                                             ,
+                                             
+                                             f
+                                             
+                                                r
+                                                k
+                                             
+                                             ≥
+                                             f
+                                             
+                                                r
+                                                i
+                                             
+                                             
+                                             o
+                                             r
+                                             
+                                             o
+                                             b
+                                             
+                                                j
+                                                k
+                                             
+                                             ≥
+                                             o
+                                             b
+                                             
+                                                j
+                                                i
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+This heuristic is based on the pseudo-costs, numerical values that estimate the variation in objective value for rounding up or rounding down, called up-pseudo-cost and down-pseudo-cost, respectively. The pseudo-costs of a variable can be combined into a score function that returns a numeric value.
+
+                           
+                              
+                                 
+                                    
+                                       
+                                          
+                                             s
+                                             c
+                                             o
+                                             r
+                                             e
+                                             (
+                                             
+                                                q
+                                                −
+                                             
+                                             ,
+                                             
+                                                q
+                                                +
+                                             
+                                             )
+                                          
+                                       
+                                       
+                                          =
+                                       
+                                       
+                                          
+                                             
+                                                (
+                                                1
+                                                −
+                                                μ
+                                                )
+                                             
+                                             *
+                                             m
+                                             i
+                                             n
+                                             
+                                                (
+                                                
+                                                   q
+                                                   −
+                                                
+                                                ,
+                                                
+                                                   q
+                                                   +
+                                                
+                                                )
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       
+                                       
+                                       
+                                          
+                                             +
+                                             
+                                             
+                                                (
+                                                μ
+                                                )
+                                             
+                                             *
+                                             m
+                                             a
+                                             x
+                                             
+                                                (
+                                                
+                                                   q
+                                                   −
+                                                
+                                                ,
+                                                
+                                                   q
+                                                   +
+                                                
+                                                )
+                                             
+                                             ,
+                                             
+                                             
+                                             μ
+                                             =
+                                             1
+                                             /
+                                             6
+                                             .
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+This result is used to guide the branching, by selecting the variable that maximizes the score. Further details about pseudo-costs can be found in Achterberg et al. (2004).
+
+This approach is based on the same idea as PW. The difference lies in the score function which is the product of the two Pseudo-Costs in this case.
+
+                           
+                              
+                                 
+                                    
+                                       
+                                          
+                                             s
+                                             c
+                                             o
+                                             r
+                                             e
+                                             
+                                                (
+                                                
+                                                   q
+                                                   −
+                                                
+                                                ,
+                                                
+                                                   q
+                                                   +
+                                                
+                                                )
+                                             
+                                             =
+                                             
+                                                q
+                                                −
+                                             
+                                             *
+                                             
+                                                q
+                                                +
+                                             
+                                             .
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+The pseudo-cost of a variable is considered to be unreliable until it has been updated a number of times. With this heuristic, “unreliable” variables are selected for strong branching to initialize the pseudo-costs with enough updates to make them more reliable.
+
+The inference history of a variable is a record of how many inferences have been discovered as a result of branching on this variable in the past. These inferences take the form of counts of variables whose domains have been effected by LP bounds propagation or domain propagation that might have happened during pre-solving or in-solving.
+
+In Full Strong Branching branches are created for the most promising variables based on pseudo-costs. Each branch’s LP relaxation is solved and the branches that result in the best improvement are taken.
+
+In Full Strong Branching on all Variables a more exhaustive approach is taken where all possible branches are explored as before. This should find the best possible branch at each node but it is very expensive in terms of computational time.
+
+In order to set the stage for DASH, three components are necessary. The first ingredient is a descriptive set of features that can correctly distinguish between different classes of instances but that can also be calculated with minimal overhead. Our feature space was described in Section 3.1. Second, there must be a diverse set of heuristics with different strengths as described in the previous section. Finally, we need a heterogeneous domain with a large number of instances. The details of our experimental setup and benchmarks are given in this section.
+
+The feature computation and heuristics are implemented through extensions to the state-of-the-art MIP solvers 
+                        
+                           IBM
+                           
+                           ILOG
+                           
+                           CPLEX
+                        
+                      version 12.5 (IBM, 2013) and the open-source 
+                        SCIP
+                      solver version 3.0.1 (Achterberg, 2004). All of our experiments were run on dual Intel Xeon E5430 quad-core processors (2.66 gigahertz) computers with 12 gigabytes of DDR-2 FB-DIMM 667 megahertz memory. In order to obtain reliable results when running on multi-core architectures, we run both solvers in single-thread mode with the timeout set at 1800 seconds.
+
+For 
+                        
+                           CPLEX
+                           ,
+                        
+                      only the built-in branching strategy was modified through implementation of a branch callback function based on Algorithm 2. For all the approaches under comparison, this branch callback was required to be enabled so that the comparability of the results was guaranteed 
+                        1
+                     
+                     
+                        1
+                        Note that 
+                              CPLEX
+                            switches-off certain heuristics as soon as branch callbacks, even empty ones, are being used so that the entire search behavior could be different.
+                     . The 
+                        CPLEX
+                      solver employs the following heuristics; MF, LF, LFHO, MFHO, P, and PW.
+
+For 
+                        
+                           SCIP
+                           ,
+                        
+                      DASH was realized as a new solver plug-in. This plug-in is able to switch between branching rules that are native to the solver. The following heuristics are realized by the 
+                        SCIP
+                      solver; RV, MF, LF, RP, I, P, S, and AS. For S, we use the default value of 8 as the number of candidate variables for full strong branching.
+
+In order to obtain a solver that works well for MIPs in general, the benchmark set was comprised of many different datasets: miplib2010 (Koch, Achterberg, Andersen, Bastert, Berthold, Bixby, Danna, Gamrath, Gleixner, Heinz, Lodi, Mittelmann, Ralphs, Salvagnin, Steffy, & Wolter, 2011), fc (Atamtürk, 2001), lotSizing (Atamtürk & Munõz, 2004), mik 
+                        Atamtürk (2003), nexp (Atamtürk, Nemhauser, & Savelsbergh, 2001), region (Leyton-Brown, Pearson, & Shoham, 2000), and pmedcapv, airland, genAssignment, scp, SSCFLP were originally downloaded from Saxena (2010). From an initial dataset of about 900 instances, those that could not be solved within 1,800 seconds by any of our solvers were filtered. Also removed were the easy instances, which are solved entirely during the 
+                           CPLEX
+                         pre-solving process or in less than one second by each heuristic. The final dataset consisted of 341 hard MIP instances with the desired properties. This was randomly split into 180 for the training set and 161 for the testing set.
+
+Before splitting instances into training and testing sets, we performed an analysis of the whole dataset which provided some motivating insights. In particular, the clustering using g-means on the whole dataset. The resulting distribution of instances per cluster is shown in Table 3
+                        . Each row is normalized to sum to 100 percent. For example, for Cluster 1, 20 percent of the instances are from the airland dataset. From this table we first observe that there are not enough clusters to perfectly separate the different datasets into unique clusters. We found only 5 clusters from 12 different datasets. This, however, is not what we would have actually wanted to see as we are more interested in capturing similarities between instances, not splitting benchmarks. The instances from airland, LotSizing and pmedcap are grouped together in Cluster 1. The instances from fc and nexp are placed in Cluster 2. Cluster 3 is dominated by the instances from region200 while region100 is also in this group together with scp. The instances from GenAssignment and the SSCFLP falls into Cluster 4. Interestingly, mik instances are almost separated from all other instances defining its own space in Cluster 5. Finally, as one would expect, the instances from the miplib, which can be considered as a representative of all problem types, are spread across all clusters. This clustering therefore demonstrates that we both have a diverse set of instances and that our problem features are representative enough for clustering purposes. To have a better view of the relationship between the instances, in Fig. 2
+                        , we provide data visualization by projecting the instances into 2 and three dimensions using Single Value Decomposition (SVD) on the features.
+
+The reason behind creating distinct extended datasets is based on the fact that our two DASH implementations for 
+                           CPLEX
+                         and 
+                           SCIP
+                         use a different set of heuristics. This clearly changes the behavior of instances during solving. The details of our extended datasets which include sub-instances are as follows.
+
+
+                        extDatasetC: This dataset contains all the original training instances, plus a sub-sample of sub-instances collected using CPLEX and all eight branching heuristics (six pure heuristics: MF, LF, LFHO, MFHO, P and PW; and two which randomly switch between heuristics) implemented as branch callback.
+
+
+                        extDatasetS: This dataset contains the original training instances and a sub-sample of sub-instances collected using SCIP and all the eight available branching rules (RV, MF, LF, RP, I, P, S, and AS).
+
+
+                        extDatasetSr: Similarly, this dataset is obtained by using only five of the 
+                           SCIP
+                         heuristics to collect sub-instances. In particular, two heuristics that performed the best on the training set, when using the geometric mean as performance measure, are removed. These were Reliability Branching (RP) and Pseudo-Cost Branching (P). The random variable branching rule was also removed. This is done to obtain a balanced portfolio of heuristics with comparable performances.
+
+When extending the data sets we limit ourselves to have up to 10,000 feature vectors. Beyond that, we found the memory consumption of g-means to be prohibitive. We performed a random sampling (with uniform distribution) of sub-instances with the constraint that, given an instance, keep feature vectors at depth 0 and 1 and keep, if possible, at least another feature vector for each branching rule applied.
+
+Note that, as mentioned before, these extended datasets are only used to identify the clusters in the datasets. Afterwards, only the original instances are used to actually evaluate the performance of the solvers.
+
+This section presents the numerical results of our experiments using 
+                        CPLEX
+                      and 
+                        SCIP
+                     . In all our experiments we present the average run time (Avg), the shifted geometric mean (GeoMean), and the Par10 performance. The shifted geometric mean of 
+                        
+                           
+                              t
+                              1
+                           
+                           ,
+                           …
+                           ,
+                           
+                              t
+                              n
+                           
+                        
+                      is defined by 
+                        
+                           
+                              
+                                 (
+                                 
+                                    ∏
+                                    
+                                       i
+                                       =
+                                       1
+                                    
+                                    n
+                                 
+                                 
+                                    (
+                                    
+                                       t
+                                       i
+                                    
+                                    +
+                                    s
+                                    )
+                                 
+                                 )
+                              
+                              
+                                 1
+                                 n
+                              
+                           
+                           −
+                           s
+                        
+                      and is an intermediate measure between the arithmetic and geometric means. While Avg and GeoMean use the timeout value for the instances that are not solved in that time, Par10 is the standard penalized average measurement where those solvers are penalized as having taken 10 times the time out value. We also present the percentage of instances solved.
+
+The goal of our experiments is to assess the efficiency of DASH and to test whether it can improve the performance of these state-of-the-art MIP solvers. To this end, we compare the following:
+
+                        
+                           •
+                           Virtual Best Solver (VBS): A fictional approach in which the best heuristic is already known for each instance. This provides a lower bound for what is achievable given a perfect portfolio.
+
+VBS_RAND: A variation to the VBS approach that can also choose an approach that randomly switches heuristics at each step of the branching tree.
+
+VBS_DASH: Another variation to the VBS approach that can also choose the proposed DASH algorithm among the other heuristics.
+
+Best Single Solver (BSS): The desired upper bound, obtained by solving each instance with the solver based on a single branching heuristic, whose average running time is the lowest on all the dataset.
+
+Instance-Specific Algorithm Configuration (ISAC): The pure ISAC methodology obtained with the normal set of features and clustering. Here a single heuristic is chosen for each instance based on features of the root node.
+
+Random switched heuristics: These are heuristics that try to solve a given instance by selecting a random branching heuristic from a subset of those available at each node.
+
+We first evaluate whether there is any potential in switching heuristics while solving an instance. We therefore evaluate both of our solvers with an approach that switches heuristics randomly at each decision node. For 
+                           
+                              CPLEX
+                              ,
+                           
+                         the random switched solvers have been realized in the branch callback in two versions. The first version switches between all heuristics while the second switches only among the top four best heuristics (MFHO, MF, PW, and P). 
+                           SCIP
+                         offers a built-in random branching rule (RANDvar) which selects the branching variable using an uniform probability distribution. Since the focus is on branching rule switching, an additional random switching heuristic (RANDheur) was implemented that changes randomly the branching rule, choosing among all the native not-random heuristics at every node. The performance of randomized 
+                           CPLEX
+                         solvers are given in Table 4
+                         and the performance of randomized 
+                           SCIP
+                         solvers is given in Table 5
+                        .
+
+For both solvers it can be observed that, switching heuristics randomly during search results in atrocious performance. The results are much worse than what can be achieved by BSS, the solver that commits to a single heuristic. Note, however, that in the case of 
+                           
+                              CPLEX
+                              ,
+                           
+                         the virtual best solver benefits from randomization. Therefore, if blind chance can result in some robustness, it is reasonable to argue that deliberately exploiting the structural changes might lead to further performance gains.
+
+In order to apply the DASH algorithm in practice, we must first make some parametric decisions. Particularly, until what depth should we allow our solver to switch heuristics, and at what intervals?
+
+As in Fig. 1, we project the feature space into two dimensions for a random instance from airland data set in Fig. 3
+                        . We present all observed sub-instances and also the sub-instances of a single branch. The difference is that, unlike ISAC, DASH allows changing the solvers when boundaries are crossed. What these representative figures show is that the features change gradually. This means that there is no need for tracking the changes at every search node. We therefore choose to check the sub-instance features at every third node. Moreover, it also hints that using a depth of 10 can be reasonable, as in most cases the nodes do not span across more than two clusters. GGA is used for computing the best heuristic for each cluster.
+
+Note that during the tuning phase, we restrict computation to 300 seconds, while during testing we allow for 1,800 seconds. This is done for two reasons. First, due to the number of evaluations required, current algorithm configuration tools cannot handle timeouts much longer than five minutes without needing weeks to complete. Second, in our experiments, we observe that the parameters trained for the shorter timeout carry over to the longer one. Finally, recall that the presented evaluations are based only on the original instances, as the sub-instances are only used for the clustering step of the DASH procedure.
+
+In Table 6
+                         we compare DASH with the Best Single Solver (BSS), the original ISAC approach, and the Virtual Best Solver (VBS). First of all, both DASH and ISAC perform better than the BSS. When compared to ISAC, DASH is able to solve a larger number of instances in less time, and hence, it is a better alternative to its more rigid predecessor. However, we do allow for the possibility that switching heuristics might not be the best strategy for every instance. We therefore also introduce DASH+, which first clusters the original instances using ISAC and then allows each cluster to independently decide if it wants to use the dynamic heuristic switching. We found this hybrid approach between DASH and ISAC to be better than both alternatives.
+
+It was shown in Kroer and Malitsky (2011) that all features are not equally important, and in fact, some might even introduce noise, and hence, can worsen the performance. Accordingly, we decided to apply feature selection. In particular, we utilized the information gain filtering technique (Collautti et al., 2013) which is often used in decision trees. This method is based on the calculation of entropy of the data as a whole and for each class. We apply the feature filtering to ISAC and DASH+ referring to them as ISAC_filt and DASH+filt respectively. As suggested by Kroer and Malitsky (2011), feature selection yields gains for both approaches. Especially, the resulting DASH+filt solver performs considerably better than all the other alternatives getting closest to the performance of the VBS.
+
+We finally show the performance of a virtual best solver if it were allowed to use DASH. VBS_DASH also enjoys speeds-ups provided by our dynamic heuristic selection.
+
+The positive results obtained using 
+                           CPLEX
+                         motivated the implementation of DASH as a 
+                           SCIP
+                         plugin as well. Our objective is to see how DASH compares when embedded in a different solver and also to provide further proof that its effectiveness is implementation-independent and remains valid when a different set of branching rules are used. In particular, 
+                           SCIP
+                         offers the ability to work directly on the native search heuristics, giving the opportunity to employ a cutting-edge solver without any significant changes. Notice that in our previous experiment when we used branch callbacks, 
+                           CPLEX
+                         automatically switched-off some heuristics which might change the solver behavior.
+
+In Table 5, when comparing randomized solvers for 
+                           
+                              SCIP
+                              ,
+                           
+                         we noticed that there was a smaller gap between BSS and VBS for SCIP than for CPLEX. This means that the performance of using the best single branching heuristic is on par with what can be achieved by switching among single branching heuristics. The reason behind that result is that when using 
+                           SCIP
+                         the Reliability Branching on Pseudo Cost Values (RP) heuristic strongly dominates the other heuristics. Consequently, this little improvement possible over the BSS. DASH is geared toward settings when there exist distinct clusters with varying heuristics preferences. With the initial results obtained in Table 5, one would expect that almost all the clusters would prefer the BSS, which essentially means that switching would not be effective.
+
+To test our hypothesis, we divide the analysis of DASH for the 
+                           SCIP
+                         solver into two parts:
+
+                           
+                              •
+                              
+                                 Complete: The complete set uses a portfolio of the native branching rules of 
+                                    SCIP
+                                 . This was the case where the BSS and the VBS had similar performance in Table 5.
+
+
+                                 Partial: The partial set discards the two best heuristic, RP and P, and the random heuristic, RV. We expect the remaining portfolio to exhibit a larger gap between the BSS and the VBS compared to the Complete set.
+
+In contrast to our experiments with 
+                           
+                              CPLEX
+                              ,
+                           
+                         we leave the parametric decisions of DASH (i.e., at what interval to switch heuristics and at what depth switching should stop) to our parameter tuner GGA. While this increases the search space of the parameter configuration, these two parameters are related to the overall performance, hence, it is reasonable to seek good values. With these additional decisions we increase the tuning time per execution from 300 to 600 seconds. The resulting parameter values after tuning on the Complete set of heuristics was 7 for the switching interval and 14 for the depth to terminate dynamic decisions. For the Partial set, the interval was found to be 6 while the maximum depth was 12.
+
+The result of our experiment with 
+                           SCIP
+                         using the Complete and Partial sets are given in Tables 7
+                         and8
+                        , respectively. As expected, for the complete set DASH yields a marginal improvement in the number solved instances and is slightly slower. In the presence of a single heuristic that dominates all others in terms of performance, monitoring the structural changes has little to offer and the benefit of using DASH becomes limited. Similar conclusions hold for the ISAC approach as well.
+
+Alternatively, as Table 8 shows, in the case where the existing heuristics have complementary strengths, DASH will find and exploit them. This is in line with our previous experiments using 
+                           CPLEX
+                        . Similarly, the hybrid DASH+ approach as well as feature filtering are again beneficial and further boost the search performance.
+
+Overall, our experiments show how DASH improves over ISAC and the BSS, the single best MIP solver. The additional effectiveness of VBS_DASH suggests that there is still room for improving the state-of-the-art MIP solvers. This leaves the door open for future research for generating more descriptive feature sets, investigating branching rules with complementary strengths, which in turn provide better clusterizations, and in combination, a more informed heuristic guidance and a principled understanding of search behavior.
+
+@&#CONCLUSIONS@&#
+
+We introduced a method that advances the idea of instance-specific algorithm configuration to the fine-grained level of sub-instance configuration and generalized dynamic heuristic selection for MIP problems. Using a parameter tuner, we showed how to effectively learn an assignment of variable selection heuristics to sub-instances for a rather small set of training instances even when the branching decisions determine the distribution of instances that must be dealt with deeper in the tree. The method can be readily extended to other types of heuristics.
+
+We presented a set of descriptive, general features for MIP and showed how they can be monitored efficiently as enhancements to standard off-the-shelf solvers. We traced the problem solving process and used this knowledge dynamically during search to switch the branching heuristic for sub-instances. This approach, named DASH, was implemented in two high-performance MIP solvers and was evaluated on a set of hard, highly heterogeneous MIP instances. It was found that the approach clearly outperformed the readily-available best pure branching heuristic as well as its coarse-grained instance-specific predecessor. We conclude that dynamic heuristic selection can be very beneficial compared to committing to a single heuristic, yet the existence of complementary heuristics, a diverse set of instances, and descriptive features are also important.
+
+@&#ACKNOWLEDGMENTS@&#
+
+The authors would like to thank the anonymous reviewers for their many valuable comments and suggestions. The second author was supported by Paris Kanellakis fellowship at Brown University when conducting the work contained in this document. This document reflects his opinions only and should not be interpreted, either expressed or implied, as those of his current employer. The fourth author was supported by the European Commission through the ICON FET-Open project (grant agreement 284715).
+
+@&#REFERENCES@&#
+

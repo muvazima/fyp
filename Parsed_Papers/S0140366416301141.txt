@@ -1,0 +1,431 @@
+@&#MAIN-TITLE@&#CURE—Towards enforcing a reliable timeline for cloud forensics: Model, architecture, and experiments
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           Cloud time alteration attack scenarios, consequences, and countermeasures, have been surveyed.
+
+
+                        
+                        
+                           
+                           A novel cloud simulator has been designed, implemented, and released as open source.
+
+
+                        
+                        
+                           
+                           CURE architecture can detect Timeline of Events alterations to aid a forensic investigation process.
+
+
+                        
+                        
+                           
+                           A real-world deployment of CURE has been tested on a public cloud.
+
+
+                        
+                        
+                           
+                           Measured performance figures support CURE viability.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Cloud computing
+
+Timeline validation
+
+Digital forensics
+
+Measurement and simulation
+
+Experimental test-beds and research platforms
+
+@&#ABSTRACT@&#
+
+
+               Graphical abstract
+               
+                  
+                     
+                        
+                           
+                        
+                     
+                  
+               
+            
+
+@&#INTRODUCTION@&#
+
+Cloud computing allows performing demanding computations and also enables remote storage and management of large amounts of data. Unfortunately, cloud computing also presents relevant security challenges. In fact, it can open the way to novel cyberthreats and security issues. As an example, the pay-per-use model potentially allows an adversary to rent cloud resources and apply techniques (e.g. brute force, DDoS [1]) that were not affordable before. However, cloud computing also enables more advanced computer analysis and forensic techniques [2], since cloud technology allows seamless retrieval and storage of Virtual Machine status (e.g. VM images) [3].
+
+As the complexity and size of clouds grows, it is increasingly important to be able to protect such federated resources [4], especially from time alteration attacks [5]. With respect to this latter relevant threat [6], it becomes mandatory to enforce time consistency among the multiple and heterogeneous activities deployed on a cloud. A typical cloud or federated cloud scenario features multiple physical hosts running a large number of guest Virtual Machines, each one relying on internal and/or external time sources, as depicted in Fig. 1
+                     . In this figure, RTC indicates the actual physical Real Time Clock that is accessed by the host and that acts as a timing source for the Virtual Real Time Clocks that are simulated on the VMs for access by the kernel and userspace programs and services running on the VMs. The behavior of cloud VMs and services is based on the timings they get through the internal virtual clock source exposed by the host. As a matter of fact, time readings can be altered/faked both by an adversary on the VM and by an adversary on the host.
+
+Time alteration attacks are quite common and well known in distributed systems [5,6]. In particular, timestamp changes can maliciously affect the timeline of events (also ToE in the following) recorded by an application or system. The problem is particularly relevant in cloud scenarios as the underlying technology adds specificity to the problem [7]. In fact, cloud resources can be deployed and taken offline at will. Hence, it is mandatory to model and investigate cloud scenarios to improve the understanding of the problem and to suggest a remedy. In particular, prevention and detection of timing attacks are of uttermost importance in both computer forensics [8,9] and auditing [10].
+
+One of the challenges of reliable cloud forensics is that simply getting the physical image of cloud nodes does not suffice [11] to have a forensically sound image of the system under investigation. This is true even if remote logging is in place, since cloud hosts and their guests can manipulate the internal timing used to send log data [12]. Reconstructing the ToE of even a single user process can be tricky for a computer forensic professional (e.g. due to guest migration). The main threat we want to protect the cloud from, is the malicious machine-time variation in both hosts and guests. Such malicious alteration would undermine the efficacy of computer forensic investigations [5]. In fact, the ToE alteration is the Achilles’ heel of digital evidence collection, since it could jeopardize forensic analysis [6].
+
+The overall objective of this work is to improve the reliability of cloud host and guest event timings in order to allow effective forensics for the cloud (and also easing cloud auditing [13]). Cloud forensic here is intended as an activity aimed at investigating actions performed on the cloud by service users and service providers. In this paper we provide a solution to guarantee the ToE integrity (also referred to as good timeline or original timeline in Section 3) of hosts and guests in the cloud. Even in cases where such unaltered sequence of events cannot be reconstructed, then our approach guarantees that the alteration does not go undetected. Another goal is to gather as much information and insight as possible from simulating possible attack scenarios, and to discuss them in order to foster research in this novel direction.
+
+This paper provides several contributions. In particular, a generic cloud time model is introduced and possible attack scenarios and countermeasures surveyed. Further, a solution is provided to the problem of protecting the ToE integrity for events inside guests and hosts. The proposed CURE architecture detects ToE alterations and corrects them, ensuring the validity of the forensics investigation process. Hints on how cloud computing technology can help forensic investigation are also provided. In particular, a description is given on how a malicious time alteration can be detected and how the original good ToE can be reconstructed. Both host and guest ToE alteration scenarios are described. As regards the latter, cloud snapshot and rollback techniques are leveraged to bring the VM back to the original (unaltered) state. It is worth noting that we were able to test a large deployment by means of simulation over cloud nodes (Amazon Web Services). Simulation was used to test the scalability of our approach, as it would not have been possible to deploy our software on cloud hosts. Discussed results pave the way for further work and introduce novel research directions.
+
+The remainder of this document is organized as follows: Section 2 summarizes state of the art cloud security and forensics; Section 3 introduces a generic time model for cloud computing and describes the proposed CURE architecture; Section 4 discusses the security aspects of CURE; Section 5 gives implementation details and depicts the features of the Scalable Cloud Simulator (SCS) that was implemented; Section 6 describes the experimental testbeds (including Amazon AWS), presents performance figures and discusses results; finally, in Section 7 conclusions are drawn.
+
+@&#RELATED WORK@&#
+
+Cloud security is of paramount importance today [14]. However, not much attention has been devoted to cloud time alteration attacks while, for traditional server timing, time alteration issues were considered with greater detail [15,16]. One ingredient guaranteeing the integrity of our proposed system is software obfuscation. We do not intend to delve into the endless debate on obfuscation. However, we observe that obfuscation techniques are widely accepted in the literature, as shown in the following subsection as well as in recent papers [17,18].
+
+Obfuscation changes executable code syntactically but not semantically, thus preserving its functionality and rendering reverse engineering more complex. Even though devising a general purpose obfuscator is unfeasible in theory [19], such an approach is often adopted [20] e.g. to help prevent reverse engineering [21] (see also
+                           1
+                        
+                        
+                           1
+                           
+                              http://www.darpa.mil/program/safeware
+                           
+                        ).
+
+Sahai and coworkers recently introduced indistinguishability obfuscation (IO) [22], a framework under which attackers cannot tell the difference between two versions of a computer program that were obfuscated in different ways. Sahai’s paper fostered novel research efforts over obfuscation. In fact, Waters [23] introduced more flexible types of encryption, such as IO-based functional encryption aimed at providing new keys to users to unlock different segments of data even after the data has been encrypted by a master key. In addition, some usable forms have emerged that may make it possible to hide key elements of a program and deliver at least partially on the promise of mathematically proven obfuscation [18].
+
+As regards guest introspection, proposed approaches [24] show that it is possible by the host machine to infer information from a guest VM and/or alter guest behavior and internal status. Obfuscation can offer some degree of VM isolation even from the host [25]. In fact, as shown in [26], insulation schemes can render tampering with internal code and data more difficult. Shan et al. [27] further advanced in protecting agents code from tampering by using self-modifying code. Guaranteeing various kinds of secrecy is possible by means of advanced obfuscation techniques such as in [17,21].
+
+Distributed time synchronization of distributed networked hosts is still a hot research topic [28]. Ridoux and Veitch [29] synchronize clocks over networks by taming delay variability. Their approach only targets a single client host and a single server, but it can also be useful in lager contexts.
+
+Cloud forensics has been investigated, among others, by Marty [30], introducing a logging framework for the cloud to ensure that the data needed for forensic investigations has been generated and collected. Marty’s approach is complementary to our proposal in that it focuses on easy and effective log collection. However, this approach does not protect against timing attacks such as the ones addressed here. Cloud forensics and privacy issues have been dealt with in [31] using homomorphic encryption [32] and commutative encryption. In that paper forensically-sound schemes are provided so that investigators can obtain the required evidence while partly preserving the privacy of other users. Secure Logging as a Service (SecLaaS) was introduced by Zawoad et al. in [14]. SecLaaS stores VM logs for forensic investigators and preserves proofs of past logs. Further, Zawoad proposed a cloud-based proactive forensics framework to record state information across a set of cloud nodes for cross forensic analysis. Studies in both [14] and [2] are relevant contributions to secure, privacy-preserving log/evidence collection but they do not consider the problem of ToE integrity.
+
+Several papers in the literature on reliable forensics have addressed anti-forensic attacks, i.e. attacks aimed at preventing forensic analysis (such as timing attacks). However, to the best of our knowledge, no general framework has ever been developed to counter such attacks. A taxonomy of anti-forensic attacks and countermeasures is presented in [33]. An interesting work on live digital forensics addressing rootkits that is complementary to our work is by Carrier [34]. However, to the best of our knowledge, no previous work on cloud forensics has modeled, studied and addressed timing attacks in depth as present work.
+
+Existing work on reliable forensics timeline generation focuses on extracting times from a disk image into a timeline. Hargreaves [6] proposes a technique that can automatically reconstruct high-level events from a set of low-level events. Forensic analysis can be complemented with the good/guaranteed ToE to correlate changes with events and what triggered them. This allows to track modification details and trace them back to the originating actor. Cloud-based computer simulation is discussed by Liu [35]. Some of his guidelines have been useful in setting up the distributed CURE testbed. Thorpe has given a relevant contribution to forensics investigations in the cloud. In particular, a formal model for VM kernel synchronization was introduced in [36], where a virtual machine log auditor is adopted to synchronize virtual server log events across distinct time-zones. This approach allows a posteriori reconciliation of discrepancies in the historical activity traces of virtual machines belonging to different time zones. The goal of our work is fundamentally different in that it specifically aims to guarantee the ToE validity in the face of malicious modifications. Further work by Thorpe and Ray [5] details the software tool implementing the virtual machine log auditor that allows detecting temporal inconsistencies by examining the semantics of the activities (i.e. no command can be run by a user without a previous successful login). These results are interesting and are complementary to the present work, which is targeted at resilience (i.e. detection and correction) of ToEs before they can affect digital forensics validity.
+
+Finally, there is relevant previous work regarding adequate laboratory specifications for emulating network attacks and experimenting with network forensics [37]. The findings of such work support our testbed implementation.
+
+This section introduces a first high-level time model that is used to evaluate and discuss potential time-based abuses, threats and remedies. In particular the objective here is to guarantee the timeline integrity (i.e. ToE integrity as better defined in the next section) of guest and host services. In this first model we assume a unique trusted and protected entity, namely a Cloud Controller (CC in the following), that cannot be altered or faked by an adversary. The CC is connected to a trusted and reliable timestamp service, whereas guest services can use regular non-guaranteed services (i.e. NTP – Network Time Protocol). Guest services are connected to the CC via secure network channels.
+
+We introduce here some naming that will be useful in the following.
+
+
+                        Agents: software components that are located in every cloud machine and manage local time and timeline in accordance with cloud time.
+
+
+                        Timeline: a series of events (ei
+                        ) in a machine that have associated timestamps (ts(ei
+                        )) for events and where the timeline origin (ts(e
+                        0)) is not necessarily synchronized with any external time.
+
+
+                        Good Timeline: a series of events (ei
+                        ) in a machine that have strictly increasing associated timestamps (ts(ei
+                        )) for events happened one after another.
+
+
+                        Guaranteed Timeline: a series of events with associated timestamps, where there is a guarantee that, for every couple of events ex
+                         and ey, ts(ex
+                        ) < ts(ey
+                        ) iff ex
+                         actually happened before ey
+                        .
+
+
+                        Timeline integrity: a timeline enjoys the integrity property when it is at least a “good timeline”. The defined model aims to guarantee (by means of trusted nodes such as the CC) the ToE (Timeline of Events) integrity of host and guest services.
+
+In CURE every agent on guests or hosts sends heartbeat packets on a secure network channel to the Cloud Controller (i.e. the trusted entity in the cloud). In addition, the agent on the Cloud Controller sends heartbeat packets to both guests and hosts in order to receive their responses that the CC will evaluate. These packets, protected by a secure channel, are periodically sent following a natural time-line. The Cloud Controller analyzes in real time the received timelines, using a trusted time reference, and establishing if some of those ToEs have been compromised and how.
+
+We can now describe the CURE architecture (Fig. 2
+                        ) with definitions of the most important CURE components and of their scope and interactions. The main architectural goal of CURE is to provide a framework where selected components can be deployed to detect and react to attacks and anomalies in the cloud ToEs. The main CURE component are showed in the following.
+
+
+                        Time Agents. Some details on time agents, relating them with security aspects depicted in Fig. 4
+                        :
+
+                           
+                              •
+                              
+                                 Guest/Host Agent, GA/HA: every Guest/Host has a Time Agent whose code is obfuscated and contains symmetric and/or asymmetric keys.
+
+
+                                 Cloud Controller Agent, CA: the Cloud Controller has a Time Agent whose code can (optionally) be obfuscated and contains symmetric and/or asymmetric keys.
+
+
+                        Time Controller. The core of the agent is the Time Controller (TC) entity that monitors the timeline of the machine and delivers and receives heartbeats.
+
+                           
+                              •
+                              
+                                 TimeStamp Service, TSS: it is a service (present in every TC) that updates local time from one or more reliable external timing sources;
+
+
+                                 Cloud TC (CTC): it invokes the TSS in order to update the CC time; the CC features a local agent called CA which implements the CTC. The CC is the only component that is assumed to have a trusted and reliable time service (be it external or internal), while guest services are connected to regular time sources (i.e.: NTP, used in Amazon EC2 [38]). The CC detects Guest and Host time alterations by analyzing differences in collected timestamps. Denial of Service Attacks to external time sources do not affect the cloud timeline integrity since the timeline integrity is independent from the starting time value.
+
+
+                                 Guest/Host TC (GTC/HTC): it traces the Guest/Host ToEs and sends such traces to the CC; for every Guest/Host a local agent exists called GA/HA implementing a TC.
+
+In order to guarantee a good ToE to N distributed systems hosted on M possibly malicious hosts, time synchronization, action and reaction systems have to be put in place. Different approaches can be taken to synchronize the time:
+
+
+                        Distributed Time Synchronization: time information can be distributed in P2P fashion but would suffer from traffic explosion issues [39];
+
+
+                        Hierarchical Time Synchronization: periodic timestamps (see Section 4) are broadcast from one or more secure cloud services to all hosts and their guests. Hosts must appropriately route such timing packets to all contained guests.
+
+A set of essential properties have to be guaranteed by a good timeline alteration detection and recovery system:
+
+                           
+                              •
+                              Accountability: based on the received timestamps, a time controller have to record timestamp evolution over time.
+
+Reliability: a guest has to be reliable against one or more malicious hosts and vice-versa. It is clearly more difficult for a guest to be resilient to host-based attacks. Details can be found in Tables 1
+                                  and 2
+                                 .
+
+Some of the possible “Abuse Case” scenarios that alter the normal “Good Timeline” are as follows:
+
+
+                        Privilege Escalation and ToE Alteration: an adversary obtains admin privileges on a guest VM or on a cloud host and changes their clock altering ToEs.
+
+
+                        Filesystem Timestamp Alteration: an adversary obtains access (privileged or not) to some files and she changes the associated timestamps.
+
+As an example of the Privilege Escalation attack above, a malicious user opens a VM guest session at a given time. During this time she commits a crime. After the crime, she changes the VM time to the previous point in time where she was committing the crime and performs an interactive activity (as an example, writing a long document on a text editor). A corrupted ToE will show that she was not able to commit the crime because, at that time, she was in fact busy writing a document. Even though the alteration might not go undetected, the traces of the alteration themselves would render the evidence not valid for a forensic evaluation. As such, the malicious user would not be able to use the corrupted ToE as evidence of her innocence, which is exactly the correct behavior of the proposed system [40,41].
+
+As an example of Filesystem Timestamp Alteration, an adversary can change the timestamp of individual files to fake activity on them. This way, she does not need to alter the ToE to perform such change. Changing ToE can be achieved in two ways: by altering the clock of the system or by changing files timestamp directly. The former approach introduces a more uniform distribution of changes with respect to the latter, because altering the clock is a global system property used by timestamp APIs. As for the latter approach, changes are more punctual. A forensic analysis for the former could intercept the timeline alteration due to the high number of modified filesystem objects, while for the latter, the timeline alteration is rendered more evident/less consistent in comparison with other objects. However, the system introduced in this paper can help correlate the timestamps of sets of objects.
+
+However, please note that our solution is not focused on precise synchronization but on detection of ToE alterations. Most works in the Literature [42,43] focus on precise synchronization but do not consider attack scenarios extensively. Future work can integrate both approaches.
+
+In the following, we discuss the most important security aspects of CURE:
+
+
+                     Time Heartbeat: every guest and host sends a periodic heartbeat (HB) packet containing timestamp information to the CC through the above-defined secure network channels. This one is needed to get the guest/host status and timestamp at every moment (like the sync properties introduced above – see Section 3.3 – but reverted: from the hosts/guests to the CC). The nature of the HB is dual: it communicates the existence of the peer and its timestamp.
+
+
+                     Anti-forging mechanisms: assuming that agents are unforgeable, the mechanisms to implement that is via code obfuscation. As an example, the Skype client software is obfuscated to protect encryption keys and code from reverse engineering [44]. However, agent code and embedded keys have to be frequently updated to minimiz e the chances of information leakage.
+
+
+                     Key Management: it is needed only in the case agents are unforgeable because, in the case the agents are forgeable, we must consider the keys as lost and in the hands of the adversary. The keys are embedded in the agents and protected by obfuscation mechanisms (see [20]). Two main cases exist: symmetric keys where the CC has to store all host and guest keys (this introduces scalability issues [45]); asymmetric keys where every guest has to store the CC public key and the CC has to store public keys for all guests and hosts; guests, hosts and CC exchange symmetric session keys through an asymmetric handshaking phase. Session keys are used to encrypt the above defined channels.
+
+
+                     Cloud Controller trustiness: The CC is the single unique trusted object in the cloud. It finally decides about ambiguous use cases such as those in Section 4.2. In particular, it answers the following questions:
+
+                        
+                           •
+                           When both host and guest are signaling each other as malicious: which one is really malicious?
+
+In case many hosts have been signaled as malicious: are they really malicious? Or so are the ones that signal?
+
+The CC is the only component that is assumed to have a trusted and reliable time service (be it external or internal), while guest services are connected to normal time sources (such as NTP or machine clock which is typically used in cloud solutions like Amazon EC2). The CC detects Guest/Host time alterations by analyzing differences in collected timestamps. There is no need to compare such times with the CC in collected ToEs, since the ToE integrity is independent from the value of starting time. As such, DoS attacks to external time sources do not affect the cloud timeline integrity. Variations of internal time imply variations of the Timeline, that are detected by our system.
+
+In this section, we analyze the case of (guest/host) time reliability in two complementary cases: CURE agents are unforgeable (see Table 1); and, CURE agents can be forged (see Table 2).
+
+In the case agents are unforgeable, no one can manipulate the agents’ code to change their behavior. As such, the detection scheme could be implemented into the agent itself. The agent would then send an alert when an anomaly is detected. Unfortunately, such an approach would require a (possibly growing) local storage on the agent side that could be used to more easily locate the agent data and code, thus compromising its integrity and/or functionality.
+
+In the case where agents are assumed forgeable (see Table 2), the adversary can potentially manipulate agents’ code to change their behavior.
+
+In the case of Guest Time Reliability it is very difficult to detect whether a non-malicious guest is reporting some violation or the GA is actually malicious and as such it cannot be trusted. Further, the host can forge any message or response coming from any hosted guest, given that in this scenario keys in agents cannot be ultimately protected. This leads to alternative solutions where probing the actual time has to be done indirectly by: i) creating interactive service requests and analyzing the obtained responses to infer internal service times; ii) or capturing and analyzing actual service request and response packets in order to passively infer internal service times.
+
+Such probing has to be done externally from the malicious entity. If services are not interactive (i.e. request/response), then there must be a way of interrupting them in order to get partial responses. Smart semantics-aware packet sniffing is a requirement for this kind of analysis.
+
+Agent protection leverages code obfuscation that, as shown in Section 2.1 can be feasible and convenient. The goal here is to be able to perform a similar computation that yields probabilistic values. Such probabilistic results can be decoded by the CC to infer a true/false result. It is however possible to compute an intermediate result based on embedded key input (and a shared time). Based on such encoded partial result it is possible for a CC (who has counterpart key) to extract a true/false final result. Such final function is extremely difficult to compute without a pre-shared secret (and a shared time) [47]. Hence, we can obtain a function that is difficult both to reverse-engineer and to emulate.
+
+Channel security also depends on Agent reliability. Agents can be forgeable or unforgeable. If we assume unforgeable agents, a secure channel is defined as a channel protected by a symmetric session key eventually augmented with an asymmetric handshake phase. Then, a number of key management solutions can be deployed. In this case, encryption keys are protected with anti-forging mechanisms leveraged by agents (see Section 2.1). If we assume agents are forgeable, then code obfuscation can be used to help protecting the guest from host interception [21]. In order to achieve that, the obfuscated code can compute a function of a large input data (e.g. different time probes taken in different ways from the agent – see Section 2.1). As such, the output will not be a simple true/false result but a combined result that only the destination CC can validate and extract information from (optionally, transmitted data can be signed by the sender) [47]. Obfuscation has been widely proven in the literature to increase guest protection from host interception [48]. It is used here to increase code protection against reverse engineering [20].
+
+In this work, one agent is deployed on each and every guest and host. Every agent is implemented using a different code obfuscation (see Section 2.1) and hides its own symmetric or asymmetric keys in the code [17]. All guest and host agents’ keys are known to the CC (a single point of failure unless replicated, as addressed in future work).
+
+To reconstruct a crime scene and place the facts in a logical order might be a difficult work especially in a cloud environment where data are spread across different regions and countries with time differences. Malicious users could change the timeline of events to modify the logical order and try to highlight different behavior [40,49].
+
+This section provides details over the implementation of a prototype of the proposed architecture (see Figs. 2 and 3
+                     ). This includes the SCS (Scalable Cloud Simulator) that has been especially designed to test and stress the proposed system over large cloud scenarios.
+                        2
+                     
+                     
+                        2
+                        All software released as open source at http://ricerca.mat.uniroma3.it/users/lombardi/cloudforensics.html , and also on GitHub https://github.com/robo3945/Cure , to allow the widest usage and extension of the implemented components.
+                     
+                  
+
+The prototype was developed in Java since such high-level language has proven effective in a wide range of network tools and simulators over the years
+                           3
+                        
+                        
+                           3
+                           see http://www.opendaylight.org
+                           
+                         Moreover, introduced processing overhead mimics the effect of an obfuscation function on performance. Further, Java allows extending the simulation over a large number of hosts and it allows for fast implementation, tuning and evolution.
+
+The obfuscation of the communication channel is an important mechanism for keeping security-related information as hidden as possible from an adversary. In fact, we chose not to leverage well known protocol implementations such as TSL/SSL, since it would have made easier for an adversary on the host side to infer information from the guest VM. TCP was discarded because it would not have been efficient for HB message exchange (as it would have required connection establishment at each HB exchange) while using UDP for all communications is potentially less prone to tracking [50]. So we adopted UDP with our own implementation of the secure channel and compromising signaling.
+
+
+                        Additional simulation components – the Oracle: to model the behavior of a particular action/functionality request, in the SCS simulator we implemented an askOracle() method in the SimulationModel class that implements the desired behavior (e.g. failure probability according to a chosen distribution). Every node and object instance can instantiate a different SimulationModel (SM) object, thus behaving in a different way. Groups of nodes/object instances can instantiate/refer to the same SM object and thus we can model complex system interactions failure probability.
+
+
+                        Time Controller and TimeStamp Service: the main implementation objects are the TC and the TSS. A TSS on the CC is different from the TSS on Guests or Hosts because it has a reliable connection to a trusted external source to get a faithful and trusted time. In this implementation, the time of the CC is considered as trusted. HTC and GTC share the same implementation as they behave in the same way.
+
+
+                        Secure channels: we developed a symmetric-encryption secure channel for confidentiality (the asymmetric case is an extension) where the agents know the symmetric key for the encrypted datagram packets. Given that UDP is not reliable, we could introduce redundancy in transmissions with burst of the packets, to minimize the loss probability. However, this does not solve the packet loss issue but it makes it worse. Therefore we simply do not try to recover lost datagrams. On the contrary, the lack of reception of a timestamp packet can be a security warning for: network congestion, malicious host intervention or guest inability to send. Challenge/response mechanism are used for the authentication of the peers, where keys are hard-coded in the obfuscated code.
+
+
+                        The Heartbeat channel: every heartbeat message has an ordinal attribute to build the ToE of messages. That ordinal number allows the analyzer to check for anomalies, such as those where for growing ordinals there are no corresponding growing timestamps. We chose not to split the signaling (anomalies, etc.) channel from the regular HB channel to increase protection of the signaling from tampering and blockage. In fact, a malicious host might intercept spurious datagrams not sent at regular intervals. An irregular sending time would possibly mean to the CC that the packet contains some other kind of information. A malicious host would most probably try to suppress such messages as the CC would not notice that packet is missing. Piggybacking the signaling channel inside regularly-spaced HB timestamp packets has advantages (+) and disadvantages (
+                           −
+                        ):
+
+                           
+                              •
+                              
+                                 (+) with a covert channel, the adversary has to decrypt and interpret the datagram content to be able to use it;
+
+
+                                 (+) the signaled event/status can be tied to a particular point in time and as such replay attacks are not possible;
+
+
+                                 (
+                                 
+                                    −
+                                 
+                                 ) any signaling of anomalous conditions/alarms is deferred up until the following heartbeat packet departure, this can potentially allow the adversary to perform further damage.
+
+Heartbeat packets have the following format: HB(challenge, signal payload, timestamp) and HB(response, signal payload, perceived time).
+
+Guests/Hosts send HB(c,...) packets to the CC that evaluates them for the timeline and timeout events (HB(r,s,t) packets received from the Guests/Hosts are not considered). The CC sends HB(c,...) packets to the Guests/Hosts to obtain HB(r,...) packets and to evaluate the response events.
+
+The CC verifies timelines and can alert an external entity or can directly warn the administrator. However, such signaling from guest or hosts to the CC has to be protected as it can be exploited by the adversary to induce false detections. As a countermeasure against man in the middle attacks, the datagrams that are sent contain ordinal sequences as described above.
+
+As regards the small footprint snapshot and the fast rollback techniques that are used, the advanced lightweight snapshotting techniques introduced in [51] have been adopted. Both snapshot and rollback are performed on the VM via a modeling and abstraction mechanism that limits the memory footprint size as well as the ToE recovery time.
+
+We designed and implemented SCS (Scalable Cloud Simulator), a software simulator that allows performing experimental activity over CURE. The simulator allows modeling a cloud scenario with multiple hosts each running a number of guests. SCS actually implements the software components that are part of the CURE architecture. The simulator executes agents as software threads that actually perform computation over data coming from actually sent and received datagram packets. This way, small scale results can be obtained but also validated in a real testbed. SCS also allows performing wide-scale experiments that represent actual large-scale deployment. We decided not to make use of existing cloud simulators. In fact, CloudSim [52] did not allow to study the behavior of the required functionality and to collect packet loss statistics, whereas the network simulators ns-2 and ns-3 [53] would not allow to simulate complex interactions among cloud guests and hosts.
+
+
+                        SCS is written in Java 8 (but it is backwards compatible with Java 6) as a multithreaded Java application. Every Agent has UDP server and client threads that respectively receive and send HB packets. Every TC (on both the CC and the Guest/Host) runs the very same Agent that is able to discriminate whether the node is a CA or GA/HA.
+
+Being written in Java, SCS can potentially run on any JVM-supporting OS. However, we tuned the network resources to fit on a Linux Ubuntu 12.04LTS 64 bit OS in order to match actual Cloud scenarios in the experimentation phase. Besides the core implementation written in Java, there are three bash shell scripts to manage the deployment phase and run the testbed (see Section 6.2).
+
+We can now describe the experimental activity aimed at collecting useful information on the effectiveness, reliability, scalability, and limitations of the proposed approach. The resilience to attacks can be measured using the following indicators in this scenarios:
+
+                        
+                           •
+                           Malicious attack: Erroneous timeline, Erroneous response, Heartbeat miss.
+
+Packet loss/delay: Host congestion, Network congestion.
+
+Node/network failure: Heartbeat loss, Heartbeat response.
+
+The results of tests performed using a CURE prototype are shown and discussed below. Tests have been performed using SCS (see Section 5.2) leveraging a real-world cloud (Amazon EC2).
+
+The rationale for the design decisions for the proposed approach is to detect ToE alterations driven by attacks or failure. The public cloud is simulated via an EC2 (Amazon Elastic Cloud 2) set of VMs. A simulation tool (SCS) was used in the tests, as deploying the same number of real guests on a cloud would have been prohibitive and it would not have allowed deploying our software on cloud hosts.
+
+Failures are simulated using different error probabilities. The simulator actor (called Oracle) changes heartbeat packets (the Oracle produces a good/erroneous packet according to a given set of probabilities) so to simulate different kinds of errors: Timeline, Timeout and Response errors (in the case of attacks the Oracle introduces the above errors with an higher probability). Only heartbeat packets error are traced and analyzed in order to reduce memory usage within limits. The experimentation metrics are error numbers, false positive (a true positive is an attack) and the distribution of the errors.
+
+As shown in Figs. 4 and 5
+                        , the experimental testbed was set up using a set of VMs (deployed over Amazon AWS resources).
+
+Cloud Controller VM was an Amazon M1.Large (7.5 GiB of memory with 2 vCPU: 4 Amazon EC2 Compute Units) machine. Guest/Host VM was an Amazon M1.Small (1.7 GiB of memory with 1 vCPU) machine. Every VM was running Ubuntu Linux 12.04 LTS with a Java VM Oracle version jdk-6u34-linux-x64.
+
+The deployment and run phases of the testbed were driven through three bash shell scripts:
+
+                           
+                              •
+                              TotalEC2.sh: running in a Deploy station external to the real cloud, it prepares every VMs (clean and sync) and runs the AT-total.sh on every cloud VM;
+
+AT-total.sh: schedules the VM-run.sh with the Linux AT command at specified times on the cloud VM;
+
+VM-run.sh: runs the Java application that starts the simulation on the cloud VM.
+
+In Appendix A, the adopted test execution scripts — augmented with Java code (for completeness) — are provided.
+
+Tests have been performed over a virtual Cloud of seven virtual machines, each with a Linux-based OS (Fig. 4). Every VM is a Cloud Host: the first one only contains the Cloud Controller jthread (Java Threads), the other ones the sets of Guest/Host jthreads. Every Guest/Host runs an Agent with its Time Controller (TC) executing inside it.
+
+Running the current CURE version implies having a maximum of circa 400 simulated guests (as jthreads) per VM. Since HTC and GTC are the same, the unique HTC (per VM) is simulated over the 400 TCs. The value 400 is an upperbound for TCs because it corresponds to circa 2400 VM’s OS threads (every Agent implementation features around 6 VM jthreads), which is the maximum limit supported by the standard Linux kernel. However, this value can be considered a reasonable upperbound that does not affect simulation results.
+
+Every VM instance has a configuration file, as in Table 3
+                        , in which the CURE parameters are defined. Some considerations are needed about config. parameters. As regards guest failure percentage, in general, guest failures are induced by the failures on their host. Other guest failures can only be due to virtualization issues that can affect guest behavior. As such, the cloud system is assumed highly reliable, and the failure probability exclusively due to guest failure has been set to 0.00001 and network failure is 0.05% (Amazon EC2 Service Level Agreement [54]).
+
+As regards delay timing, the system was configured in order for the interval between two consecutive HB packets from a Guest to the CC (through the Host) to be set at 30 s The CC checks the received packets every 30 s for response and ToE correctness, and every 5 min for the timeout threshold. It is worth noting that by “Timeout” we mean that the packet arrives to the CC but only after the expiration of the 5 min timeout threshold (ex: a packets arrives after 5 min and 10 sec).
+
+In the tests, the overall running time of CURE simulation varied. Every single test was repeated at least 16 times, and the average value was reported. Running time was set to: 30, 60, 90, 120, 180, 240, and 480 min.
+
+HBs arriving to the CC are analyzed in order to find Timeline-, Timeout- or Response-errors. Errors are possibly introduced by infrastructure problems (failure probability) or by attacks (hacking probability). An HB with errors is captured and then deleted from the CC data structures to limit the simulator footprint in memory. As such, it is not presently possible to trap HBs with more than one error. This limitation of the simulation model is induced by the implementation of this first prototype. Trapping more than one error for HB would have meant maintaining large data structures for too long thus limiting simulation time. An extension to this work could be to maintain the trapping history (instead of packet history) of every guest/hosts to minimize that memory footprint. However, we consider the present prototype and test setup to be more than adequate for the kind of simulations we were interested in performing.
+
+These tests were performed using a real world cloud testbed comprising the following Amazon EC2 resources: one M1.Large instance to simulate the CC and six M1.Small instances to simulate Cloud hosts.
+
+The M1 instance was a general purpose machine in the Amazon Cloud. The Small instances had 1.7 GiB of memory with 1 vCpu while the Large instance had 7.5 GiB of memory with 2 vCpu (4 Amazon EC2 Compute Units). Further, the Small instance was aimed at low network activity, while the Large to a moderate network activity. The Large instance was chosen for the high rate of network traffic for the CC.
+
+
+                        Figs. 6
+                         and 7
+                         show the number of Timeline-, Timeout- and Response-error packets and the FP percentage of these kinds of errors (notice the x-axis scale). The FP shows how many error packets are due to the infrastructure failure instead of the hacking activity. Figures show that the curves are just linear. FPs are very close to zero and this means that CURE has been optimized well and the infrastructure, in the sense of the simulator (because EC2 can be considered very reliable), is reliable. Only Timeline errors reach 6% when the duration time reaches 480 min. This percentage is related to the Timeline algorithm that is approximated in order to obtain a reasonable speed.
+
+In Fig. 8
+                        , we report on the different distributions of the erroneous packets. It is evident that error type packet rates are low enough, considering that the CC receives around 80 packets/s. The rationale is that Timeout-errors do not dominate anymore Timeline- and Response-errors in CURE.
+
+
+                        Fig. 9
+                         shows CPU Amazon EC2 monitoring graphs. Spikes belong to maintenance jobs that had to be kept running on the instances. The CC instance has a heavy CPU load because it gets all the packets from the TCs. From the above figures it is clear that systems in the EC2 are constantly loaded for the simulation and this enforce the conclusion that CURE fully exploits available resources.
+
+@&#DISCUSSION@&#
+
+One of the most crucial points of the proposed solution is the trustworthiness of the CC. Cloud providers and/or a TTP can control CC reliability and security. However, this is out of scope of this paper and it is left for future work where redundancy of CC is considered.
+
+UDP communication is used, as it is simpler and less resource-hungry than TCP (synchronization-wise) [55]. UDP is also potentially less prone to tracking [50]. So we implemented a secure channel over datagrams. Given that UDP does not support retransmission of lost packets, we could introduce redundancy in transmissions, sending burst of the same packets repeated for N times, in order to minimize the loss probability. However, using bursts does not solve the packet loss issue. On the contrary, it makes it worse. This is the reason we simply do not try to recover lost datagrams. On the contrary, we see the lack of reception of a timestamp packet as a security warning. If the lack of datagram from a source node continues we can increase consciousness that something bad happened, be it network congestion, malicious host intervention or guest inability to send (crashed or victim of a successful attack). That introduces an overhead estimated in the experimentation part. For the authentication of the peers the mechanism used is the challenge/response with keys that are hard coded in the obfuscated code. As a consequence, keys are renewed by updating the code containing them.
+
+It is worth noticing that network congestion issues can potentially affect the proposed solution. In order to address such issues, the time duration between sending two HB packets is flexible and can be varied within a given range following network-load. Nevertheless, network congestion also affects cloud functionality, if CC does not see many packets, an anomalous situation/event is detected anyway by CURE as an attack or other relevant issue.
+
+The proposed solution does not fully address the attack scenario where guest and host machines collude in issuing the same false timing. This is out of the scope for present work. However, further pushing the distributed detection approach, both hosts and guests can be discarded/blacklisted by an enhanced system.
+
+Furthermore, most of the collected experimental results are based on a simulated testbed. It is worth noting that, on the one hand the simulator-based approach was adopted to allow a larger scalability of the experiments and it is a reasonably faithful representation of real-world scenarios. On the other hand, setting up an actual private or public cloud testbed with over 2400 guests would have been prohibitive.
+
+@&#CONCLUSIONS@&#
+
+In this paper, we have provided several contributions. First, cloud host and guest time alteration detection and resilience have been introduced leveraging a novel architecture (CURE). Then, possible attack scenarios, consequences, and countermeasures, have been surveyed. Later, we have discussed issues related to host and guest machine-time security like reliability, channel security, and cloud time forensics.
+
+In particular, a cloud simulator (SCS) has been designed, implemented, and released as open source. Through SCS, we run a massive experimental campaign on a public cloud that allowed us to test a real-world deployment of our solution. Results show that the proposed CURE architecture detects Timeline of Events alteration and that it can guarantee the validity and reliability of the forensic investigation process. Obtained performance figures also support the viability of CURE. Future work will focus on distributed timeline integrity verification and further scalability.
+
+@&#ACKNOWLEDGMENTS@&#
+
+This work has been partially supported by the European Antitrust Forensic IT Tools project (rif. HOME/2012/ISEC/FP/C2/4000003977) funded by the Prevention of and Fight against Crime Programme of the European Union European Commission. The authors would like to acknowledge the anonymous reviewers for their valuable comments.
+
+
+                     
+                        
+                           
+                        
+                     
+                  
+
+
+                     
+                        
+                           
+                        
+                     
+                  
+
+
+                     
+                        
+                           
+                        
+                     
+                  
+
+
+                     
+                        
+                           
+                        
+                     
+                  
+
+@&#REFERENCES@&#
+

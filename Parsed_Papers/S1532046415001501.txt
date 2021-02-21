@@ -1,0 +1,652 @@
+@&#MAIN-TITLE@&#Challenges in clinical natural language processing for automated disorder normalization
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           Disorder normalization in clinical text has wide-ranging applications.
+
+
+                        
+                        
+                           
+                           Clinical normalizers must handle ad-hoc formatting, jargon, and ambiguous acronyms.
+
+
+                        
+                        
+                           
+                           Disorder vocabulary is richer in clinical text than biomedical abstracts.
+
+
+                        
+                        
+                           
+                           Normalization with pairwise learning to rank handles rich vocabulary.
+
+
+                        
+                        
+                           
+                           Further normalization improvements require improved named entity recognition.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Natural language processing
+
+Electronic health records
+
+Information extraction
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  Background
+                  Identifying key variables such as disorders within the clinical narratives in electronic health records has wide-ranging applications within clinical practice and biomedical research. Previous research has demonstrated reduced performance of disorder named entity recognition (NER) and normalization (or grounding) in clinical narratives than in biomedical publications. In this work, we aim to identify the cause for this performance difference and introduce general solutions.
+               
+               
+                  Methods
+                  We use closure properties to compare the richness of the vocabulary in clinical narrative text to biomedical publications. We approach both disorder NER and normalization using machine learning methodologies. Our NER methodology is based on linear-chain conditional random fields with a rich feature approach, and we introduce several improvements to enhance the lexical knowledge of the NER system. Our normalization method – never previously applied to clinical data – uses pairwise learning to rank to automatically learn term variation directly from the training data.
+               
+               
+                  Results
+                  We find that while the size of the overall vocabulary is similar between clinical narrative and biomedical publications, clinical narrative uses a richer terminology to describe disorders than publications. We apply our system, DNorm-C, to locate disorder mentions and in the clinical narratives from the recent ShARe/CLEF eHealth Task. For NER (strict span-only), our system achieves precision=0.797, recall=0.713, f-score=0.753. For the normalization task (strict span+concept) it achieves precision=0.712, recall=0.637, f-score=0.672. The improvements described in this article increase the NER f-score by 0.039 and the normalization f-score by 0.036. We also describe a high recall version of the NER, which increases the normalization recall to as high as 0.744, albeit with reduced precision.
+               
+               
+                  Discussion
+                  We perform an error analysis, demonstrating that NER errors outnumber normalization errors by more than 4-to-1. Abbreviations and acronyms are found to be frequent causes of error, in addition to the mentions the annotators were not able to identify within the scope of the controlled vocabulary.
+               
+               
+                  Conclusion
+                  Disorder mentions in text from clinical narratives use a rich vocabulary that results in high term variation, which we believe to be one of the primary causes of reduced performance in clinical narrative. We show that pairwise learning to rank offers high performance in this context, and introduce several lexical enhancements – generalizable to other clinical NER tasks – that improve the ability of the NER system to handle this variation. DNorm-C is a high performing, open source system for disorders in clinical text, and a promising step toward NER and normalization methods that are trainable to a wide variety of domains and entities. (DNorm-C is open source software, and is available with a trained model at the DNorm demonstration website: http://www.ncbi.nlm.nih.gov/CBBresearch/Lu/Demo/tmTools/#DNorm.)
+               
+            
+
+@&#INTRODUCTION@&#
+
+The application of clinical natural language processing to the clinical narratives in electronic health records has the potential to make a significant impact in many aspects of healthcare and biomedical research. Recent work has demonstrated this potential at the point of care (such as with clinical decision support [1,2]), for patients understanding their own records [3], for public health (e.g. biosurveillance [4]), and in biomedical research (e.g. cohort identification [5,6], identifying novel potential clinical associations [7,8] or pharmacovigilance [9,10]).
+
+A common task in clinical natural language processing is the identification of key clinical variables mentioned in the text, such as disorders or treatments. This subtask includes both locating mentions of key entities (named entity recognition) and identifying mentions found (normalization) with respect to a controlled vocabulary such as SNOMED-CT [11]. An example sentence from a clinical narrative, together with annotations for disorder mentions and their respective concepts can be seen in Fig. 1
+                     . The results of these subtasks are then used by downstream components to provide the higher level processing required by the end task, making the result highly dependent on the quality of the normalization results obtained.
+
+While clinical natural language processing has been an area of increasing attention, progress still trails the general and biomedical domains [12]. While this is partially due to the relative scarcity of clinical narrative corpora due to privacy concerns, it is also partially due to the additional difficulties encountered in clinical narrative text. Biomedical text is written to communicate research results to a wide audience and is edited for clarity. Clinical narrative text, on the other hand, is written by health care professionals to communicate the status and history of a single patient to other health care professionals or themselves. These notes record the reason the patient was seen (i.e. the chief complaint), document treatments given, the findings of any tests administered, and other information needed to make informed decisions regarding care for a single patient. Typical notes include progress notes documenting treatment provided, consult reports communicating the results of diagnostic tests, and discharge summaries recording the entire course of a hospital stay. As these notes each have different purposes, they are highly heterogeneous in their content and level of detail. Moreover their format is typically unstructured, resulting in a wide variety of ad-hoc structural components.
+
+We illustrate many of the problems clinical narrative text presents for natural language processing with examples in Table 1
+                     . In general, systems which process clinical narratives cannot expect the clear structure and communication common in published text. Instead, clinical narrative is prepared under considerable time pressure, using a combination of ad-hoc formatting, eliding words which could be inferred from context, and with liberal use of parenthetical expressions, jargon and acronyms to increase the information density.
+
+In this article, we approach the task of normalization of key entities in clinical narrative using disorders as a case study. While disease normalization in biomedical publications is a difficult task due to the wide variety of naming patterns for diseases, ambiguity, and term variation, the idiosyncrasies of clinical text cause additional difficulties. Disorder normalization in clinical text has been previously attempted using both lexical and rule-based techniques [13–17]. In this line of research, the task has often been to identify diagnoses, as in ICD-9 coding [18], or only a specific subset of problems [19]. In this study, we instead describe a system to identify and normalize all disorders mentioned in a clinical narrative. We employ DNorm, a machine learning method for learning the similarity between mentions and concept names from a specified controlled vocabulary directly from training data. Previous work with DNorm demonstrated state-of-the-art performance in biomedical publications [20]. Our participation in the recent ShARe/CLEF eHealth shared task resulted in the highest normalization performance of any participant [3], but also demonstrated performance significantly reduced compared to biomedical publications. In this manuscript we demonstrate that that the vocabulary used to describe disorders in clinical text is richer than in publications – and hence more difficult to model – while the variability in overall language use is similar (see Methods Section). We use this insight to make improvements to the named entity recognition component to handle the richer disorder vocabulary.
+
+@&#RELATED WORK@&#
+
+Natural language processing of clinical text has a long history, going back to the Linguistic String Project–Medical Language Processor (LSP–MLP) project in 1986 [21]. The field was thoroughly surveyed by Meystre et al. [22] in 2008.
+
+A recurring theme is the scarcity of annotated corpora, or datasets which can be used to develop and evaluate natural language processing systems [12]. One consequence of the relative lack of annotated data is a longstanding emphasis on knowledge intensive approaches. For example, two of the most widely used tools (MetaMap [23,24] and MedLEE [25]) both emphasize a hybrid of natural language processing and lexical approaches using the UMLS Metathesaurus, rather than machine learning methods trained directly on clinical text. MetaMap, created by the National Library of Medicine, has been successfully applied to clinical narratives for a wide variety of purposes, including biosurveillance [4], cohort identification [5], and to find potentially novel clinical associations [7]. MedLEE has also been applied to clinical text for a wide variety of purposes, including pharmacovigilance [9], SNOMED-CT coding [25], and determining comorbidities [26].
+
+The field has moved forward in large part due to the efforts of several groups to provide annotated data through the context of a shared task. The 2007 Medical NLP challenge involved assigning ICD-9 codes to radiology reports [18]. The 2010 i2b2 obesity challenge consisted of predicting the status of obesity and 15 related comorbidities, requiring participants to determine whether the disorders were mentioned [19]. This dataset was recently used by Tang et al. [27] to compare several techniques for named entity recognition of disorders in hospital discharge summaries. The 2012 i2b2 challenge required the identification of clinically significant events (including clinical problems) and their temporal relationships [28].
+
+One recent shared task specifically assessed the state-of-the-art on automatic disorder recognition in clinical narrative text. This task, called ShARe/CLEF eHealth Task 1 [3], required participants to locate the span of all disorders mentioned in the clinical narrative (Task 1a) – the task of named entity recognition (NER) – and normalize (or ground) the mention to a concept within the Disorder semantic group of the controlled vocabulary SNOMED-CT (Task 1b).
+
+A notable trend that can be seen in the shared tasks is a shift in from lexical and natural language processing based techniques for (NER) to techniques based primarily on machine learning. In the 2010 i2b2 challenge, for example, the highest-performing systems used a lexical approach, while in the 2012 challenge, the highest-performing systems were hybrids employing machine learning for NER and rule-based approaches for normalization (or grounding). Most methods for automatic normalization of diseases and related concepts from free text continue to rely on dictionary methods and/or heuristic rules [13–17].
+
+We recently introduced a novel machine learning framework for normalization called DNorm [20], which showed state-of-the-art performance on the NCBI Disease Corpus, which is comprised of the abstracts of biomedical publications [29,30]. This framework uses pairwise learning-to-rank to directly learn a similarity function between mentions found in narrative text and terms from a controlled vocabulary. Since the method is used with machine learning methods for NER – such as conditional random fields with a rich feature set – it provides an adaptable system that is quickly trainable to specific needs. While our participation in the ShARe/CLEF eHealth Tasks 1a and 1b [31] resulted in the highest normalization performance of any participant, it also demonstrated that the performance of NER and normalization in the clinical domain is significantly lower than in biomedical publications. In this article we identify reduced NER performance due to increased term variation as the primary cause for this performance difference, and introduce several improvements that are generalizable to other clinical NER problems to enhance the lexical knowledge of the NER system.
+
+@&#METHODS@&#
+
+We created a pipeline system employing a statistical named entity recognizer, BANNER [32], and adapted a recently developed normalization method, DNorm [33], to perform the normalization. We perform an analysis demonstrating that term variation is a primary concern in clinical narrative, and use this to motivate additional lexical features in BANNER. Since DNorm learns term variants directly from training data that must be annotated for both mention span and concepts, we employed the ShARe/CLEF eHealth Task 1 corpus [3], which is annotated with disorder concepts from SNOMED-CT [11], a large structured vocabulary of clinical terms. We leveraged terms from the full UMLS Metathesaurus [34] to prepare the lexicon. This section describes each step in detail.
+
+The ShARe/CLEF eHealth Task 1 Corpus (the “eHealth corpus”) consists of 299 clinical notes (199 for training, and 100 for test) that were independently annotated by two professional trained annotators, followed by an adjudication step, resulting in a high inter-annotator agreement [3]. The organizers did not report harmonizing the annotations across the corpus. Annotations in this corpus represent disorders and are marked with the associated textual span and concept identifier from SNOMED-CT [11]. The annotators defined ‘disorder’ as “any span of text which can be mapped to a concept in SNOMED-CT and which belongs to the Disorder semantic group” [3], where the Disorder semantic group was defined to be all semantic types in the UMLS Disorders Semantic Group except Findings, a total of 11 types (Congenital Abnormality, Acquired Abnormality, Injury or Poisoning, Pathologic Function, Disease or Syndrome, Mental or Behavioral Dysfunction, Cell or Molecular Dysfunction, Experimental Model of Disease, Signs and Symptoms, Anatomical Abnormality, Neoplastic Process). The concept identifier used is the unique identifier used in the version of SNOMED-CT present in the UMLS Metathesaurus: the CUI, or Concept Unique Identifier. The training set contains 5784 disorder annotations and the test set contains 5351 disorder annotations.
+
+The corpus contains four types of clinical notes: discharge summaries, electrocardiogram (ECG) reports, echocardiogram (echo) reports, and radiology reports, as shown in Table 2
+                        . While the number of each type is relatively similar in the Training set, the Test set is dominated by discharge summaries, which are significantly longer than the other types.
+
+Example sentences from the corpus are shown in Table 3
+                        , illustrating some distinctive characteristics of this corpus. The first example illustrates a single span which exactly matches the name of a SNOMED-CT concept, after case normalization. The term variation examples depict the case where the mention text refers to a SNOMED-CT concept via a name different than the one present in SNOMED-CT. Abbreviations, the next example, are an important sub-type of term variation, and – like term variations in general – may be unique to the physician responsible for the clinical narrative. The morphology example shows that term variations may consist of word variations rather than word substitutions. The next example demonstrates a “CUI-less” mention: a span considered to represent a disorder by the annotators, but which could not be resolved to a suitable concept within the SNOMED-CT Disorder group. Mentions annotated as “CUI-less” comprise 28.2% of all annotations in this corpus – a frequency somewhat less than other studies [35]. While these mentions cannot be normalized to a concept, their mention text contains useful, meaningful information that would be ignored if “CUI-less” mentions were disregarded. The disjoint mention example shows that disorder annotations may consist of spans which are not contiguous. Among the 11.1% of the annotations which are disjoint, 93.2% have 2 spans and the remainder have 3. The final example shows that disorders referenced indirectly are not annotated. A glucose reading of far over 180 strongly suggests diabetes, but this requires inference and is therefore not annotated.
+
+We performed a comparative analysis of the NCBI Disease Corpus against the eHealth corpus to guide our adaptation of DNorm from the former to the latter. Because DNorm uses machine learning methods, the performance depends on how well the patterns learned from the training set generalize to the full domain. In a concept identification task such as disorder normalization, a primary concern is the size of the vocabulary of the domain: as the richness of the vocabulary increases, small amounts of text – such as the training data – become less representative of the full domain, causing performance to decrease. We quantified the notion of vocabulary richness using closure properties. A textual domain is said to exhibit closure with respect to some linguistic phenomenon if the total number of distinguishable elements of that aspect – as observed in a representative text – trends toward a finite number [36]. Closure properties can be analyzed visually by plotting the number of unique elements against the total number of elements over samples of increasing sizes. As this analysis guides the work adapting DNorm to clinical text, we describe both the analysis method and its results here.
+
+Our first comparison measures the richness of the overall vocabulary by considering the closure of all tokens. We randomly shuffled the sentences in the training sets of both the eHealth and the NCBI Disease corpora. We then iterated through all sentences, sampling the number of unique tokens seen at regular intervals of the total number of tokens seen. We repeated this procedure 30 times, calculating the mean for each sample. The results for both corpora are seen in Fig. 2
+                        . We see that the closure curves are very similar between the two corpora, implying that – when all tokens are considered – the richness of the vocabulary across the two domains is similar. Thus the reduced performance in the clinical domain cannot be explained by difference in the richness of the overall vocabulary.
+
+We next compared the closure of mention texts and concepts. We randomly shuffled the mentions in the training sets of both the eHealth and the NCBI Disease corpora and iterated through all mentions, sampling the number of unique mention texts and unique concept identifiers seen at regular intervals of the total number of mentions considered. We repeated this procedure 30 times, calculating the mean for each sample. The results are seen in Fig. 3
+                        , which demonstrates a much wider variety of both mention texts and concepts in clinical narrative compared to biomedical publications. Thus, while clinical narrative and biomedical publications have similar variability when considering all tokens, clinical narrative uses a richer vocabulary to describe disorders than publications. This higher variability makes inference within the domain more difficult and explains the reduced performance in clinical narrative text. Compensating for the increased variability of text in the clinical narrative thus becomes the primary goal of adapting DNorm to clinical narrative.
+
+The lexicon is a pre-specified set of concepts, each with a unique identifier and one or more names. SNOMED-CT forms the core of our lexicon, since all annotations in the eHealth corpus are to SNOMED-CT concepts. Our initial lexicon was derived from the 2012AB release of the UMLS Metathesaurus [34]. The concepts included in the lexicon consisted of all those contained in the SNOMED-CT source vocabulary and belonging to the same 11 semantic types as used in the corpus, that is, the Disorder semantic group except for Findings. We increased the number of synonymous terms for each concept by including all English terms for each included concept except those marked suppressed, regardless of the source vocabulary for the term.
+
+The initial lexicon derived from the UMLS Metathesaurus did not handle “CUI-less” mentions, even though these constitute over 30% of the corpus. Manual analysis revealed that many of the “CUI-less” concepts corresponded to concepts within the semantic type Findings. We determined, however, that simply including the Findings semantic type within the lexicon would significantly reduce precision. Instead, we identified the “CUI-less” mentions occurring five or more times in the Training set, and appended those mentions to the lexicon as terms for the concept “CUI-less.”
+
+Further analysis of the Training set demonstrated that many noun forms of a term were freely substituted with the corresponding adjective form. While our system employed stemming, as described in the next section, stemming does not handle derivational morphology, and we found anatomical terms to be a particular concern. For example, the adjective form of “femur” is “femoral,” which is stemmed to “femor,” and different bases are also occasionally used, such as “optic” used as the adjective form of “eye.” We handled these by extracting a list of anatomic adjective/noun pairs from the UMLS (about 60), and adding synonyms to the lexicon substituting the adjective form for every lexicon name containing the noun form.
+
+The Training set also contained several abbreviations that are not found in the Metathesaurus. To address these, we used the medical abbreviations from Taber’s Medical Dictionary [37]. We filtered the list to only include those entries where the expanded form exactly matched one of the terms for an included concept, which added 102 terms to the lexicon.
+
+Finally, we noted that several abbreviation mentions in the Training set were ambiguous, e.g., the mention “AR” matches abbreviations listed in the UMLS for both “aortic regurgitation” (CUI C0003504) as well as “rheumatoid arthritis” (CUI C0003873), and “CAD” matches abbreviations for both “coronary heart disease” (CUI C0010068) as well as “coronary artery disease” (CUI C1956346). We filtered abbreviations from the lexicon where we could not match each letter in the abbreviation against the first letters of any of the other terms for the same concept. E.g. “AR” would match “aortic regurgitation” but not “rheumatoid arthritis.” Some abbreviations required additional disambiguation e.g., “MI” matches both “myocardial infarction” as well as “mitral incompetence.” We resolved these cases by preferring the sense that appears more frequently in the Training set.
+
+DNorm includes separate modules for mention-level NER using BANNER [32], abbreviation resolution, and normalization using a pairwise learning-to-rank algorithm. In this study, we adapt DNorm to clinical notes by introducing additional NER features and a post-processing module to handle the increased term variation. An overview of the overall approach is provided in Fig. 4
+                        , and described in greater detail in the subsequent sections.
+
+While clinical narratives are structured, the structure varies between different types of reports and different clinical groups, with the structure variably applied even within these subsets [38]. Because local context is more important than global context for inferring whether a specified span refers to a disorder mention, we segment each clinical narrative into individual sentences. Sentence segmentation in clinical narrative is complicated by two factors, however. First, it is not always clear what constitutes a sentence in the clinical narrative (see, e.g., the “non-sentential structure” examples in Table 1). Second, sentence punctuation is used inconsistently, leading to some sentences lacking periods, or lists which lack separating commas or newlines.
+
+Our preprocessing module initially segments the text using the implementation of sentence segmentation in the standard distribution of Java
+                           1
+                           https://docs.oracle.com/javase/7/docs/api/java/text/BreakIterator.html.
+                        
+                        
+                           1
+                        . We then refine the segmentation with rules we identified manually by iteratively applying our module to the Training subset. These rules locate several additional sentence breaks, such as multiple adjacent newlines, and also correct some consistent errors, such as inserting a sentence break after “Dr.”
+
+We identified disorder mentions using the BANNER named entity recognition system [32]. BANNER is a trainable NER system which uses conditional random fields and a rich feature approach. We used an extensive feature set similar to previous work in NER for diseases [39], including the following:
+                           
+                              •
+                              Individual tokens and lemmas: We included one binary feature for each token and lemma observed in the training set.
+
+Part of speech: We included a binary feature for each part of speech.
+
+Character n-grams: We included binary features for each character n-gram of length 2 and length 3 observed in the training set.
+
+Word shapes: We transformed each token by replacing each upper case letter with ‘A’, each lower case letter with ‘a’, each digit with ‘0’, and all other characters with ‘_’. We included one binary feature for each transformed token observed in the training data. We also included a variant that replaces multiple characters of the same type with a single character.
+
+We set the CRF order – the number of previous labels to be used to predict the next label – to 1. We initially set the labeling model to IO, which labels each token as either part of a disorder mention (“I”) or not (“O”). This configuration does not effectively represent disjoint mentions, however, since it only models whether or not a token was a part of a mention. We therefore created a second model that employs different labels for contiguous and disjoint mentions (the CD label model). Examples of both the IO labels and the CD labels are seen in Table 4
+                        . Spans tagged by the model as contiguous mentions were returned directly, but spans labeled as part of a disjoint mention were joined into a single disjoint mention. This significantly reduced the confusion between contiguous and disjoint mentions, and allowed either 0 or 1 disjoint mentions to be accurately represented within each sentence. We note that while neither the IO nor the CD labeling models are capable of differentiating between adjacent mentions, these are relatively rare (2.4% of mentions in the training data) and introducing an additional label to delineate the start of a mention (as in the IOB model) increases the complexity of the patterns to be learned.
+
+To improve the ability of the system to handle term variation, we performed several additional improvements to the NER component. First, we added the output of MetaMap [23,24] as an input feature to the system (“MetaMap feature”). Given a textual passage, MetaMap identifies the candidate UMLS concepts and their corresponding mention spans. For this study, the source vocabulary was limited to SNOMED-CT, and the semantic categories were restricted to the 11 disorder semantic types as previously specified. The provided clinical report is split into chunks, and each chunk is fed into the MetaMap API to obtain the candidate mentions. Mentions which overlap are resolved to the longest span, e.g., “breast cancer” is preferred to “cancer.” The module also filters some generic mentions, e.g., “allergies,” “condition,” “disease,” “finding,” etc.
+
+Next, we improved the dictionary feature used by BANNER (“improved dictionary features”) by adding the semantic type “Findings” and the other semantic types from the Disorder subgroup not already included. We also added a second dictionary feature to locate anatomical mentions using the UMLS semantic type “Body Part, Organ or Organ Component.” These are useful since many disorder mentions include the part of the anatomy affected.
+
+DNorm is a technique for learning the best mapping of a given mention to a name within a controlled vocabulary such as SNOMED-CT [20]. It converts both the mentions and the names from the controlled vocabulary to TF-IDF vectors [40] and then uses a regression model learned directly from the training data to score each name in the controlled vocabulary against the mention, and returns the top ranked name. We provide an overview of the method and describe the differences from previous implementations.
+
+Both mentions and names to vectors are converted to lower case, each token is stemmed, stop words are removed, and the remaining tokens are converted to TF-IDF vectors [40]. The TF of each element in the vector is calculated as the number of times the corresponding token appears in the mention or name. The IDF for each element in the vector is calculated from lexicon as:
+                           
+                              
+                                 IDF
+                                 =
+                                 log
+                                 
+                                    
+                                       count
+                                       (
+                                       number of names in lexicon
+                                       )
+                                    
+                                    
+                                       count
+                                       (
+                                       number of names in lexicon containing the token
+                                       )
+                                       +
+                                       1
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+All vectors are normalized to unit length. We calculate the score between mention vector 
+                           
+                              m
+                           
+                         and name vector 
+                           
+                              n
+                           
+                         using a weight matrix, 
+                           
+                              W
+                           
+                         whose elements 
+                           
+                              
+                                 
+                                    W
+                                 
+                                 
+                                    ij
+                                 
+                              
+                           
+                         encode the correlation between token 
+                           
+                              
+                                 
+                                    m
+                                 
+                                 
+                                    i
+                                 
+                              
+                           
+                         appearing in a mention and token 
+                           
+                              
+                                 
+                                    n
+                                 
+                                 
+                                    j
+                                 
+                              
+                           
+                         appearing in the concept name:
+                           
+                              
+                                 score
+                                 (
+                                 m
+                                 ,
+                                 n
+                                 )
+                                 =
+                                 
+                                    
+                                       m
+                                    
+                                    
+                                       T
+                                    
+                                 
+                                 Wn
+                                 =
+                                 
+                                    
+                                       
+                                          ∑
+                                       
+                                       
+                                          i
+                                          ,
+                                          j
+                                       
+                                    
+                                 
+                                 
+                                    
+                                       m
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 
+                                    
+                                       W
+                                    
+                                    
+                                       ij
+                                    
+                                 
+                                 
+                                    
+                                       n
+                                    
+                                    
+                                       j
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+Under this framework, normalizing a given mention consists of finding the highest-ranking name and then returning its associated concept.
+
+The matrix 
+                           
+                              W
+                           
+                         is initialized to the identity matrix, 
+                           
+                              I
+                           
+                         making the scoring function initially equivalent to cosine similarity [40]. 
+                           
+                              W
+                           
+                         is then iteratively optimized via stochastic gradient descent [41]. Specifically, we iterate through each mention 
+                           
+                              m
+                           
+                         from the training data, with its associated correct name, 
+                           
+                              
+                                 
+                                    n
+                                 
+                                 
+                                    +
+                                 
+                              
+                           
+                         and also iterate through each incorrect name 
+                           
+                              
+                                 
+                                    n
+                                 
+                                 
+                                    -
+                                 
+                              
+                           
+                        . If the score for 
+                           
+                              m
+                              ,
+                              
+                                 
+                                    n
+                                 
+                                 
+                                    +
+                                 
+                              
+                           
+                         is not greater than the score for 
+                           
+                              m
+                              ,
+                              
+                                 
+                                    n
+                                 
+                                 
+                                    +
+                                 
+                              
+                           
+                        by at least a constant margin (
+                           
+                              r
+                           
+                        ) then the weight matrix 
+                           
+                              W
+                           
+                         is adjusted by slightly increasing the correlation between 
+                           
+                              m
+                           
+                         and 
+                           
+                              
+                                 
+                                    n
+                                 
+                                 
+                                    +
+                                 
+                              
+                           
+                         and slightly decreasing the correlation between 
+                           
+                              m
+                           
+                         and 
+                           
+                              
+                                 
+                                    n
+                                 
+                                 
+                                    -
+                                 
+                              
+                           
+                        . That is, if, 
+                           
+                              
+                                 
+                                    m
+                                 
+                                 
+                                    T
+                                 
+                              
+                              
+                                 
+                                    Wn
+                                 
+                                 
+                                    +
+                                 
+                              
+                              -
+                              
+                                 
+                                    m
+                                 
+                                 
+                                    T
+                                 
+                              
+                              
+                                 
+                                    Wn
+                                 
+                                 
+                                    -
+                                 
+                              
+                              <
+                              r
+                           
+                         then 
+                           
+                              W
+                              ←
+                              W
+                              +
+                              λ
+                              
+                                 
+                                    
+                                       m
+                                       
+                                          
+                                             (
+                                             
+                                                
+                                                   n
+                                                
+                                                
+                                                   +
+                                                
+                                             
+                                             )
+                                          
+                                          
+                                             T
+                                          
+                                       
+                                       -
+                                       m
+                                       
+                                          
+                                             (
+                                             
+                                                
+                                                   n
+                                                
+                                                
+                                                   -
+                                                
+                                             
+                                             )
+                                          
+                                          
+                                             T
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        . We empirically determined that 
+                           
+                              λ
+                              =
+                              
+                                 
+                                    10
+                                 
+                                 
+                                    -
+                                    3
+                                 
+                              
+                           
+                         provided the best performance.
+
+In our previous work using DNorm in biomedical publications, where we employed the MEDIC vocabulary [42], we found that a margin of 1 (
+                           
+                              r
+                              =
+                              1
+                           
+                        ) provided better performance than a margin of 0 (
+                           
+                              r
+                              =
+                              0
+                           
+                        ) [20]. With the SNOMED-CT vocabulary, as used in this work, we found instead that a non-zero margin caused performance to drop significantly. We traced this issue to the SNOMED-CT vocabulary, which contains significantly more unique tokens than the MEDIC vocabulary but whose terms are also highly compositional, causing much of the vocabulary to be reused frequently [11]. The result of this compositionality is that using a margin of 1 with training mentions such as “fracture” causes the model to learn spurious negative correlations between “fracture” and the other tokens it appears with in the lexicon, such “femur.” This, in turn, causes mentions employing these terms, such as “femur fracture,” to be normalized incorrectly. Reducing the margin to 
+                           
+                              r
+                              =
+                              0
+                           
+                         resolves these spurious negative correlations.
+
+We implemented some rule-based post-processing to correctly handle several consistent patterns. For example, “w/r/r,” is an abbreviation for “wheezing” (CUI C0043144), “rales” (CUI C0034642), and “ronchi” (CUI C0035508). We also included rules to handle common disjoint mentions, such as the physical exam finding “tender abdomen,” and to filter some anatomical terms (e.g. “lung”) which are false positives when they constitute the complete mention.
+
+@&#RESULTS@&#
+
+Empirical feedback during system development was provided by reserving approximately 20% of the eHealth Training set for assessing improvements. Once development was complete, both the NER and the normalization models were retrained on the full Training set and evaluation was performed on the Test set, which was previously unseen.
+
+We report the results of our experiments using multiple evaluation measures, all at the mention level, which evaluate the ability of the system to identify the correct disorder span and also the correct concept identifier. These consist of strict and relaxed versions of span-only precision, recall and F-score to evaluate NER, and strict and relaxed versions of span+concept precision, recall and F-score for evaluating normalization. Precision (
+                        
+                           p
+                        
+                     ), recall (
+                        
+                           r
+                        
+                     ), and F-score (
+                        
+                           f
+                        
+                     ) are defined as follows:
+                        
+                           
+                              p
+                              =
+                              
+                                 
+                                    tp
+                                 
+                                 
+                                    tp
+                                    +
+                                    fp
+                                 
+                              
+                              r
+                              =
+                              
+                                 
+                                    tp
+                                 
+                                 
+                                    tp
+                                    +
+                                    fn
+                                 
+                              
+                              f
+                              =
+                              
+                                 
+                                    2
+                                    pr
+                                 
+                                 
+                                    p
+                                    +
+                                    r
+                                 
+                              
+                           
+                        
+                     where 
+                        
+                           tp
+                        
+                      is defined as the number of spans that the system returns correctly; for the strict measure, all spans must match on both sides, the overlapping measure only requires the spans to share at least one token. For the span+concept measures, 
+                        
+                           tp
+                        
+                      requires the correct concept identifier, in addition to either a strict or relaxed span match. All measures are micro-averaged. “CUI-less” mentions are evaluated as if “CUI-less” were their concept identifier (the system must return “CUI-less” or the concept will be marked incorrect).
+
+Note that our definition of strict and relaxed span-only precision, recall and F-score are equivalent to the measures used in the ShARe/CLEF eHealth shared task, making these measurements directly comparable to those reported by the NER task (Task 1a) [3]. Moreover, the primary evaluation measurement of the normalization task (Task 1b), which the organizers called “strict accuracy,” is equivalent to our definition of strict span+concept recall, again allowing comparison between our results and those reported by the task.
+
+The results of each evaluation measure are reported in Table 5
+                      for the base version and each experimental condition. The base version is comparable to the version submitted to the eHealth task, but has slightly higher performance due to an update in the version of the UMLS used for the dictionary features. As the table shows, we have significantly improved results for both NER and normalization compared to the base version of the system: NER from a strict f-measure of 0.714 to 0.753 and normalization from a strict f-measure of 0.636 to 0.672. These improvements are statistically significant (p
+                     <0.01; bootstrap resampling [41]). Furthermore, our final version (last row in Table 5) now has slightly higher performance than the highest NER strict F-score reported in the eHealth task (0.750). In addition, while our system previously had the highest normalization performance (as measured by strict recall) of the participants in the eHealth task, we have improved this measure by an additional 0.046.
+
+Our system is able to provide significantly higher recall, at the expense of precision, through n-best decoding in the conditional random field model [42]. While conditional random field models are typically used to return the single highest scoring sequence of tags, in n-best decoding the n highest scoring sequences of tags are provided, typically resulting in several variations on the tagging sequence, increasing the probability that one is correct. The results of using n
+                     =5 and also n
+                     =50 are reported in Table 6
+                      where we achieve a maximum strict span-only recall of 0.889, and a maximum strict span+concept recall of 0.744.
+
+@&#DISCUSSION@&#
+
+Our approach is based on classification of the text using machine learning and local context. Several characteristics of the corpus contributed to our results. First, the annotators were instructed to annotate all disorders mentioned, even if not a current concern or not experienced by the patient, and also only annotate disorders that are referenced textually, rather than disorders requiring some inference. In addition, the annotators were requested to annotate spans that were an exact match for the concept being annotated. In particular, anaphoric references are not annotated and negation is ignored except for the uncommon case of a disorder described as the negation of a normal state, such as “not ambulated.” Since these characteristics all favor a local inference approach it is notable, therefore, that the results for both NER and for normalization remain lower than is typically reported for diseases in published abstracts, where reported performance ranges from 0.78 to 0.84 f-measure [20,29,30].
+
+We manually analyzed the errors made by DNorm on the Test set, and report the results in this section. In this analysis an error could be either a false positive or a false negative. Normalization errors – a correct span but incorrect concept identifier – only constituted 17.2% of the errors. The remaining errors, 82.8%, are due to the NER (one or more incorrect spans). NER errors are therefore 4.8 times more frequent than normalization errors, underscoring the difficulty of NER for this task compared to normalization. This contrasts with published abstracts, where the NER errors were only 1.3 times more frequent than normalization errors [20]. This is particularly notable in light of the fact that the normalization task is significantly more difficult in clinical narrative since the vocabulary is larger and the MEDIC lexicon used for publications combines many near-synonym disease concepts into a single concept [42].
+
+Analysis of the normalization errors revealed that most were between related concepts. These may be less specific than the annotated concept – such as returning C0023890 (“Liver cirrhosis”) for the mention “hepatitis-c cirrhosis,” instead of “CUI-less” – or may be more specific, such as returning C0013384 (“Dyskinetic syndrome”) for the mention “abnormal movements,” instead of C0392702 (“Abnormal involuntary movements”). We also found some annotations that appeared to be context-sensitive. For example, the mention “collapse” is annotated as “atelectasis” (CUI C0004144) when it refers to a collapsed lung but to “CUI-less” when it refers to other parts of the anatomy.
+
+Due to the high frequency of NER errors (incorrect spans), we distinguished these into three further categories, which we describe here and then analyze below. Boundary errors, where the span(s) returned overlapped the correct span(s) without matching exactly, constitutes 27.6% of all errors. We also found 39.3% of all errors to be caused by false negatives: there was an annotated mention that was not matched (or overlapped) by any mention found. Finally, 16.0% of the total errors were due to false positives: the NER model returned a mention which did not overlap any annotated span.
+
+
+                        Boundary errors frequently involved including too much detail (“apneic episodes” rather than just “apneic”) or too little (“chest pain” instead of “chest pain with exertion”). Errors involving disjoint mentions often fall into this category. Another frequent example is a list of medical conditions entered into the clinical note without delimiters, such as “Aspiration pneumonia Down’s syndrome Alzheimer’s dementia.” In 35.9% of the cases of boundary errors, the concept identifier assigned by DNorm was the same as the concept identifier annotated, suggesting that the evaluation is overly pessimistic in cases where usable normalization does not require the exact spans.
+
+
+                        False negatives were frequently “CUI-less” mentions (57.6%). Also common were abbreviations (e.g. “DM2,” “OCR”), ad-hoc abbreviations (“extrem warm”), descriptive phrases (“food got stuck”), relatively generic problem adjectives (“narrowing,” “unsteady”) and nouns which do not clearly indicate a disorder out of context (“temperature,” “speech”).
+
+
+                        False positives were frequently caused by confusion with entities of other types. A common example is treatments (“inflammatory medications,” “mitral valve repair”), which not only share vocabulary with disorders but can also be disorders themselves if abused (“opiates”). Other examples include mentions of disease-causing organisms (“Klebsiella pneumoniae”), bodily functions (“asleep”), and anatomical mentions (“umbilicus”).
+
+Based on this initial analysis, summarized in Fig. 5
+                        , we performed a second analysis to determine the overall frequency of several specific errors. These errors involved “CUI-less” mentions, disjoint mentions, abbreviations/acronyms, and misspellings.
+
+First, we determined that either the annotated concept or the concept returned by DNorm was “CUI-less” for 50.2% of the errors. Contrasting this frequency with the frequency of “CUI-less” mentions in the corpus (28.2%) suggests that “CUI-less” mentions are more difficult to recognize, and this is a major source of error. Manual analysis of these mentions indicates that these are primarily caused by two phenomena: findings and hyponyms. Many mentions considered disorders by the annotators, such as “low blood pressure,” are listed in SNOMED-CT under the semantic type Finding (in this case, CUI C0020649, Hypotension). Since Findings fall outside the scope of the defined vocabulary, these were listed as “CUI-less.” Other “CUI-less” annotations, such as “hepatitis-c cirrhosis” are specializations of existing SNOMED-CT concepts, and therefore are annotated as “CUI-less.”
+
+Second, we considered whether either the annotated span or the span found was disjoint. For example, the phrase “hemorrhagic contusion in the left frontal lobe” was annotated as “hemorrhagic contusion,” but the system returned the disjoint span “hemorrhagic contusion | left frontal lobe.” We found that disjoint spans were involved in 11.5% of the errors. While it seems reasonable that disjoint mentions would be more difficult to locate than contiguous mentions, comparing the similarity of their frequency in the set of errors to their frequency in the overall corpus (11.1%) suggests that our method of handling disjoint mentions was nearly sufficient to remove them as a performance bottleneck. In addition, we did see some evidence of the annotators using disjoint mentions to ensure that all tokens in the span annotated would match a token in the name for the annotated concept. For example, the phrase “mitral leaflets are mildly thickened” was annotated as “mitral leaflets | thickened.” This partially explains the relative complexity of the NER task compared to the normalization task.
+
+Third, we considered whether either the annotated span or the span found involved abbreviations (e.g. “tachy”) or acronyms (e.g. “RA”). We found that these were involved in 21.7% of the errors, including both NER errors – from the difficulty in recognizing that the span represents a disease name – and normalization errors – from the difficulty in determining the correct concept. Acronyms and abbreviations therefore are a major source of error.
+
+Fourth, we considered whether either the annotated span or the span found included a misspelling. Our analysis determined that misspellings typically caused false negatives in the normalization. For example, the misspelled disorder mention “pharyungitis” (for “pharyngitis”) retains sufficient hints – particularly the suffix “-itis” – that the NER model successfully infers that the token represents a disorder mention. The normalization model, on the other hand, only considers full tokens, and since the token is not present in the lexicon, normalization fails. While this is a limitation of our method, we found that misspelled words were only present in 1.9% of the errors. We therefore conclude that while misspellings are not a primary source of error in this corpus, addressing misspellings in future work would increase the generalization of the method.
+
+@&#CONCLUSION@&#
+
+In this work, we successfully adapted DNorm to locate and identify disorder mentions in clinical notes. Our comparative analysis of language use in clinical narrative and biomedical publications shows that there is no difference in the number of different words used in general between the two genres, though this result should be replicated with larger corpora. However our results show that clinical narrative text references a wider variety of disorders than biomedical publications and uses a larger number of phrases (mentions) to refer to them. This analysis provides an explanation for the performance differences between the two domains and motivated our inclusion of new lexical features in the NER and additional post-processing. DNorm uses a pipeline approach, chaining a trainable NER tool (BANNER) with a novel normalization methodology which learns term variations directly from the training data by applying a learning algorithm based on pairwise learning-to-rank. We demonstrated improved performance on both named entity recognition and normalization on the ShARe/CLEF eHealth corpus by improving both NER features and post-processing. Our analysis of the errors demonstrates that NER errors outnumber normalization errors by more than 4-to-1. This indicates that the NER task is more difficult than the normalization task, and suggests that future efforts be concentrated on NER. The error analysis shows that the primary sources of error are mentions that the annotators considered disorders but could not identify within the defined scope of the controlled vocabulary (the “CUI-less” mentions) and acronyms/abbreviations. We believe it may be possible to handle the “CUI-less” mentions by reclassifying out-of-scope UMLS concepts [44] and acronyms/abbreviations using graph-based disambiguation [45]. The error analysis also demonstrated that that misspellings are not a significant source of error. We believe that this method is widely applicable, and have now demonstrated its applicability in settings involving both clinical notes with mention-level normalization and published literature with document-level normalization [20].
+
+@&#ACKNOWLEDGMENTS@&#
+
+The authors are grateful to the authors of the eHealth corpus, thank Dr. Chih-Hsuan Wei for his help preparing the demonstration website, and the anonymous reviewers for their insightful observations. This research was supported by the Intramural Research Program of the NIH, National Library of Medicine.
+
+@&#REFERENCES@&#
+

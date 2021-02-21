@@ -1,0 +1,3914 @@
+@&#MAIN-TITLE@&#An efficient level set method for simultaneous intensity inhomogeneity correction and segmentation of MR images
+
+@&#HIGHLIGHTS@&#
+
+
+               
+                  
+                  
+                     
+                        
+                           
+                           We propose a novel method for simultaneous intensity inhomogeneity correction and segmentation.
+
+
+                        
+                        
+                           
+                           Energy functional includes total variation regularization for bias field and level set function.
+
+
+                        
+                        
+                           
+                           The minimization procedure searches the global minimum and does not depend on initialization.
+
+
+                        
+                        
+                           
+                           The method was tested on synthetic and real images and evaluated qualitatively and quantitatively.
+
+
+                        
+                        
+                           
+                           The approach produces results, similar or superior in quality compared to other techniques.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+MRI
+
+Segmentation
+
+Bias field
+
+Intensity inhomogeneity
+
+Level set
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  Intensity inhomogeneity (bias field) is a common artefact in magnetic resonance (MR) images, which hinders successful automatic segmentation. In this work, a novel algorithm for simultaneous segmentation and bias field correction is presented. The proposed energy functional allows for explicit regularization of the bias field term, making the model more flexible, which is crucial in presence of strong inhomogeneities. An efficient minimization procedure, attempting to find the global minimum, is applied to the energy functional. The algorithm is evaluated qualitatively and quantitatively using a synthetic example and real MR images of different organs. Comparisons with several state-of-the-art methods demonstrate the superior performance of the proposed technique. Desirable results are obtained even for images with strong and complicated inhomogeneity fields and sparse tissue structures.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Intensity inhomogeneity is a common artefact that often occurs in medical images and is caused by imperfect image acquisition. For example, radio frequency field inhomogeneities appear due to either a non-uniform field itself or a non-uniform sensitivity of the receiver and transmitter coils. Such artefacts lead to undesired intensity variations in the same tissue types across the image. They hinder successful automated image segmentation, especially if the segmentation algorithms rely only on image intensities [15]. Therefore, efficient and reliable techniques for intensity inhomogeneity correction are required.
+
+In general, there are two main directions in this area [18,47]. First, the correction can be done prospectively based on adjustments of hardware and acquisition methods, such as phantom-based calibration and multichannel transmit scanning. Such techniques can remove scanner-dependent inhomogeneities. Nonetheless, they are not applicable for already acquired data. Second, the retrospective correction is done on a post-processing level. Such methods are rather general and mainly rely on the information from acquired images and prior knowledge about imaged anatomies, including methods based on filtering, histogram analysis, surface fitting, statistical modeling, and segmentation [18]. Approaches that allow for simultaneous image segmentation and bias field correction are especially attractive, since the processes of segmentation and correction are interleaved to benefit from each other [47].
+
+Level set methods, which are based on calculus of variations and partial differential equations, are naturally able to represent contours with complex topology and to change their topology during evolution. In the last decade, level set methods have become increasingly popular in image processing for segmentation [22,42,43], denoising, and enhancement [23,45]. Region-based level set models [22,37] aim to evolve the contour such that a certain region of interest is identified. A classical example is the well-known Chan and Vese model [7], which uses a region homogeneity assumption. Other methods based on piecewise smooth models might overcome the problem of intensity inhomogeneity. However, they are usually more computationally expensive and sensitive to initialization [27].
+
+In this paper, we propose a novel region-based level set method, which allows for simultaneous intensity inhomogeneity correction and two-phase image segmentation. Using a generally accepted model of images with intensity inhomogeneity, we apply a local intensity clustering property proposed by Li et al. [26] and extend the energy functional to enable an explicit regularization of the bias field component. The functional consists of two parts related to segmentation and bias field correction. We reformulate the level set functional using a convexification procedure [6] and minimize each part with the Split Bregman algorithm [3,14], which attempts to find the global minimum and does not depend on initialization. The algorithm is implemented with CUDA [36], a general-purpose computing platform on graphics processing units (GPGPU), to guarantee fast computations.
+
+The paper is organized as follows. First, a review of related works is given in Section
+                     2. In Section
+                     3, we shortly introduce the model and the basic level set formulation. In Section
+                     4, we present our extended functional. The level set formulation and the minimization procedure are described in Section
+                     4.3. The implementation is elaborated in Section
+                     4.4. The results and findings are discussed in Section
+                     5. This paper is summarized in Section
+                     6.
+
+@&#RELATED WORK@&#
+
+Recently, multiple retrospective algorithms for bias field correction applied to MR data have been proposed [18,47]. These algorithms have become an essential part of segmentation pipelines. Such approaches as the nonparametric non-uniformity normalization (N3) method of Sled et al. [44] and its extension, the N4 approach, by Tustison et al. [46] have become popular due to their performance. They are applied in numerous studies, where the intensity inhomogeneity correction is introduced in a preprocessing step [16,24,40,49] and the segmentation of the target organ (for instance, brain structures, breast, or liver tissue) is done thereafter. However, in certain applications prior bias field correction can not fully erase the inhomogeneity, which degrades the segmentation quality or requires semi-automatic post-processing, as mentioned, for example, in [32,40].
+
+Therefore, techniques, which jointly perform bias field correction and simultaneous segmentation, are required. Wells et al. [50], Guillemaud and Brady [17] presented a statistical approach based on the expectation maximization (EM) algorithm [15]. Their methods required prior knowledge on intensity distributions of different tissue classes. If there was no good initial guess for either the bias field or the classification estimate, the EM algorithm could lead to unsatisfactory results. Makarau et al. [34] developed a method based on the Mean shift approach [10] for breast images. It was tested on images with extracted regions of interest, i.e., without background. The method could lead to misclassifications, since it relied also on successful extraction of breast tissue. Pham and Prince added a multiplicative term to the objective function in the fuzzy C-Means (FCM) algorithm [2] to account for multiplicative intensity inhomogeneities [38]. However, the algorithm was rather sensitive to noise and computationally expensive. There are multiple extensions of this approach. Ahmed et al. proposed the labeling of a pixel (voxel) to be influenced by the labels in its immediate neighborhood [1], which made the algorithm insensitive to salt and pepper noise. Nevertheless, they did not consider that the algorithm might lead to unsatisfactory results without regularization terms. Li et al. also included the neighborhood statistics in the functional [30] and kept both regularization terms of the bias field, proposed by Pham and Prince [38]. They obtained promising results on images with a high noise level. However, these methods were tested on either phantom or brain images, and they stayed rather computationally demanding. Chen and Giger proposed a fast FCM based method [8]. The bias field was estimated in each iteration on the current tissue class centroids and the membership values of voxels. Then the estimated field was smoothed with an iterative low pass filter. The authors tested their algorithm on clinical breast MR images. That algorithm enhanced the signal intensities of fatty breast tissues, but the intensity of some fibroglandular tissue was also enhanced. This might change the overall contrast of images leading to wrong segmentation results, as reported by Lin et al. [32]. Lin et al. proposed a combined procedure for bias field correction and segmentation, consisting of the nonparametric non-uniformity normalization (N3) method [44] and a modified FCM [32]. In the first step of their algorithm, the breast region was extracted from the body in a semiautomatic manner. The algorithm was compared to the coherent local intensity clustering (CLIC), another FCM based method proposed by Li et al. [28], which showed promising results in removing strong inhomogeneities and, generally, did not require stripping of the region of interest. The study showed that both algorithms produced results comparable in quality. Cui et al. presented a localized FCM based method, motivated by the CLIC method of Li et al. [28], with the objective function including local and global information, which allowed for noise suppression [11]. The method was tested on synthetic images, X-ray vessel images, and MR brain images. Li et al. extended their CLIC method and converted the proposed functional to the level set formulation to improve performance. The results were promising even without additional (usually manual or semiautomatic) extraction of the region of interest [26]. Zhang et al. presented an extension of this approach, integrating a maximum likelihood function over the entire image domain to the level set energy [54,55]. Zhan et al. [53] introduced a Gaussian distribution with a bias field as a local region descriptor. The variational model included three-phase level set model, and the method was tested on brain images. Nonetheless, the original level set method and its extensions are often sensitive to initialization in real-world images and rather computationally expensive. Moreover, that approach of Li et al. [26] sometimes produced misclassifications for images that consisted of two main classes, where the intensities of one tissue class and the background were similar. Ivanovska et al. [20] introduced a mask-based method to further improve results. However, the approach found only a local minimum, depended on initialization, and its computational costs made it practically inapplicable to massive data processing. Wang and Pan presented a level set method with an image-guided regularization term, to restrict the level set function [48]. The method was evaluated only on brain images. The bias field was also formulated in level set terms. Nevertheless, the level set procedure was dependent on the initial countour and might get stuck in a local minimum.
+
+The idea to convexify an energy functional and search the global minimum is becoming popular also for intensity inhomogeneity correction and segmentation algorithms. Li et al. [25] extended the basic model and introduced a method, which jointly performed bias field estimation and the tissue membership functions in an FCM-like energy minimization process to optimize two multiplicative intrinsic components of an MR image. The bias field was presented as a linear combination of a given set of smooth basis functions. The introduced energy functional was convex and, therefore, the minimization sought the global minimum. The method was evaluated on brain images. Moreno et al. [35] proposed a multi-phase convex level set procedure for brain image segmentation using Chambolle's dual minimization approach [5]. However, no bias field component was taken into account here. Yang and Wu formulated the local and global intensity fitting energy model and applied the Split Bregman method to it [51,52]. The bias field regularization remained implicit though. Moreover, the authors reported that their method was sensitive to weighting parameter selection [51]. Ivanovska et al. proposed a more flexible model [21], which allowed for an explicit regularization of the bias field component. An efficient minimization procedure, namely, the Split Bregman algorithm [14] was applied both for contour evolution and bias field correction processes.
+
+This paper presents an extended version of our preliminary work [21], namely, a fast novel level set based method for simultaneous bias field correction and segmentation, which allows for explicit bias field manipulation and uses a minimization procedure that searches the global minimum. Here, we provide a more thorough and accurate description of the model, level set functional derivation and minimization, introduce a full GPU-based implementation, test the approach both on synthetic and multiple MR data of different organs, and present quantitative result evaluation. The method requires no prior stripping of the region of interest. The utilized level set procedure requires no (re-)initialization and is less computationally demanding than the classical level set approaches.
+
+The 2D image 
+                           Im
+                           :
+                           Ω
+                           →
+                           
+                              
+                                 ℝ
+                              
+                           
+                         is defined on a continuous domain Ω, such that
+                           
+                              (1)
+                              
+                                 Im
+                                 =
+                                 bJ
+                                 +
+                                 n
+                                 ,
+                              
+                           
+                        where J is the true image, b is the intensity inhomogeneity component, and n is the additive zero-mean Gaussian noise. This is a standard multiplicative model that originates from MR physics [4] and is used in multiple works on intensity inhomogeneity correction [47].
+
+Similarly as in the model presented by Li et al. [26], we assume that the bias field component 
+                           b
+                           :
+                           Ω
+                           →
+                           
+                              
+                                 ℝ
+                              
+                           
+                         is slowly varying and essentially constant within a small circular neighborhood O
+                        
+                           y
+                         (b(x)≈
+                        b(y), for x
+                        ∈
+                        O
+                        
+                           y
+                        ).
+
+Here, we shortly describe the original CLIC energy formulation and the level set evolution procedure presented by Li et al. [26].
+
+The true image J is assumed to be piecewise constant, i.e., it consists of N regions Ω1, …Ω
+                              N
+                            with intensities c
+                           =(c
+                           1, …, c
+                           
+                              N
+                           ) and the bias field b. The noise n in the neighborhood O
+                           
+                              y
+                            is minimized by the following fidelity term 
+                              
+                                 ∑
+                                 
+                                    i
+                                    =
+                                    1
+                                 
+                                 N
+                              
+                              
+                                 ∫
+                                 
+                                    
+                                       Ω
+                                       i
+                                    
+                                    ∩
+                                    
+                                       O
+                                       y
+                                    
+                                 
+                              
+                              
+                                 
+                                    (
+                                    b
+                                    (
+                                    y
+                                    )
+                                    
+                                       c
+                                       i
+                                    
+                                    −
+                                    Im
+                                    (
+                                    x
+                                    )
+                                    )
+                                 
+                                 2
+                              
+                              dx
+                           , where y denotes the center of the circular neighborhood O
+                           
+                              y
+                            with a radius ρ: O
+                           
+                              y
+                           
+                           ={x
+                           :|x
+                           −
+                           y|≤
+                           ρ}.
+
+Thereafter, a truncated Gaussian function K is introduced to account for the piecewise smoothness of the model. The clustering criterion for classifying the intensities in O
+                           
+                              y
+                            is
+                              
+                                 (2)
+                                 
+                                    
+                                       E
+                                       y
+                                    
+                                    =
+                                    
+                                       ∑
+                                       
+                                          i
+                                          =
+                                          1
+                                       
+                                       N
+                                    
+                                    
+                                       ∫
+                                       
+                                          
+                                             Ω
+                                             i
+                                          
+                                          ∩
+                                          
+                                             O
+                                             y
+                                          
+                                       
+                                    
+                                    K
+                                    (
+                                    y
+                                    −
+                                    x
+                                    )
+                                    
+                                       
+                                          (
+                                          b
+                                          (
+                                          y
+                                          )
+                                          
+                                             c
+                                             i
+                                          
+                                          −
+                                          Im
+                                          (
+                                          x
+                                          )
+                                          )
+                                       
+                                       2
+                                    
+                                    dx
+                                    .
+                                 
+                              
+                           Since K(y
+                           −
+                           x)=0 for x
+                           ∉
+                           O
+                           
+                              y
+                           , the clustering criterion can be written as
+                              
+                                 (3)
+                                 
+                                    
+                                       E
+                                       y
+                                    
+                                    =
+                                    
+                                       ∑
+                                       
+                                          i
+                                          =
+                                          1
+                                       
+                                       N
+                                    
+                                    
+                                       ∫
+                                       
+                                          
+                                             Ω
+                                             i
+                                          
+                                       
+                                    
+                                    K
+                                    (
+                                    y
+                                    −
+                                    x
+                                    )
+                                    
+                                       
+                                          (
+                                          b
+                                          (
+                                          y
+                                          )
+                                          
+                                             c
+                                             i
+                                          
+                                          −
+                                          Im
+                                          (
+                                          x
+                                          )
+                                          )
+                                       
+                                       2
+                                    
+                                    dx
+                                    .
+                                 
+                              
+                           
+                        
+
+The clustering energy in the entire domain Ω is then formulated as
+                              
+                                 (4)
+                                 
+                                    E
+                                    =
+                                    ∫
+                                    
+                                       E
+                                       y
+                                    
+                                    dy
+                                    =
+                                    ∫
+                                    
+                                       
+                                          
+                                             
+                                                ∑
+                                                
+                                                   i
+                                                   =
+                                                   1
+                                                
+                                                N
+                                             
+                                             
+                                                ∫
+                                                
+                                                   
+                                                      Ω
+                                                      i
+                                                   
+                                                
+                                             
+                                             K
+                                             (
+                                             y
+                                             −
+                                             x
+                                             )
+                                             
+                                                
+                                                   (
+                                                   b
+                                                   (
+                                                   y
+                                                   )
+                                                   
+                                                      c
+                                                      i
+                                                   
+                                                   −
+                                                   Im
+                                                   (
+                                                   x
+                                                   )
+                                                   )
+                                                
+                                                2
+                                             
+                                             dx
+                                          
+                                       
+                                    
+                                    dy
+                                    .
+                                 
+                              
+                           Then, the order of integrations is exchanged:
+                              
+                                 (5)
+                                 
+                                    E
+                                    =
+                                    ∫
+                                    
+                                       
+                                          
+                                             
+                                                ∑
+                                                
+                                                   i
+                                                   =
+                                                   1
+                                                
+                                                N
+                                             
+                                             
+                                                ∫
+                                                
+                                                   
+                                                      Ω
+                                                      i
+                                                   
+                                                
+                                             
+                                             K
+                                             (
+                                             y
+                                             −
+                                             x
+                                             )
+                                             
+                                                
+                                                   (
+                                                   b
+                                                   (
+                                                   y
+                                                   )
+                                                   
+                                                      c
+                                                      i
+                                                   
+                                                   −
+                                                   Im
+                                                   (
+                                                   x
+                                                   )
+                                                   )
+                                                
+                                                2
+                                             
+                                             dy
+                                          
+                                       
+                                    
+                                    dx
+                                    =
+                                    ∫
+                                    
+                                       ∑
+                                       
+                                          i
+                                          =
+                                          1
+                                       
+                                       N
+                                    
+                                    
+                                       e
+                                       i
+                                    
+                                    (
+                                    x
+                                    )
+                                    dx
+                                    ,
+                                 
+                              
+                           with
+
+
+                           
+                              
+                                 (6)
+                                 
+                                    
+                                       e
+                                       i
+                                    
+                                    (
+                                    x
+                                    )
+                                    =
+                                    ∫
+                                    K
+                                    (
+                                    y
+                                    −
+                                    x
+                                    )
+                                    
+                                       
+                                          (
+                                          b
+                                          (
+                                          y
+                                          )
+                                          
+                                             c
+                                             i
+                                          
+                                          −
+                                          Im
+                                          (
+                                          x
+                                          )
+                                          )
+                                       
+                                       2
+                                    
+                                    dy
+                                    .
+                                 
+                              
+                           
+                        
+
+The level set membership function M
+                           
+                              i
+                           (ϕ(x)) is added as a multiplicative term to the clustering energy, and it is defined as follows
+                              
+                                 (7)
+                                 
+                                    E
+                                    (
+                                    ϕ
+                                    ,
+                                    
+                                       
+                                          c
+                                       
+                                    
+                                    ,
+                                    b
+                                    )
+                                    =
+                                    ∫
+                                    
+                                       ∑
+                                       
+                                          i
+                                          =
+                                          1
+                                       
+                                       N
+                                    
+                                    
+                                       e
+                                       i
+                                    
+                                    (
+                                    x
+                                    )
+                                    
+                                       M
+                                       i
+                                    
+                                    (
+                                    ϕ
+                                    (
+                                    x
+                                    )
+                                    )
+                                    dx
+                                    ,
+                                 
+                              
+                           where ϕ is a level set function. Two phase segmentation considered, where N
+                           =2, M
+                           1(ϕ)=
+                           H(ϕ) and M
+                           2(ϕ)=1−
+                           H(ϕ). H(ϕ) is the Heaviside function and its derivative is the Dirac delta function δ:
+
+
+                           
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                d
+                                                dx
+                                             
+                                             H
+                                             (
+                                             x
+                                             )
+                                             =
+                                             δ
+                                             (
+                                             x
+                                             )
+                                          
+                                       
+                                       
+                                          
+                                             H
+                                             (
+                                             x
+                                             )
+                                             =
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               1
+                                                            
+                                                            
+                                                               
+                                                               x
+                                                               ≥
+                                                               0
+                                                            
+                                                         
+                                                         
+                                                            
+                                                               0
+                                                            
+                                                            
+                                                               
+                                                               x
+                                                               <
+                                                               0
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+The energy from Eq. (7) is taken as the data term in the variational level set formulation
+                              
+                                 (8)
+                                 
+                                    F
+                                    (
+                                    ϕ
+                                    ,
+                                    
+                                       
+                                          c
+                                       
+                                    
+                                    ,
+                                    b
+                                    )
+                                    =
+                                    E
+                                    (
+                                    ϕ
+                                    ,
+                                    
+                                       
+                                          c
+                                       
+                                    
+                                    ,
+                                    b
+                                    )
+                                    +
+                                    ν
+                                    L
+                                    (
+                                    ϕ
+                                    )
+                                    +
+                                    μ
+                                    
+                                       R
+                                       p
+                                    
+                                    (
+                                    ϕ
+                                    )
+                                    ,
+                                 
+                              
+                           where μ and ν are weighting factors, H is the Heaviside function, 
+                              L
+                              (
+                              ϕ
+                              )
+                              =
+                              ∫
+                              |
+                              ∇
+                              H
+                              (
+                              ϕ
+                              )
+                              |
+                              dx
+                            is the regularization term for contour smoothing. 
+                              
+                                 R
+                                 p
+                              
+                              (
+                              ϕ
+                              )
+                              =
+                              ∫
+                              p
+                              (
+                              |
+                              ∇
+                              ϕ
+                              |
+                              )
+                              dx
+                            is the distance regularization term, which allows for maintaining the signed distance property of ϕ without additional reinitialization [29], and p(s)=0.5(s
+                           −1)2.
+
+The minimization of the energy 
+                              F
+                              (
+                              ϕ
+                              ,
+                              
+                                 
+                                    c
+                                 
+                              
+                              ,
+                              b
+                              )
+                            results in the image segmentation given by the level set function ϕ and the estimation of the bias field b. It is achieved by an iterative process, where on each iteration the energy is minimized with respect to each of its variables ϕ, c, b. The minimization is obtained by solving following equations (in each equation the other two variables are fixed):
+                              
+                                 (9)
+                                 
+                                    
+                                       
+                                          ∂
+                                          ϕ
+                                       
+                                       
+                                          ∂
+                                          t
+                                       
+                                    
+                                    =
+                                    −
+                                    
+                                       
+                                          ∂
+                                          F
+                                       
+                                       
+                                          ∂
+                                          ϕ
+                                       
+                                    
+                                    =
+                                    −
+                                    δ
+                                    (
+                                    ϕ
+                                    )
+                                    (
+                                    
+                                       e
+                                       1
+                                    
+                                    −
+                                    
+                                       e
+                                       2
+                                    
+                                    )
+                                    +
+                                    ν
+                                    δ
+                                    (
+                                    ϕ
+                                    )
+                                    div
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   ∇
+                                                   ϕ
+                                                
+                                                
+                                                   |
+                                                   ∇
+                                                   ϕ
+                                                   |
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    +
+                                    μ
+                                    div
+                                    (
+                                    
+                                       d
+                                       p
+                                    
+                                    (
+                                    |
+                                    ∇
+                                    ϕ
+                                    |
+                                    )
+                                    ∇
+                                    ϕ
+                                    )
+                                    ,
+                                 
+                              
+                           
+                           
+                              
+                                 (10)
+                                 
+                                    
+                                       
+                                          
+                                             c
+                                             ˆ
+                                          
+                                       
+                                       i
+                                    
+                                    =
+                                    
+                                       
+                                          ∫
+                                          (
+                                          b
+                                          *
+                                          K
+                                          )
+                                          Im
+                                          
+                                             M
+                                             i
+                                          
+                                          (
+                                          ϕ
+                                          )
+                                          dx
+                                       
+                                       
+                                          ∫
+                                          (
+                                          
+                                             b
+                                             2
+                                          
+                                          *
+                                          K
+                                          )
+                                          
+                                             M
+                                             i
+                                          
+                                          (
+                                          ϕ
+                                          )
+                                          dx
+                                       
+                                    
+                                    ,
+                                 
+                              
+                           
+                           
+                              
+                                 (11)
+                                 
+                                    
+                                       
+                                          b
+                                          ˆ
+                                       
+                                    
+                                    =
+                                    
+                                       
+                                          (
+                                          Im
+                                          
+                                             ∑
+                                             
+                                                i
+                                                =
+                                                1
+                                             
+                                             N
+                                          
+                                          
+                                             c
+                                             i
+                                          
+                                          
+                                             M
+                                             i
+                                          
+                                          (
+                                          ϕ
+                                          )
+                                          )
+                                          *
+                                          K
+                                       
+                                       
+                                          (
+                                          
+                                             ∑
+                                             
+                                                i
+                                                =
+                                                1
+                                             
+                                             N
+                                          
+                                          
+                                             c
+                                             i
+                                             2
+                                          
+                                          
+                                             M
+                                             i
+                                          
+                                          (
+                                          ϕ
+                                          )
+                                          )
+                                          *
+                                          K
+                                       
+                                    
+                                    ,
+                                 
+                              
+                           where * denotes the convolution operator.
+
+The finite difference scheme proposed by Li et al. [29] is applied for the level set evolution, and fixed space steps Δx
+                           =Δy
+                           =1 are taken. For application, the Heaviside function H and the Dirac delta δ (the Dirac delta function) are replaced by their smooth approximations of H and δ, denoted as H
+                           
+                              ϵ
+                            and δ
+                           
+                              ϵ
+                           , as ϵ
+                           →0:
+                              
+                                 (12)
+                                 
+                                    
+                                       H
+                                       ϵ
+                                    
+                                    (
+                                    x
+                                    )
+                                    =
+                                    
+                                       1
+                                       2
+                                    
+                                    
+                                       
+                                          
+                                             1
+                                             +
+                                             
+                                                2
+                                                π
+                                             
+                                             arctan
+                                             
+                                                
+                                                   x
+                                                   ϵ
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    ,
+                                 
+                              
+                           
+                           
+                              
+                                 (13)
+                                 
+                                    
+                                       δ
+                                       ϵ
+                                    
+                                    (
+                                    x
+                                    )
+                                    =
+                                    
+                                       ϵ
+                                       
+                                          π
+                                          (
+                                          
+                                             ϵ
+                                             2
+                                          
+                                          +
+                                          
+                                             x
+                                             2
+                                          
+                                          )
+                                       
+                                    
+                                    ,
+                                 
+                              
+                           with ϵ
+                           =1, i.e. ϵ is equal to the fixed space steps.
+
+@&#METHOD@&#
+
+In the original CLIC model, the truncated Gaussian function K serves for an implicit smoothing of the bias field term b. The level of smoothness is controlled by the standard deviation σ of the Gaussian kernel K, i.e., one can manipulate b only by changing σ, which can be insufficient in presence of complicated intensity inhomogeneities and organ structures. Moreover, such a smoothing term requires computation of four convolutions in each iteration, which is rather computationally expensive. We propose to formulate the clustering energy with explicit bias field regularization, which requires no convolutions, as follows
+                           
+                              (14)
+                              
+                                 
+                                    E
+                                    1
+                                 
+                                 =
+                                 
+                                    μ
+                                    b
+                                 
+                                 ∫
+                                 
+                                    ∑
+                                    
+                                       i
+                                       =
+                                       1
+                                    
+                                    N
+                                 
+                                 
+                                    
+                                       (
+                                       b
+                                       (
+                                       x
+                                       )
+                                       
+                                          c
+                                          i
+                                       
+                                       −
+                                       Im
+                                       (
+                                       x
+                                       )
+                                       )
+                                    
+                                    2
+                                 
+                                 dx
+                                 +
+                                 ∫
+                                 |
+                                 ∇
+                                 b
+                                 
+                                    |
+                                    TV
+                                 
+                                 dx
+                                 ,
+                              
+                           
+                        where ∫|∇
+                        b|
+                           TV
+                        
+                        dx is the total variation [41] of b, and μ
+                        
+                           b
+                         is a constant, which denotes the weight between the data term and the regularization term. The total variation term serves for explicit smoothing of the bias field.
+
+The level set membership function M
+                        
+                           i
+                        (ϕ(x)) is added as a multiplicative term to the fidelity term of the clustering energy:
+                           
+                              (15)
+                              
+                                 ∫
+                                 
+                                    ∑
+                                    
+                                       i
+                                       =
+                                       1
+                                    
+                                    N
+                                 
+                                 
+                                    
+                                       (
+                                       b
+                                       (
+                                       x
+                                       )
+                                       
+                                          c
+                                          i
+                                       
+                                       −
+                                       Im
+                                       (
+                                       x
+                                       )
+                                       )
+                                    
+                                    2
+                                 
+                                 
+                                    M
+                                    i
+                                 
+                                 (
+                                 ϕ
+                                 (
+                                 x
+                                 )
+                                 )
+                                 dx
+                                 ,
+                              
+                           
+                        where ϕ is a level set function. We consider only the two phase cases, where N
+                        =2, M
+                        1(ϕ)=
+                        H(ϕ), and M
+                        2(ϕ)=1−
+                        H(ϕ) with the Heaviside function H. Let 
+                           
+                              e
+                              i
+                              *
+                           
+                           (
+                           x
+                           )
+                           =
+                           
+                              
+                                 (
+                                 b
+                                 (
+                                 x
+                                 )
+                                 
+                                    c
+                                    i
+                                 
+                                 −
+                                 Im
+                                 (
+                                 x
+                                 )
+                                 )
+                              
+                              2
+                           
+                        . This term serves both as the data component for region-based level set function ϕ and the fidelity component for b.
+
+Finally, our clustering energy is formulated as follows:
+
+
+                        
+                           
+                              (16)
+                              
+                                 
+                                    E
+                                    new
+                                 
+                                 (
+                                 ϕ
+                                 ,
+                                 
+                                    
+                                       c
+                                    
+                                 
+                                 ,
+                                 b
+                                 )
+                                 =
+                                 
+                                    μ
+                                    b
+                                 
+                                 ∫
+                                 
+                                    ∑
+                                    
+                                       i
+                                       =
+                                       1
+                                    
+                                    N
+                                 
+                                 
+                                    e
+                                    i
+                                    *
+                                 
+                                 (
+                                 x
+                                 )
+                                 
+                                    M
+                                    i
+                                 
+                                 (
+                                 ϕ
+                                 (
+                                 x
+                                 )
+                                 )
+                                 dx
+                                 +
+                                 ∫
+                                 |
+                                 ∇
+                                 b
+                                 (
+                                 x
+                                 )
+                                 
+                                    |
+                                    TV
+                                 
+                                 dx
+                                 ,
+                              
+                           
+                        where μ
+                        
+                           b
+                         is a weighting constant.
+
+The variational level set formulation is formulated as
+                           
+                              (17)
+                              
+                                 
+                                    F
+                                    new
+                                 
+                                 (
+                                 ϕ
+                                 ,
+                                 
+                                    
+                                       c
+                                    
+                                 
+                                 ,
+                                 b
+                                 )
+                                 =
+                                 
+                                    μ
+                                    ϕ
+                                 
+                                 
+                                    E
+                                    new
+                                 
+                                 (
+                                 ϕ
+                                 ,
+                                 
+                                    
+                                       c
+                                    
+                                 
+                                 ,
+                                 b
+                                 )
+                                 +
+                                 L
+                                 (
+                                 ϕ
+                                 )
+                                 ,
+                              
+                           
+                        where μ
+                        
+                           ϕ
+                         is a factor, which controls the relative influence of the data term and of the smoothing term. We omit the regularization term 
+                           
+                              R
+                              p
+                           
+                           (
+                           ϕ
+                           )
+                         (cf. (8)), since no standard level set minimization procedure will be used.
+
+The variations of energy in Eq. (17) with respect to the level set function ϕ for fixed c, b lead to the following gradient descent scheme:
+                           
+                              (18)
+                              
+                                 
+                                    
+                                       ∂
+                                       ϕ
+                                    
+                                    
+                                       ∂
+                                       t
+                                    
+                                 
+                                 =
+                                 −
+                                 δ
+                                 (
+                                 ϕ
+                                 )
+                                 
+                                    γ
+                                    1
+                                 
+                                 (
+                                 
+                                    e
+                                    1
+                                    *
+                                 
+                                 −
+                                 
+                                    e
+                                    2
+                                    *
+                                 
+                                 )
+                                 +
+                                 δ
+                                 (
+                                 ϕ
+                                 )
+                                 div
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                ∇
+                                                ϕ
+                                             
+                                             
+                                                |
+                                                ∇
+                                                ϕ
+                                                |
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 ,
+                              
+                           
+                        where the Dirac delta function is the derivative of the Heaviside function H, γ
+                        1
+                        =
+                        μ
+                        
+                           ϕ
+                        
+                        μ
+                        
+                           b
+                        . In standard numerical implementation, the smooth approximations H
+                        
+                           ϵ
+                         and δ
+                        
+                           ϵ
+                         from Eq. (12) are used.
+
+Eq. (18) is similar to the gradient scheme for ϕ for the Chan-Vese model [6], therefore, the convexification procedure described by Chan et al. [6] can be utilized here. The level set functional is reformulated as follows.
+
+First, the approximate Heaviside function is omitted altogether, which gives
+                           
+                              (19)
+                              
+                                 
+                                    
+                                       ∂
+                                       ϕ
+                                    
+                                    
+                                       ∂
+                                       t
+                                    
+                                 
+                                 =
+                                 −
+                                 
+                                    γ
+                                    1
+                                 
+                                 (
+                                 
+                                    e
+                                    1
+                                    *
+                                 
+                                 −
+                                 
+                                    e
+                                    2
+                                    *
+                                 
+                                 )
+                                 +
+                                 div
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                ∇
+                                                ϕ
+                                             
+                                             
+                                                |
+                                                ∇
+                                                ϕ
+                                                |
+                                             
+                                          
+                                       
+                                    
+                                 
+                                 .
+                              
+                           
+                        This equation is the gradient descent for the following energy
+                           
+                              (20)
+                              
+                                 ∫
+                                 |
+                                 ∇
+                                 ϕ
+                                 
+                                    |
+                                    TV
+                                 
+                                 dx
+                                 +
+                                 
+                                    γ
+                                    1
+                                 
+                                 ∫
+                                 (
+                                 
+                                    e
+                                    1
+                                    *
+                                 
+                                 −
+                                 
+                                    e
+                                    2
+                                    *
+                                 
+                                 )
+                                 ϕ
+                                 dx
+                                 .
+                              
+                           
+                        According to Theorem 2 from [6], a global minimizer can be found by carrying out the following convex minimization:
+                           
+                              (21)
+                              
+                                 
+                                    min
+                                    
+                                       0
+                                       ≤
+                                       ϕ
+                                       ≤
+                                       1
+                                    
+                                 
+                                 ∫
+                                 |
+                                 ∇
+                                 ϕ
+                                 
+                                    |
+                                    TV
+                                 
+                                 dx
+                                 +
+                                 
+                                    γ
+                                    1
+                                 
+                                 ∫
+                                 (
+                                 
+                                    e
+                                    1
+                                    *
+                                 
+                                 −
+                                 
+                                    e
+                                    2
+                                    *
+                                 
+                                 )
+                                 ϕ
+                                 dx
+                                 ,
+                              
+                           
+                        and then setting {x
+                        :
+                        ϕ(x)≥
+                        ν} for ν
+                        ∈[0, 1]. We take ν
+                        =1 in our implementation. For more details of the convexification procedure, we refer to the original work by Chan et al. [6].
+
+Second, we transform our initial energy functional (cf. Eq. (17)) as follows.
+
+
+                        
+                           
+                              (22)
+                              
+                                 
+                                    F
+                                    Convex
+                                 
+                                 (
+                                 ϕ
+                                 ,
+                                 
+                                    
+                                       c
+                                    
+                                 
+                                 ,
+                                 b
+                                 )
+                                 =
+                                 
+                                    μ
+                                    ϕ
+                                 
+                                 
+                                    μ
+                                    b
+                                 
+                                 ∫
+                                 [
+                                 ϕ
+                                 (
+                                 x
+                                 )
+                                 
+                                    
+                                       (
+                                       b
+                                       (
+                                       x
+                                       )
+                                       
+                                          c
+                                          1
+                                       
+                                       −
+                                       Im
+                                       (
+                                       x
+                                       )
+                                       )
+                                    
+                                    2
+                                 
+                                 +
+                                 (
+                                 1
+                                 −
+                                 ϕ
+                                 (
+                                 x
+                                 )
+                                 )
+                                 
+                                    
+                                       (
+                                       b
+                                       (
+                                       x
+                                       )
+                                       
+                                          c
+                                          2
+                                       
+                                       −
+                                       Im
+                                       (
+                                       x
+                                       )
+                                       )
+                                    
+                                    2
+                                 
+                                 ]
+                                 dx
+                                 +
+                                 
+                                    μ
+                                    ϕ
+                                 
+                                 ∫
+                                 |
+                                 ∇
+                                 b
+                                 (
+                                 x
+                                 )
+                                 
+                                    |
+                                    TV
+                                 
+                                 dx
+                                 +
+                                 ∫
+                                 |
+                                 ∇
+                                 ϕ
+                                 (
+                                 x
+                                 )
+                                 
+                                    |
+                                    TV
+                                 
+                                 dx
+                                 ,
+                              
+                           
+                        
+                     
+
+
+                        
+                           
+                              F
+                              Convex
+                           
+                           (
+                           ϕ
+                           ,
+                           
+                              
+                                 c
+                              
+                           
+                           ,
+                           b
+                           )
+                         is minimized with respect to three parameters, namely, ϕ, c, and b, given the other two updated in previous iteration. We have noticed that the efficient Split Bregman algorithm [3,13,14] can be utilized for minimization with respect to ϕ and b. Below we describe the procedures in more detail for each variable.
+
+The main steps of the algorithm are as follows. First, the auxiliary variable d
+                           =∇
+                           ϕ is introduced. λ
+                           
+                              ϕ
+                            is a weighting factor. The constraint d
+                           =∇
+                           ϕ is enforced using the Bregman iteration approach [3]:
+                              
+                                 (23)
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   (
+                                                   
+                                                      ϕ
+                                                      
+                                                         k
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   ,
+                                                   
+                                                      d
+                                                      
+                                                         k
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   )
+                                                   =
+                                                   arg
+                                                   
+                                                      min
+                                                      
+                                                         ϕ
+                                                         ∈
+                                                         [
+                                                         0
+                                                         ,
+                                                         1
+                                                         ]
+                                                         ,
+                                                         d
+                                                      
+                                                   
+                                                   ∫
+                                                   (
+                                                   |
+                                                   d
+                                                   |
+                                                   +
+                                                   
+                                                      γ
+                                                      1
+                                                   
+                                                   (
+                                                   
+                                                      e
+                                                      1
+                                                      *
+                                                   
+                                                   −
+                                                   
+                                                      e
+                                                      2
+                                                      *
+                                                   
+                                                   )
+                                                   ϕ
+                                                   +
+                                                   
+                                                      
+                                                         
+                                                            λ
+                                                            ϕ
+                                                         
+                                                      
+                                                      2
+                                                   
+                                                   |
+                                                   d
+                                                   −
+                                                   ∇
+                                                   ϕ
+                                                   −
+                                                   
+                                                      bv
+                                                      k
+                                                   
+                                                   
+                                                      |
+                                                      2
+                                                   
+                                                   )
+                                                   dx
+                                                   ,
+                                                   
+                                                   k
+                                                   ≥
+                                                   0
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      bv
+                                                      
+                                                         k
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   =
+                                                   
+                                                      bv
+                                                      k
+                                                   
+                                                   +
+                                                   ∇
+                                                   
+                                                      ϕ
+                                                      
+                                                         k
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   −
+                                                   
+                                                      d
+                                                      
+                                                         k
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+The L
+                           1 and L
+                           2 components of this functional are split [14] so that the minimization is performed efficiently with respect to ϕ and d separately. These steps are:
+
+
+                           
+                              
+                                 (24)
+                                 
+                                    
+                                       ϕ
+                                       
+                                          k
+                                          +
+                                          1
+                                       
+                                    
+                                    =
+                                    
+                                       min
+                                       ϕ
+                                    
+                                    
+                                       γ
+                                       1
+                                    
+                                    (
+                                    
+                                       e
+                                       1
+                                       *
+                                    
+                                    −
+                                    
+                                       e
+                                       2
+                                       *
+                                    
+                                    )
+                                    ϕ
+                                    +
+                                    
+                                       
+                                          
+                                             λ
+                                             ϕ
+                                          
+                                       
+                                       2
+                                    
+                                    |
+                                    
+                                       d
+                                       k
+                                    
+                                    −
+                                    ∇
+                                    ϕ
+                                    −
+                                    
+                                       bv
+                                       k
+                                    
+                                    
+                                       |
+                                       2
+                                    
+                                    ,
+                                 
+                              
+                           
+                           
+                              
+                                 (25)
+                                 
+                                    
+                                       d
+                                       
+                                          k
+                                          +
+                                          1
+                                       
+                                    
+                                    =
+                                    
+                                       min
+                                       d
+                                    
+                                    |
+                                    d
+                                    |
+                                    +
+                                    
+                                       
+                                          
+                                             λ
+                                             ϕ
+                                          
+                                       
+                                       2
+                                    
+                                    |
+                                    
+                                       d
+                                       k
+                                    
+                                    −
+                                    ∇
+                                    
+                                       ϕ
+                                       
+                                          k
+                                          +
+                                          1
+                                       
+                                    
+                                    −
+                                    
+                                       bv
+                                       k
+                                    
+                                    
+                                       |
+                                       2
+                                    
+                                    .
+                                 
+                              
+                           The minimizing solution ϕ
+                           
+                              k+1 is characterized by the optimality condition:
+                              
+                                 (26)
+                                 
+                                    ω
+                                    Δ
+                                    ϕ
+                                    =
+                                    
+                                       γ
+                                       1
+                                    
+                                    (
+                                    
+                                       e
+                                       1
+                                       *
+                                    
+                                    −
+                                    
+                                       e
+                                       2
+                                       *
+                                    
+                                    )
+                                    +
+                                    
+                                       λ
+                                       ϕ
+                                    
+                                    div
+                                    (
+                                    
+                                       bv
+                                       k
+                                    
+                                    −
+                                    
+                                       d
+                                       k
+                                    
+                                    )
+                                    ,
+                                    
+                                    
+                                    ϕ
+                                    ∈
+                                    [
+                                    0
+                                    ,
+                                    1
+                                    ]
+                                    .
+                                 
+                              
+                           A fast approximate solution for ϕ is provided with a Gauss-Seidel iterative scheme. Finally, the minimizing solution for d
+                           
+                              k+1 is given by soft-thresholding:
+                              
+                                 (27)
+                                 
+                                    
+                                       d
+                                       
+                                          k
+                                          +
+                                          1
+                                       
+                                    
+                                    =
+                                    
+                                       
+                                          (
+                                          ∇
+                                          
+                                             ϕ
+                                             
+                                                k
+                                                +
+                                                1
+                                             
+                                          
+                                          +
+                                          
+                                             bv
+                                             k
+                                          
+                                          )
+                                       
+                                       
+                                          |
+                                          ∇
+                                          
+                                             ϕ
+                                             
+                                                k
+                                                +
+                                                1
+                                             
+                                          
+                                          +
+                                          
+                                             bv
+                                             k
+                                          
+                                          |
+                                       
+                                    
+                                    max
+                                    
+                                       
+                                          
+                                             |
+                                             ∇
+                                             
+                                                ϕ
+                                                
+                                                   k
+                                                   +
+                                                   1
+                                                
+                                             
+                                             +
+                                             
+                                                bv
+                                                k
+                                             
+                                             |
+                                             −
+                                             
+                                                1
+                                                
+                                                   
+                                                      λ
+                                                      ϕ
+                                                   
+                                                
+                                             
+                                             ,
+                                             0
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+Now we minimize the functional 
+                              
+                                 F
+                                 Convex
+                              
+                              (
+                              ϕ
+                              ,
+                              
+                                 
+                                    c
+                                 
+                              
+                              ,
+                              b
+                              )
+                            with respect to b. We omit all additive parts of 
+                              
+                                 F
+                                 Convex
+                              
+                           , which do not depend on b and disappear with the differentiation, as well as the integrals for the sake of shortness. Now, the minimization problem looks as follows:
+
+
+                           
+                              
+                                 (28)
+                                 
+                                    
+                                       min
+                                       b
+                                    
+                                    
+                                    
+                                       μ
+                                       b
+                                    
+                                    (
+                                    
+                                       
+                                          (
+                                          b
+                                          
+                                             c
+                                             1
+                                          
+                                          −
+                                          Im
+                                          )
+                                       
+                                       2
+                                    
+                                    ϕ
+                                    +
+                                    
+                                       
+                                          (
+                                          b
+                                          
+                                             c
+                                             2
+                                          
+                                          −
+                                          Im
+                                          )
+                                       
+                                       2
+                                    
+                                    (
+                                    1
+                                    −
+                                    ϕ
+                                    )
+                                    )
+                                    +
+                                    |
+                                    ∇
+                                    b
+                                    
+                                       |
+                                       TV
+                                    
+                                    .
+                                 
+                              
+                           This equation is similar to the total variation minimization problem [41], therefore, the Split Bregman algorithm [14] can be applied here. We redefine M
+                           1
+                           =
+                           ϕ and M
+                           2
+                           =(1−
+                           ϕ), μ
+                           
+                              b
+                           
+                           =
+                           μ/2 and take c
+                           1 and c
+                           2 out of the brackets:
+
+
+                           
+                              
+                                 (29)
+                                 
+                                    
+                                       min
+                                       b
+                                    
+                                    
+                                       μ
+                                       2
+                                    
+                                    (
+                                    
+                                       
+                                          (
+                                          b
+                                          −
+                                          Im
+                                          /
+                                          
+                                             c
+                                             1
+                                          
+                                          )
+                                       
+                                       2
+                                    
+                                    
+                                       M
+                                       1
+                                    
+                                    
+                                       c
+                                       1
+                                       2
+                                    
+                                    +
+                                    
+                                       
+                                          (
+                                          b
+                                          −
+                                          Im
+                                          /
+                                          
+                                             c
+                                             2
+                                          
+                                          )
+                                       
+                                       2
+                                    
+                                    
+                                       M
+                                       2
+                                    
+                                    
+                                       c
+                                       2
+                                       2
+                                    
+                                    )
+                                    +
+                                    |
+                                    ∇
+                                    
+                                       b
+                                       x
+                                    
+                                    |
+                                    +
+                                    |
+                                    ∇
+                                    
+                                       b
+                                       y
+                                    
+                                    |
+                                    .
+                                 
+                              
+                           Then, the auxiliary variable d
+                           =∇
+                           b is introduced. This yields
+
+
+                           
+                              
+                                 (30)
+                                 
+                                    
+                                       min
+                                       
+                                          b
+                                          ,
+                                          
+                                             d
+                                             x
+                                          
+                                          ,
+                                          
+                                             d
+                                             y
+                                          
+                                       
+                                    
+                                    
+                                       μ
+                                       2
+                                    
+                                    (
+                                    
+                                       
+                                          (
+                                          b
+                                          −
+                                          Im
+                                          /
+                                          
+                                             c
+                                             1
+                                          
+                                          )
+                                       
+                                       2
+                                    
+                                    
+                                       M
+                                       1
+                                    
+                                    
+                                       c
+                                       1
+                                       2
+                                    
+                                    +
+                                    
+                                       
+                                          (
+                                          b
+                                          −
+                                          Im
+                                          /
+                                          
+                                             c
+                                             2
+                                          
+                                          )
+                                       
+                                       2
+                                    
+                                    
+                                       M
+                                       2
+                                    
+                                    
+                                       c
+                                       2
+                                       2
+                                    
+                                    )
+                                    +
+                                    |
+                                    
+                                       d
+                                       x
+                                    
+                                    |
+                                    +
+                                    |
+                                    
+                                       d
+                                       y
+                                    
+                                    |
+                                    +
+                                    
+                                       
+                                          
+                                             λ
+                                             b
+                                          
+                                       
+                                       2
+                                    
+                                    |
+                                    
+                                       d
+                                       x
+                                    
+                                    −
+                                    
+                                       ∇
+                                       x
+                                    
+                                    b
+                                    
+                                       |
+                                       2
+                                    
+                                    +
+                                    
+                                       
+                                          
+                                             λ
+                                             b
+                                          
+                                       
+                                       2
+                                    
+                                    |
+                                    
+                                       d
+                                       y
+                                    
+                                    −
+                                    
+                                       ∇
+                                       y
+                                    
+                                    b
+                                    
+                                       |
+                                       2
+                                    
+                                    .
+                                 
+                              
+                           Finally, the Bregman iteration is applied to strictly enforce the constraints:
+
+
+                           
+                              
+                                 (31)
+                                 
+                                    
+                                       min
+                                       
+                                          b
+                                          ,
+                                          
+                                             d
+                                             x
+                                          
+                                          ,
+                                          
+                                             d
+                                             y
+                                          
+                                       
+                                    
+                                    
+                                       μ
+                                       2
+                                    
+                                    (
+                                    
+                                       
+                                          (
+                                          b
+                                          −
+                                          Im
+                                          /
+                                          
+                                             c
+                                             1
+                                          
+                                          )
+                                       
+                                       2
+                                    
+                                    
+                                       M
+                                       1
+                                    
+                                    
+                                       c
+                                       1
+                                       2
+                                    
+                                    +
+                                    
+                                       
+                                          (
+                                          b
+                                          −
+                                          Im
+                                          /
+                                          
+                                             c
+                                             2
+                                          
+                                          )
+                                       
+                                       2
+                                    
+                                    
+                                       M
+                                       2
+                                    
+                                    
+                                       c
+                                       2
+                                       2
+                                    
+                                    )
+                                    +
+                                    |
+                                    
+                                       d
+                                       x
+                                    
+                                    |
+                                    +
+                                    |
+                                    
+                                       d
+                                       y
+                                    
+                                    |
+                                    +
+                                    
+                                       
+                                          
+                                             λ
+                                             b
+                                          
+                                       
+                                       2
+                                    
+                                    |
+                                    
+                                       d
+                                       x
+                                    
+                                    −
+                                    
+                                       ∇
+                                       x
+                                    
+                                    b
+                                    −
+                                    
+                                       bv
+                                       x
+                                       k
+                                    
+                                    
+                                       |
+                                       2
+                                    
+                                    +
+                                    
+                                       
+                                          
+                                             λ
+                                             b
+                                          
+                                       
+                                       2
+                                    
+                                    |
+                                    
+                                       d
+                                       y
+                                    
+                                    −
+                                    
+                                       ∇
+                                       y
+                                    
+                                    b
+                                    −
+                                    
+                                       bv
+                                       y
+                                       k
+                                    
+                                    
+                                       |
+                                       2
+                                    
+                                    ,
+                                 
+                              
+                           where the values 
+                              
+                                 bv
+                                 x
+                                 k
+                              
+                            and 
+                              
+                                 bv
+                                 y
+                                 k
+                              
+                            are chosen through the Bregman iteration. The subproblem with respect to b is
+
+
+                           
+                              
+                                 (32)
+                                 
+                                    
+                                       b
+                                       
+                                          k
+                                          +
+                                          1
+                                       
+                                    
+                                    =
+                                    
+                                       min
+                                       b
+                                    
+                                    
+                                       μ
+                                       2
+                                    
+                                    (
+                                    
+                                       
+                                          (
+                                          b
+                                          −
+                                          Im
+                                          /
+                                          
+                                             c
+                                             1
+                                          
+                                          )
+                                       
+                                       2
+                                    
+                                    
+                                       M
+                                       1
+                                    
+                                    
+                                       c
+                                       1
+                                       2
+                                    
+                                    +
+                                    
+                                       
+                                          (
+                                          b
+                                          −
+                                          Im
+                                          /
+                                          
+                                             c
+                                             2
+                                          
+                                          )
+                                       
+                                       2
+                                    
+                                    
+                                       M
+                                       2
+                                    
+                                    
+                                       c
+                                       2
+                                       2
+                                    
+                                    )
+                                    +
+                                    
+                                       
+                                          
+                                             λ
+                                             b
+                                          
+                                       
+                                       2
+                                    
+                                    |
+                                    
+                                       d
+                                       x
+                                    
+                                    −
+                                    
+                                       ∇
+                                       x
+                                    
+                                    b
+                                    −
+                                    
+                                       bv
+                                       x
+                                       k
+                                    
+                                    
+                                       |
+                                       2
+                                    
+                                    +
+                                    
+                                       
+                                          
+                                             λ
+                                             b
+                                          
+                                       
+                                       2
+                                    
+                                    |
+                                    
+                                       d
+                                       y
+                                    
+                                    −
+                                    
+                                       ∇
+                                       y
+                                    
+                                    b
+                                    −
+                                    
+                                       bv
+                                       y
+                                       k
+                                    
+                                    
+                                       |
+                                       2
+                                    
+                                    ,
+                                 
+                              
+                           which has the optimality condition
+
+
+                           
+                              
+                                 (33)
+                                 
+                                    (
+                                    μ
+                                    (
+                                    
+                                       M
+                                       1
+                                    
+                                    
+                                       c
+                                       1
+                                       2
+                                    
+                                    +
+                                    
+                                       M
+                                       2
+                                    
+                                    
+                                       c
+                                       2
+                                       2
+                                    
+                                    )
+                                    I
+                                    −
+                                    
+                                       λ
+                                       b
+                                    
+                                    Δ
+                                    )
+                                    
+                                       b
+                                       
+                                          k
+                                          +
+                                          1
+                                       
+                                    
+                                    =
+                                    μ
+                                    Im
+                                    (
+                                    
+                                       M
+                                       1
+                                    
+                                    
+                                       c
+                                       1
+                                    
+                                    +
+                                    
+                                       M
+                                       2
+                                    
+                                    
+                                       c
+                                       2
+                                    
+                                    )
+                                    +
+                                    
+                                       λ
+                                       b
+                                    
+                                    
+                                       ∇
+                                       x
+                                       T
+                                    
+                                    (
+                                    
+                                       d
+                                       x
+                                       k
+                                    
+                                    −
+                                    
+                                       bv
+                                       x
+                                       k
+                                    
+                                    )
+                                    +
+                                    
+                                       λ
+                                       b
+                                    
+                                    
+                                       ∇
+                                       y
+                                       T
+                                    
+                                    (
+                                    
+                                       d
+                                       y
+                                       k
+                                    
+                                    −
+                                    
+                                       bv
+                                       y
+                                       k
+                                    
+                                    )
+                                    ,
+                                 
+                              
+                           where I is the identity matrix. We redefine 
+                              
+                                 μ
+                                 1
+                              
+                              =
+                              μ
+                              (
+                              
+                                 M
+                                 1
+                              
+                              
+                                 c
+                                 1
+                                 2
+                              
+                              +
+                              
+                                 M
+                                 2
+                              
+                              
+                                 c
+                                 2
+                                 2
+                              
+                              )
+                           , μ
+                           2
+                           =
+                           μ(M
+                           1
+                           c
+                           1
+                           +
+                           M
+                           2
+                           c
+                           2). Then
+
+
+                           
+                              
+                                 (34)
+                                 
+                                    (
+                                    
+                                       μ
+                                       1
+                                    
+                                    I
+                                    −
+                                    λ
+                                    Δ
+                                    I
+                                    )
+                                    
+                                       b
+                                       
+                                          k
+                                          +
+                                          1
+                                       
+                                    
+                                    =
+                                    
+                                       μ
+                                       2
+                                    
+                                    Im
+                                    +
+                                    
+                                       λ
+                                       b
+                                    
+                                    
+                                       ∇
+                                       x
+                                       T
+                                    
+                                    (
+                                    
+                                       d
+                                       x
+                                       k
+                                    
+                                    −
+                                    
+                                       bv
+                                       x
+                                       k
+                                    
+                                    )
+                                    +
+                                    
+                                       λ
+                                       b
+                                    
+                                    
+                                       ∇
+                                       y
+                                       T
+                                    
+                                    (
+                                    
+                                       d
+                                       y
+                                       k
+                                    
+                                    −
+                                    
+                                       bv
+                                       y
+                                       k
+                                    
+                                    )
+                                    .
+                                 
+                              
+                           A fast approximate solution for b can be found with Gauss-Seidel iterations.
+
+Similarly as for ϕ, the optimal solution for d is found using the shrinkage operator [14]:
+
+
+                           
+                              
+                                 (35)
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                d
+                                                x
+                                                
+                                                   k
+                                                   +
+                                                   1
+                                                
+                                             
+                                             =
+                                             
+                                                
+                                                   (
+                                                   
+                                                      ∇
+                                                      x
+                                                   
+                                                   
+                                                      b
+                                                      
+                                                         k
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   +
+                                                   
+                                                      bv
+                                                      x
+                                                      k
+                                                   
+                                                   )
+                                                
+                                                
+                                                   |
+                                                   
+                                                      ∇
+                                                      x
+                                                   
+                                                   
+                                                      b
+                                                      
+                                                         k
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   +
+                                                   
+                                                      bv
+                                                      x
+                                                      k
+                                                   
+                                                   |
+                                                
+                                             
+                                             max
+                                             
+                                                
+                                                   
+                                                      |
+                                                      
+                                                         ∇
+                                                         x
+                                                      
+                                                      
+                                                         b
+                                                         
+                                                            k
+                                                            +
+                                                            1
+                                                         
+                                                      
+                                                      +
+                                                      
+                                                         bv
+                                                         x
+                                                         k
+                                                      
+                                                      |
+                                                      −
+                                                      
+                                                         1
+                                                         
+                                                            
+                                                               λ
+                                                               b
+                                                            
+                                                         
+                                                      
+                                                      ,
+                                                      0
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                d
+                                                y
+                                                
+                                                   k
+                                                   +
+                                                   1
+                                                
+                                             
+                                             =
+                                             
+                                                
+                                                   (
+                                                   
+                                                      ∇
+                                                      y
+                                                   
+                                                   
+                                                      b
+                                                      
+                                                         k
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   +
+                                                   
+                                                      bv
+                                                      y
+                                                      k
+                                                   
+                                                   )
+                                                
+                                                
+                                                   |
+                                                   
+                                                      ∇
+                                                      y
+                                                   
+                                                   
+                                                      b
+                                                      
+                                                         k
+                                                         +
+                                                         1
+                                                      
+                                                   
+                                                   +
+                                                   
+                                                      bv
+                                                      y
+                                                      k
+                                                   
+                                                   |
+                                                
+                                             
+                                             max
+                                             
+                                                
+                                                   
+                                                      |
+                                                      
+                                                         ∇
+                                                         y
+                                                      
+                                                      
+                                                         b
+                                                         
+                                                            k
+                                                            +
+                                                            1
+                                                         
+                                                      
+                                                      +
+                                                      
+                                                         bv
+                                                         y
+                                                         k
+                                                      
+                                                      |
+                                                      −
+                                                      
+                                                         1
+                                                         
+                                                            
+                                                               λ
+                                                               b
+                                                            
+                                                         
+                                                      
+                                                      ,
+                                                      0
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           The Bregman vector is updated as
+                              
+                                 (36)
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                bv
+                                                x
+                                                
+                                                   k
+                                                   +
+                                                   1
+                                                
+                                             
+                                             =
+                                             
+                                                bv
+                                                x
+                                                k
+                                             
+                                             +
+                                             (
+                                             
+                                                ∇
+                                                x
+                                             
+                                             
+                                                b
+                                                
+                                                   k
+                                                   +
+                                                   1
+                                                
+                                             
+                                             −
+                                             
+                                                d
+                                                x
+                                                
+                                                   k
+                                                   +
+                                                   1
+                                                
+                                             
+                                             )
+                                             ,
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                bv
+                                                y
+                                                
+                                                   k
+                                                   +
+                                                   1
+                                                
+                                             
+                                             =
+                                             
+                                                bv
+                                                y
+                                                k
+                                             
+                                             +
+                                             (
+                                             
+                                                ∇
+                                                y
+                                             
+                                             
+                                                b
+                                                
+                                                   k
+                                                   +
+                                                   1
+                                                
+                                             
+                                             −
+                                             
+                                                d
+                                                y
+                                                
+                                                   k
+                                                   +
+                                                   1
+                                                
+                                             
+                                             )
+                                             .
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+For fixed ϕ and b, the optimal c that minimizes the energy 
+                              
+                                 F
+                                 Convex
+                              
+                            is obtained explicitly by the following equations:
+                              
+                                 (37)
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                c
+                                                1
+                                             
+                                             =
+                                             
+                                                
+                                                   ∫
+                                                   b
+                                                   (
+                                                   x
+                                                   )
+                                                   Im
+                                                   (
+                                                   x
+                                                   )
+                                                   ϕ
+                                                   (
+                                                   x
+                                                   )
+                                                   dx
+                                                
+                                                
+                                                   ∫
+                                                   
+                                                      b
+                                                      2
+                                                   
+                                                   (
+                                                   x
+                                                   )
+                                                   ϕ
+                                                   (
+                                                   x
+                                                   )
+                                                   dx
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                c
+                                                2
+                                             
+                                             =
+                                             
+                                                
+                                                   ∫
+                                                   b
+                                                   (
+                                                   x
+                                                   )
+                                                   Im
+                                                   (
+                                                   x
+                                                   )
+                                                   (
+                                                   1
+                                                   −
+                                                   ϕ
+                                                   (
+                                                   x
+                                                   )
+                                                   )
+                                                   dx
+                                                
+                                                
+                                                   ∫
+                                                   
+                                                      b
+                                                      2
+                                                   
+                                                   (
+                                                   x
+                                                   )
+                                                   (
+                                                   1
+                                                   −
+                                                   ϕ
+                                                   (
+                                                   x
+                                                   )
+                                                   )
+                                                   dx
+                                                
+                                             
+                                             ,
+                                          
+                                       
+                                    
+                                 
+                              
+                           where ϕ(x)∈[0, 1].
+
+@&#IMPLEMENTATION@&#
+
+Although the three partial minimization processes are of equal rank, we keep their historical order in the current implementation. Namely, the minimization for ϕ is the outer one, and the minimizations with respect to b and c are nested in it. The overall scheme is shown in Algorithm 1. We leave the investigation of influence of the minimization orders on the segmentation and bias field correction results for future work.
+
+
+                        
+                           Algorithm 1
+                           Minimization scheme.
+
+
+                              
+                                 
+                                    
+                                       
+                                       
+                                          
+                                             Initialize ϕ with Image Im
+                                                ∈[0, 1]
+                                          
+                                          
+                                             Compute initial b and c
+                                             
+                                          
+                                          
+                                             
+                                                while |ϕ
+                                                
+                                                   Old
+                                                
+                                                −
+                                                ϕ
+                                                
+                                                   New
+                                                |>
+                                                ɛ
+                                                
+                                                   ϕ
+                                                 AND outIter
+                                                <
+                                                maxOutIter 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                while 
+                                                innerGSIter
+                                                <
+                                                maxGSIter 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                  Gauss-Seidel Iterations for ϕ (cf. Eq. (26))
+                                          
+                                          
+                                             
+                                                
+                                                end while
+                                             
+                                          
+                                          
+                                             
+                                                Update d and Bregman vector bv for ϕ (cf. Eqs. (23) and (27))
+                                          
+                                          
+                                             
+                                                Update c (Eq. (37))
+                                          
+                                          
+                                             
+                                                
+                                                while |b
+                                                
+                                                   Old
+                                                
+                                                −
+                                                b
+                                                
+                                                   New
+                                                |>
+                                                ɛ
+                                                
+                                                   b
+                                                 AND 
+                                                   
+                                                      outIter
+                                                      b
+                                                   
+                                                   <
+                                                   
+                                                      maxOutIter
+                                                      b
+                                                   
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                  Gauss-Seidel Iterations for b (cf. Eq. (34))
+                                          
+                                          
+                                             
+                                                  Update d and Bregman vector bv for b (cf. Eqs. (36) and (35))
+                                          
+                                          
+                                             
+                                                
+                                                end while
+                                             
+                                          
+                                          
+                                             
+                                                end while
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+The algorithm fits into a single instruction multiple-data (SIMD) programming model [33]. We replace the Gauss-Seidel iterations with the red-black successive overrelaxation (SOR) [39] and set the overrelaxation parameter ω
+                        =1.5. Every part of the algorithm is implemented in CUDA as a separate kernel. The calculation process is started from the CPU side, whereas each calculation step is executed on the GPU side. The process of CPU-GPU interactions is shown in Algorithm 2. To calculate the cluster centers c, we use the reduction operation [36] to compute the sums efficiently.
+
+
+                        
+                           Algorithm 2
+                           The scheme of CPU-GPU interactions.
+
+
+                              
+                                 
+                                    
+                                       
+                                       
+                                          
+                                             
+                                                CPU-GPU: Initialize ϕ, c, b
+                                             
+                                          
+                                          
+                                             
+                                                while CPU: FlagOUTIterations
+                                                
+                                                   ϕ
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                while CPU: FlagINIterations
+                                                
+                                                   ϕ
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                  
+                                                GPU: Red-Black SOR for ϕ
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                end while
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                GPU: Update d and Bregman vector bv for ϕ
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                GPU Update c
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                while CPU: FlagOUTIterations
+                                                
+                                                   b
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                  
+                                                while CPU: FlagINIterations
+                                                
+                                                   b
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             
+                                                    
+                                                GPU: Red-Black SOR for b
+                                             
+                                          
+                                          
+                                             
+                                                  
+                                                end while
+                                             
+                                          
+                                          
+                                             
+                                                  
+                                                GPU: Update d and Bregman vector bv for b
+                                             
+                                          
+                                          
+                                             
+                                                  
+                                                GPU: Check FlagOUTIterations
+                                                
+                                                   b
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                end while
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                GPU: Check FlagOUTIterations
+                                                
+                                                   ϕ
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                end while
+                                             
+                                          
+                                          
+                                             
+                                                CPU-GPU: Return ϕ, c, b
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+The parameter selection in our model is rather straightforward. We have two data fidelity terms μ
+                     
+                        ϕ
+                      and μ
+                     
+                        b
+                      and two Bregman factors λ
+                     
+                        ϕ
+                      and λ
+                     
+                        b
+                     . Both data fidelity terms affect the segmentation results for the ϕ process, and only μ
+                     
+                        b
+                      affects the bias field correction b process. The values of the fidelity terms define the amount of smoothing, i.e., the smaller the fidelity terms, the more impact has the other term (|∇
+                     ϕ(x)| in the level set ϕ process) and the smoother the contours will be. Generally, a good strategy is to fix one of the fidelity terms and manipulate the other one. The Bregman factors serve for the Split Bregman minimization procedures. Exact values of these parameters usually can be described by the following formulae: λ
+                     
+                        ϕ
+                     
+                     ≐
+                     μ
+                     
+                        ϕ
+                     10−k
+                      and λ
+                     
+                        b
+                     
+                     ≐
+                     μ
+                     
+                        b
+                     10+l
+                     , where k and l must be defined empirically. In our examples, we fixed μ
+                     
+                        b
+                     
+                     =1, selected μ
+                     
+                        ϕ
+                     
+                     ≫
+                     μ
+                     
+                        b
+                      and k, l
+                     ∈[3, 6]. We also observe that the Bregman factor λ
+                     
+                        b
+                      influences th smoothness level of the extracted bias field.
+
+The parameters of other methods are selected according to the recommendations of the authors in original papers.
+
+We demonstrate the performance of our method as well as compare it to other state-of-the-art techniques in terms of speed and accuracy. The methods that do not require any prior extraction of the tissue of interest have been chosen. Performance is tested on a Intel(R)Xeon(R) CPU E5620@2.4GHz with 24Gb RAM and NVIDIA Tesla C2070. The state-of-the-art methods are listed in Table 1
+                     .
+
+The estimated bias field b is used for intensity inhomogeneity correction, and the bias corrected image is computed as Im/(b
+                     +
+                     ϵ), where ϵ
+                     =0.00001.
+
+We tested the performance of the methods on a synthetic image shown in Fig. 1
+                        a. The image imitates a real MR slice: it has homogeneous background with intensity level 0 and foreground with a local gradient. The image is affected by Gaussian noise with σ
+                        =10.
+
+For our method, we set μ
+                        
+                           b
+                        
+                        =1, μ
+                        
+                           ϕ
+                        
+                        =106, λ
+                        
+                           b
+                        
+                        =300, λ
+                        
+                           ϕ
+                        
+                        =103. We evaluated the segmentation results (cf. Fig. 1) using a region-based measure, namely, the Dice coefficient [12], which is computed as DSC
+                        =(2|S
+                        1
+                        ∩
+                        S
+                        2|)/(|S
+                        1|+|S
+                        2|), where S
+                        1 and S
+                        2 are two segmentation results (in our case, the one provided by the automatic method and the one provided by the expert readings). The results are presented in Table 2
+                        . As it can be observed in Fig. 1 and Table 2, level set based methods produce more accurate results with smoother contours, whereas the FCM-based approach undersegmented the circular object. Nevertheless, the level-set approaches have several issues.
+
+First, classical gradient descent based procedure used by level set approaches of Li et al. [26] and Zhang et al. [54,55] tend to converge to a local minimum and, therefore, the result depends on the location of initial contours. For example, we change the location of initial contours and run the algorithms with exactly the same parameters as in the “successful cases” (cf. Fig. 1), on the example image, which lead to unsatisfactory results as documented in Fig. 1f and g. To our experience, the method of Zhang et al. [55] is more sensitive to the initial contour location.
+
+The proposed method overcomes this limitation, since it does not depend on initial contours, and the minimization procedure uses the Split Bregman method, which seeks the global minimum. The result is shown in Fig. 1b.
+
+Second, the level set based procedures are rather computationally expensive. Of course, running time of a method is heavily dependent on implementation, and one can not compare the above-mentioned methods implemented in Matlab to an approach, which runs on a GPU. In our previous work [21], we reimplemented the method of Li et al. [26] in C++ and compared sequential CPU implementations of two methods. It appeared that our method in that implementation was approximately 15 times faster. Here, to make the approaches comparable, we reimplement the method of Li et al. [26] in CUDA [20] and observe that our method is slightly more computationally expensive, which is explained by two evolution processes (for b and ϕ) there. For example, a call of 1 iteration for the GPU implementation of Li et al. [26] with σ
+                        =4 takes 0.15s on a 512×512 image, whereas our method requires 0.23s. Our algorithm requires approximately 10s for a 512×512 image on NVIDIA Tesla C2070, whereas the algorithm of Li et al. [26] takes 5–10s for the same image dependent on the convergence speed.
+
+Real world images are clearly more complicated than any synthetic examples due to a combination of different artefacts, such as intensity inhomogeneity, noise, and partial volume effect. Moreover, different organ structures often represent a significant challenge. Since our method is designed for two-class segmentation, we select several examples, where the image can be roughly separated in two classes (dark and bright), apply the methods and discuss the results. In Fig. 2
+                        , example slices from different MR sequences are shown. The ankle and breast data were acquired with 1.5-T MR Siemens Avanto imager, and the liver data were acquired with 3-T MR Siemens Trio Tim imager. The detailed image information is given in Table 3
+                        .
+
+The first example is an image with depicted ankles. The image exhibits intensity inhomogeneities on outer ankle edges, where intensities are significantly higher than in the rest of the tissue. This example is rather straightforward to segment, since the objects are big and have quite homogeneous structure. All methods produce here satisfactory segmentation results (cf. Fig. 3
+                        ), the FCM-based method slightly undersegments the lower region, and the intensity inhomogeneity is not fully corrected. The level set based correction results are visually more homogeneous with no bias field present.
+
+The liver example is a cut-out of a slice from a 3 Tesla T1-weighted dynamic sequence. Here, there is a clear intensity gradient within the liver, where the upper inner organ's part is significantly darker than the rest tissue. The highest intensities are reached in lower and outer liver parts.
+
+As one can observe in Fig. 4
+                        , all methods produce decent results on this example. Strong intensity inhomogeneity is removed in the whole organ apart from a small region near the upper liver boundary, which did not hinder a successful segmentation.
+
+The native breast examples have a rather sophisticated bias field. Here, intensity is gradually decreasing from breast tops, where nipples are located, to the region, where heart and lungs are located. Within breast tissue itself, there is also another intensity gradient. The regions, which are close to the breast-air boundary, have higher intensity values than other regions. Moreover, breast parenchyma (dark regions) is sparse structured and interconnected with fatty tissue (light gray regions). Hence, it is not straightforward for the algorithms to properly estimate intensity inhomogeneity and not to misclassify parenchymal tissue, assigning it to the fatty tissue class. The first breast example (C1) contains relatively low amount of parenchyma, which is sparse, and the breast muscle is not well separated from the breast fatty tissue there. The second breast example (C2) contains more parenchymal regions and the breast muscle tissue is clearly visible. The results are presented in Figs. 5 and 6
+                        
+                        .
+
+The FCM-based method undersegments parenchymal regions in both examples and fails to accurately detect the sophisticated breast muscle region in the example C1. Triggering the method's parameters has not lead to result improvement. The method of Zhang et al. [54] has not been able to converge to a stable solution in a reasonable number of iterations. We show intermediate results for this method after 700 iterations.
+
+The approach of Li et al. [26] produces plausible results with some undersegmentation of the breast parenchyma and muscle regions. However, this method is based on a gradient descent minimization scheme, and it becomes really sensitive to initialization in complex real-world images, such as breast data. In Fig. 7
+                        , the segmentation results of the level set approach by Li et al. [26] with different initializations are shown. The results are obtained with the same parameter values, as in Fig. 6b, namely, with ν
+                        =255, μ
+                        =1, σ
+                        =15, dt
+                        =0.1. As in the synthetic case (cf. Fig. 1), the location of initial contours influences segmentation results. Specifically, the sparse parenchymal regions that have been detected in Fig. 6b are missing in Fig. 7.
+
+Unlike other methods, our approach overcomes the above mentioned problems due to its flexible model with a term for direct smoothing bias field component and the global optimization procedure. Hence, the sparse parenchymal regions as well as the breast muscle boundary were segmented appropriately, as documented in Figs. 5 and 6.
+
+We have shown that breast images pose a significant challenge for intensity inhomogeneity correction methods. Now we confirm our observations quantitatively using inhomogeneity correction and segmentation metrics. The results are compared to the method of Li et al. [26].
+
+Since we do not have the “true” inhomogeneity field to compare with the extracted one, we only rely on the intensities of corrected images and segmentation results. Therefore, we apply intensity variation-based and segmentation-based (region-based) metrics. For comparisons, we use manually annotated ground truth provided by our radiology experts.
+
+The results of inhomogeneity correction are usually evaluated with two measures: coefficient of variation (CV) and coefficient of joint variation (CJV) [47]. The coefficient of variation is the quotient between standard deviation (σ) and the mean value (μ) of a tissue class (C): CV(C)=
+                           σ(C)/μ(C). CV is invariant to multiplicative uniform intensity transformation, but sensitive to the additive part (brightness). Moreover, CV can be computed for one tissue class, but does not provide any information about the overlap between intensity distributions of different tissue classes.
+
+The coefficient of joint variation overcomes the above mentioned drawbacks of CV [31], since it estimates the overlap between two tissue classes (C
+                           1 and C
+                           2). CJV is defined as CJV(C
+                           1, C
+                           2)=(σ(C
+                           1)+
+                           σ(C
+                           2))/(|μ(C
+                           1)−
+                           μ(C
+                           2)|). Additionally, we also compute the relative change of CJV before and after the correction (|CJV
+                           
+                              after
+                           −
+                           CJV
+                           
+                              before
+                           |)/(CJV
+                           
+                              before
+                           )×100%.
+
+We measure CV for the whole breast tissue (fatty and parenchymal tissues together), and CJV as well as the relative CJV for fatty and parenchymal tissues in original and bias field corrected data (cf. Table 4
+                           ). One can observe that the presented approach reduces the inhomogeneity in both images. The relative variation change is larger than 63%. The level set method of Li et al. [26] yields the CV and CJV values higher than for the proposed method.
+
+Since the intensity variation based metrics are indirect [9] and their usage can be unreliable we also evaluated the segmentation results using the Dice coefficient.
+
+Of course, the segmentation results require a range of basic post-processing steps, as extracting connected components of breast tissue, smoothing breast-pectoral muscle and breast-air boundaries, and analysing 3D connected component. We applied the proposed method for the automated breast density estimation [19] and validated it using 37 3D MR mammograms. The average Dice's Similarity Coefficient (DSC) values were 0.96±0.0172 and 0.83±0.0636 for breast and parenchymal volumes. Here, for a proof of concept we apply the postprocessing steps to the example 2D slices processed by our approach and the approach of Li et al. [26] and compare the breast and parenchymal regions to manually obtained masks.
+
+In Table 5
+                           , the results of the slice-wise comparison are presented. One can observe that the method of Li et al. [26] slightly misclassifies the breast-muscle boundary (cf. Fig. 5), the DSC for the image C1 is lower than for our method, namely, 0.93, whereas our method achieves a DSC of 0.97. For the example C2, where the breast muscle boundary is clearly visible (cf. Fig. 6), the methods produce high quality results with a DSC value of 0.98. In parenchymal tissue segmentation, the method of Li et al. [26] achieves quite low DSCs, when compared to the proposed approach, which confirms our qualitative observations.
+
+Here, we extend our test set by randomly selecting 30 MR images (5 slices from 6 datasets) and apply the proposed method, the level set method of Li et al. [26], and a combined pipeline, consisting of the N4 technique [46] and a subsequent intensity clustering with the classical fuzzy C-Means approach [2] into three classes. The segmentation performance is evaluated using the Dice coefficients. The box plots for breast volume and parenchymal tissue segmentation results are presented in Fig. 8
+                        .
+
+The proposed method is superior than the other techniques both for the breast volume and parenchymal tissue segmentation. The N4 method could not erase the intensity inhomogeneities completely, which is reflected in segmentation results, where the parts of breast tissue are assigned to different intensity classes. The approach of Li et al. [26] usually detects the breast tissue rather accurately, but assigns the parenchymal tissue parts to the breast tissue class.
+
+The manual segmentations are cut approximately in the sternum position (cf. Fig. 9
+                        a). For quantitative evaluation the automatically obtained results are cut in the same line after processing. Bias field correction and segmentation results are documented in Fig. 9b–d.
+
+The proposed approach in its current implementation is a 2D two-phase level set method. This fact poses certain limitations on its application areas. First, there is the intensity range problem. Although the segmentation results as a stack of 2D slices can be combined and post-processed as a 3D volume, as it was done in [19], the intensity ranges of bias field correction results are not correlated with each other. This makes it difficult to process the bias field correction results.
+
+Second, there is a two-phase level set limitation. The proposed algorithm extracts two classes from an image, which is desirable for certain application areas, as breast or ankle segmentation, but will lead to inappropriate results for the data, where more intensity classes are present, such as brain structures. The multi-phase implementation is left for future research.
+
+Third, there is a computational time limitation. Although the presented approach works rather fast on GPU, processing of thousands of images (hundreds of 3D datasets) stays computationally expensive. In current implementation, the processing of a 3D dataset with the resolution of 512×512×128 takes approximately 30 minutes including data transfer to GPU and result saving. We will investigate further optimization of the presented approach to reduce the computational costs.
+
+@&#CONCLUSIONS AND FUTURE WORK@&#
+
+We present a variational level set method for simultaneous segmentation and intensity inhomogeneity correction. We formulate an energy by applying a generally accepted model for images with intensity inhomogeneities and a local coherent clustering criterion. We extend this criterion to include an explicit manipulation of the bias field component. The novel functional is minimized using the efficient Split Bregman method. It attempts to find the global minimum and is not sensitive to initialization for both contour segmentation and bias field extraction.
+
+Our method has been tested on synthetic and real examples and compared to state-of-the-art methods. The proposed approach with the flexible bias field component model produces promising results, which are similar to the results from the other methods or superior in quality, even for images with strong and complicated inhomogeneity gradients and sparse tissue structures. We observe that level set based approaches usually produce smooth and rather accurate contours. However, the results and convergence speed of the level set based procedures depend on the location of initial contours. Moreover, due to the classical gradient descent based minimization, level set methods usually find a local minimum. Our method overcomes these limitations.
+
+As future work, we will extend the method to three dimensions and consider multi-phase level sets, since the main limitations of the presented approach are that it operates only in 2D and is able to segment just two classes. Moreover, we also plan to investigate the influence of different versions of the minimization procedure on the results.
+
+@&#ACKNOWLEDGMENTS@&#
+
+The authors would like to thank Dr. C. Li, Dr. X. Bresson, Dr. D.-J. Kroon, and Dr. T. Goldstein for providing a research source code of the methods. This work was supported by the Ministry for Education, Science and Culture and the European Social Fund (Grant UG 11 035A). MR imaging examinations in SHIP are supported by the Federal Ministry of Education and Research (grant no. 03ZIK012) and a joint grant from Siemens Healthcare, Erlangen, Germany and the Federal State of Mecklenburg West Pomerania.
+
+@&#REFERENCES@&#
+

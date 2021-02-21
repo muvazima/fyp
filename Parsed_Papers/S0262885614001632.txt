@@ -1,0 +1,4093 @@
+@&#MAIN-TITLE@&#Fitting multiple projective models using clustering-based Markov chain Monte Carlo inference
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           Assignment of projective models becomes a problem of probabilistic inference through clustering.
+
+
+                        
+                        
+                           
+                           A Markov network formulation that models data points in terms of projective relationships in two views is introduced.
+
+
+                        
+                        
+                           
+                           An algorithm that fits multiple varieties to data points is specified using MCMC based inference.
+
+
+                        
+                        
+                           
+                           Use of a global energy measure to capture the quality of convergence.
+
+
+                        
+                        
+                           
+                           Comparative results indicate less susceptibility to parameter tuning and increased accuracy of convergence.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Multiple model fitting
+
+Clustering
+
+Markov chain Monte Carlo
+
+Two-view geometry
+
+Markov random field
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  An algorithm for fitting multiple models that characterize the projective relationships between point-matches in pairs of (or single) images is proposed herein. Specifically, the problem of estimating multiple algebraic varieties that relate the projections of 3 dimensional (3D) points in one or more views is predominantly turned into a problem of inference over a Markov random field (MRF) using labels that include outliers and a set of candidate models estimated from subsets of the point matches. Thus, not only the MRF can trivially incorporate the errors of fit in singleton factors, but the sheer benefit of this approach is the ability to consider the interactions between data points.
+                  The proposed method (CSAMMFIT) refines the outlier posterior over the course of consecutive inference sweeps, until the process settles at a local minimum. The inference “engine” employed is a Markov Chain Monte Carlo (MCMC) method which samples new labels from clusters of data points. The advantage of this technique pertains to the fact that cluster formation can be manipulated to favor common label assignments between points related to each other by image based criteria. Moreover, although CSAMMFIT uses a Potts-like pairwise factor, the inference algorithm allows for arbitrary prior formulations, thereby accommodating the needs for more elaborate feature based constraints.
+               
+            
+
+@&#INTRODUCTION@&#
+
+The detection of multiple projective varieties has significant practical ramifications in the fields of computer vision, robotics, pattern recognition and architecture. A significant category of such varieties are lines, conics and projectivities (homography tensors) [1,2] which can lead to the discovery of planar surfaces and objects within scenes [3–5]. In terms of motion, multifocal tensors [6,7] can be used to detect multiple moving objects, camera movement and degenerate configurations [8,9]. The detection of such models in one or more views becomes an arduous task afflicted not only by the quality (or the lack thereof) of the point matches but also by the lack of prior knowledge on the nature of the outliers which may be attributed to a number of reasons (occlusions, multiple motions, changes in lighting, etc.). Several methods involving least squares fitting or iterative optimization of cost functions have been proposed for the estimation of the parameters of these varieties. For a thorough treatment on these methods, the reader is deferred to Hartley and Zisserman [8].
+
+Parameter estimation yields an optimal solution in terms of some distance measure with respect to all data points. This however implies that all data points indeed belong to the chosen model, an assumption which is usually not true. Thus, the task of model fitting typically includes inlier detection, given that a certain type of model exists in the data. By far, the most popular tool to achieve this is random sampling consensus (RANSAC) [10]. The algorithm has been widely employed, not only because of its simplicity, but also because of its remarkably accurate results in a wide variety of model fitting applications.
+
+One of the early works that attempt to capture the best model amongst the set of point matches is Phillip Torr's MLESAC [11], a RANSAC variant that attempts to find the single optimal subset of matching point-pairs which minimize the average squared error over the entire set of matches. In the same spirit, but with a rather different approach to candidate model computation, Ondrej Chum proposed DEGENSAC [12], yet another RANSAC variant trying to find a best-fit homography for a scene that contains a dominant plane. The algorithm uses RANSAC to compute the homography of the dominant plane with respect to the two views and thereby estimates the fundamental matrix using the plane induced (virtual) parallax trick [13].
+
+While both MLESAC and DEGENSAC silently assume the existence of some unique optimal model fitting the correspondences, a method proposed by Tong [9] is not constrained by any such assumption, as it attempts to discover multiple fundamental matrices for an arbitrary set of correspondences by propagating information through tensor fields in 4D. To compute the models however, RANSAC is employed in a cascaded manner: Each model is calculated by using the set of outliers of the previous RANSAC as input to a new RANSAC execution. Cascaded RANSAC execution (also referred to as “sequential RANSAC” in literature) has been widely employed in order to cope with the existence of multiple models [9,12,14].
+
+The MultiRANSAC algorithm, an actual generalization of RANSAC for multiple models, was introduced by Zulliani et al. [15]. As the name implies, the algorithm generalizes the RANSAC core concept to fitting a predetermined number of models to the data. MultiRANSAC expands the minimal sampling sets (MSS) in a cascaded manner, but the consensus sets (CS) are computed based not only on the expanded MSSs but also in terms of the CSs estimated in the previous sets. The authors present results therein superior to the ones obtained with cascaded RANSAC executions.
+
+An algorithm that builds on the MultiRANSAC concept by introducing a clustering procedure amongst the data points following the initial determination of consensus sets is J-linkage by Roberto Toldo and Andrea Fusiello [16]. J-linkage determines the initial consensus sets without excluding overlaps. In other words, data points may belong to more than one consensus sets. Multiple participants (data points) are joined to form the initial clusters and the process thereafter evolves by unifying clusters with the smallest Jackard distance, thereby yielding new model parameters from their respective supports (i.e., the sets of points used to estimate the model parameters). Unlike MultiRANSAC, J-linkage can automatically conclude with the actual number of models throughout successive clustering-and-merging steps.
+
+Recently, Isack and Boykov presented PeARL, an algorithm that minimizes an energy function comprising the errors of fit and simple pairwise interactions for multiple geometric models [17]. To the best of our knowledge, this is the closest analog to the method introduced in this paper.
+
+In PeARL, Isack and Boykov argue based on their results, that greedy approaches to model updates via the estimation of their respective consensus sets used in J-linkage clustering, RANSAC, MultiRANSAC, or even Hough transform [18] with mean-shift [19] leave plenty of margin for model misclassifications, especially for increased levels of noise in the data. Instead of the rather greedy approaches for refinement and/or unification of consensus sets, they propose the minimization of the following energy function:
+                           
+                              (1)
+                              
+                                 E
+                                 
+                                    X
+                                 
+                                 =
+                                 
+                                    
+                                       ∑
+                                       r
+                                    
+                                 
+                                 
+                                    e
+                                    r
+                                 
+                                 
+                                    
+                                       X
+                                       r
+                                    
+                                 
+                                 +
+                                 T
+                                 
+                                    
+                                       ∑
+                                       
+                                          s
+                                          ϵ
+                                          N
+                                          
+                                             r
+                                          
+                                       
+                                    
+                                 
+                                 
+                                    w
+                                    
+                                       r
+                                       ,
+                                       s
+                                    
+                                 
+                                 J
+                                 
+                                    
+                                       
+                                          X
+                                          r
+                                       
+                                       ≠
+                                       
+                                          X
+                                          s
+                                       
+                                    
+                                 
+                              
+                           
+                        where e
+                        
+                           r
+                         is some error function regarding data point r and its respective assigned model label Xr
+                        , T is a positive constant, 
+                           J
+                         is the indicator function, 
+                           N
+                           
+                              r
+                           
+                         is the Markov blanket (neighborhood) of r, w
+                        
+                           r,s
+                         is a distance-related constant such that, w
+                        
+                           r,s
+                        
+                        =
+                        exp(−‖r
+                        −
+                        s‖2/σ
+                        2) and ‖r
+                        −
+                        s‖ is the distance between r and s. The algorithm samples random groups of points and estimates the initial parameters of a number of candidate models. It then performs repeated energy minimization sweeps by re-estimating model parameters from the minimization results. The energy function is minimized using graph-cuts [20], a method for efficient approximation of local minima. The results reported by the authors are clearly in favor of the method as opposed to J-linkage, MultiRANSAC and mean-shift in Hough space.
+
+The energy minimization in PeARL implies probabilistic inference over a Markov network in which pairwise interactions are obtained by imposing a graph structure to the data points. In such a framework, one is able to incorporate several factors that characterize not only the distribution of the error of fit, but also the interactions between the point matches, such as distance, local gradient histogram similarities, etc., in order to make inference more “knowledgeable” of other sorts of aspects of visual content. It is worth noting here that a key limitation of graph-cuts is that they can be applied only to specific types of pairwise terms (specifically, ones that are metrics or semi-metrics). This clearly excludes a wide variety of priors which are likely to significantly improve optimization.
+
+In this paper, we generalize the notion of energy minimization by restating the problem in terms of obtaining the joint assignment that maximizes the following probability:
+                           
+                              (2)
+                              
+                                 P
+                                 
+                                    
+                                       
+                                          X
+                                       
+                                       M
+                                    
+                                 
+                                 ∝
+                                 
+                                    
+                                       ∏
+                                       r
+                                    
+                                 
+                                 
+                                    φ
+                                    r
+                                 
+                                 
+                                    
+                                       X
+                                       r
+                                    
+                                 
+                                 
+                                    
+                                       ∏
+                                       
+                                          s
+                                          ϵ
+                                          N
+                                          
+                                             r
+                                          
+                                       
+                                    
+                                 
+                                 
+                                    ψ
+                                    
+                                       r
+                                       ,
+                                       s
+                                    
+                                 
+                                 
+                                    
+                                       X
+                                       r
+                                    
+                                    
+                                       X
+                                       s
+                                    
+                                 
+                              
+                           
+                        where 
+                           M
+                         is a set of candidate (or proposed) models, X
+                        
+                           r
+                         is the label of data point r, φ
+                        
+                           r
+                         is a singleton factor associated with r and ψ
+                        
+                           r,s
+                         a pairwise factor associated with r and s. The label X
+                        
+                           r
+                         assumes values in 
+                           M
+                        
+                        ∪{o} where o denotes an outlier. Please note here that, unlike PeARL, in our formulation outliers are a valid label just like any candidate model. The existence of outliers in the label set can generally prevent the inference algorithm from overestimating “bad” models. As will be shown in the following sections, the singleton factor φ
+                        
+                           r
+                         is modeled in such a way as to approximate the posterior of X
+                        
+                           r
+                         given the set of ground-truth models (i.e., the most suitable set of models for the data). When this approximation is not realistic, outliers should appear in greater numbers. Finally, we introduce a slightly more elaborate prior than the indicator function which penalizes non-uniformity of labels by considering the distance between points in the context of all edge lengths in the MRF (whereas PeARL weighs the prior with a function of absolute distance).
+
+Since the proposed distribution can be fairly generic especially in terms of choice of prior, we propose the generalized Swendsen–Wang MHMCMC algorithm (henceforth, GSW) by Barbu and Zhu [21] as the preferred inference “engine”. The results provided in their paper suggest that GSW performs generally better than graph-cuts. Most importantly, GSW is a clustering algorithm at its core and inference progresses by reorganizing the connectivity on the edges of an underlying graph structure 
+                           G
+                           =
+                           
+                              
+                                 V
+                                 ,
+                                 
+                                 E
+                              
+                           
+                        , where 
+                           V
+                         is a set of vertices corresponding to data points and 
+                           E
+                         is a set of edges. An activation probability p
+                        
+                           η
+                         is assigned to each edge η
+                        ∈
+                        
+                           E
+                        . Thus, the graph not only provides a neighborhood system for the MRF, but also a framework of topological connections for the GSW algorithm. Formally, our sampling strategy is equivalent to sampling from the joint distribution of (2), augmented with a set of Boolean variables, U
+                        ={u
+                        
+                           η
+                        : u
+                        
+                           η
+                        
+                        =
+                        
+                           J
+                        (η is "ON"), η
+                        ∈
+                        
+                           E
+                        }, corresponding to the activation status of the edges (“ON” or “OFF”) and imposing a hard constraint for same label assignment to all variables connected with an edge that is switched “ON”:
+                           
+                              (3)
+                              
+                                 P
+                                 
+                                    
+                                       
+                                          
+                                             X
+                                             ,
+                                             
+                                             U
+                                          
+                                       
+                                       M
+                                    
+                                 
+                                 ∝
+                                 
+                                    
+                                       
+                                          
+                                             ∏
+                                             r
+                                          
+                                       
+                                       
+                                          φ
+                                          r
+                                       
+                                       
+                                          
+                                             X
+                                             r
+                                          
+                                       
+                                       
+                                          
+                                             ∏
+                                             
+                                                s
+                                                ϵ
+                                                N
+                                                
+                                                   r
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          ψ
+                                          
+                                             r
+                                             ,
+                                             s
+                                          
+                                       
+                                       
+                                          
+                                             X
+                                             r
+                                          
+                                          
+                                             X
+                                             s
+                                          
+                                       
+                                    
+                                 
+                                 
+                                    
+                                       
+                                          
+                                             ∏
+                                             
+                                                η
+                                                =
+                                                
+                                                   i
+                                                   j
+                                                
+                                                ∈
+                                                E
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             1
+                                             +
+                                             
+                                                u
+                                                η
+                                             
+                                             
+                                                
+                                                   J
+                                                   
+                                                      
+                                                         
+                                                            Χ
+                                                            i
+                                                         
+                                                         =
+                                                         
+                                                            Χ
+                                                            j
+                                                         
+                                                      
+                                                   
+                                                   −
+                                                   1
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             p
+                                             η
+                                          
+                                          
+                                             J
+                                             
+                                                
+                                                   
+                                                      Χ
+                                                      i
+                                                   
+                                                   =
+                                                   
+                                                      Χ
+                                                      j
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                1
+                                                −
+                                                
+                                                   p
+                                                   η
+                                                
+                                             
+                                          
+                                          
+                                             1
+                                             −
+                                             J
+                                             
+                                                
+                                                   
+                                                      Χ
+                                                      i
+                                                   
+                                                   =
+                                                   
+                                                      Χ
+                                                      j
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        where 〈i,j〉 denotes the edge between the ith
+                         and jth
+                         vertices (data points). It can be easily seen that the marginal over U yields back the joint distribution of (2). Note here that the separate product indexes on the right in (3) allow for different structures between the MRF and the graph.
+
+@&#METHOD@&#
+
+As a first step, a graph structure 
+                        G
+                        =
+                        
+                           
+                              V
+                              ,
+                              
+                              E
+                           
+                        
+                      is obtained over the data points (Fig. 1a) using Delaunay triangulation [23]; this type of triangulation ensures connectivity between closest neighbors.
+
+To initialize iteration, a set of candidate models, 
+                        M
+                     , is estimated from respective minimal sample sets. From the candidate models, for each vertex (data point) r, an error vector 
+                        
+                           e
+                           r
+                        
+                        =
+                        
+                           
+                              
+                                 
+                                    
+                                       
+                                          e
+                                          
+                                             r
+                                             ,
+                                             1
+                                          
+                                       
+                                    
+                                    
+                                       …
+                                    
+                                    
+                                       
+                                          e
+                                          
+                                             r
+                                             ,
+                                             
+                                                M
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                           T
+                        
+                      is computed. Using e
+                     
+                        r
+                     , singleton factors φ
+                     
+                        r
+                      are defined in the set of labels 
+                        M
+                     
+                     ∪{o}. Pairwise factors ψ
+                     
+                        r,s
+                      are merely penalty functions of distance between points (in the context of the graph), albeit more elaborate formulations can be used
+
+As part of the GSW algorithm preparation, activation probabilities p
+                     
+                        η
+                      should be specified for every edge η
+                     ∈
+                     
+                        E
+                     . These probabilities reflect proximity in the spatial context of the graph and therefore do not depend on the label set.
+
+The proposed method executes inference iteratively until a global energy measure (Section 3.3) has reached a local minimum. Following each inference sweep, the set of candidate models is estimated based on the current label assignments. The reader is referred to the paper by Barbu and Zhu [21] for more details on GSW cuts.
+
+As mentioned earlier, singleton factors are designed to “overestimate” the posterior of a data point r being an outlier given a set of models 
+                           M
+                        , as if this set was an “ideal” selection. In particular, we exaggerate the magnitude of the greatest likelihood of error given some model and thereby obtain an un-normalized probability measure which typically overestimates outliers for a bad set of models, but will get close to the actual posterior when these models are close to ground-truth.
+
+The aforementioned design of singleton factors relies on modeling the probability of the error vector e
+                        
+                           r
+                         associated with data point r, as a Gaussian mixture model contaminated with uniform noise (notion is loosely adopted by an early publication by Torr and Zisserman [11]):
+                           
+                              (4)
+                              
+                                 p
+                                 
+                                    
+                                       e
+                                       r
+                                    
+                                 
+                                 =
+                                 p
+                                 
+                                    
+                                       e
+                                       
+                                          r
+                                          ,
+                                          1
+                                       
+                                    
+                                    …
+                                    
+                                       e
+                                       
+                                          r
+                                          ,
+                                          
+                                             M
+                                          
+                                       
+                                    
+                                 
+                                 =
+                                 λ
+                                 
+                                    
+                                       ∑
+                                       
+                                          k
+                                          =
+                                          1
+                                       
+                                       
+                                          M
+                                       
+                                    
+                                 
+                                 p
+                                 
+                                    
+                                       
+                                          
+                                             e
+                                             r
+                                          
+                                       
+                                       
+                                          m
+                                          k
+                                       
+                                    
+                                 
+                                 p
+                                 
+                                    
+                                       m
+                                       k
+                                    
+                                 
+                                 +
+                                 
+                                    
+                                       1
+                                       −
+                                       λ
+                                    
+                                 
+                                 c
+                              
+                           
+                        where p(e
+                        
+                           r
+                        |m
+                        
+                           k
+                        )~
+                        N(0, Σ
+                        
+                           k
+                        ) and p(m
+                        
+                           k
+                        ) are the error likelihood and prior of model m
+                        
+                           k
+                        , c
+                        >0 is a constant related to outliers and λ is the probability of any data point being an inlier. With a series of manipulations, the posterior probability of data point r being an outlier can be written in the following form (see Appendix A for derivation):
+                           
+                              (5)
+                              
+                                 P
+                                 
+                                    
+                                       
+                                          o
+                                       
+                                       
+                                          e
+                                          r
+                                       
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       α
+                                       p
+                                       
+                                          
+                                             
+                                                
+                                                   e
+                                                   r
+                                                
+                                             
+                                             
+                                                m
+                                                ξ
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             ∑
+                                             
+                                                n
+                                                =
+                                                1
+                                             
+                                             
+                                                M
+                                             
+                                          
+                                       
+                                       p
+                                       
+                                          
+                                             
+                                                
+                                                   e
+                                                   r
+                                                
+                                             
+                                             
+                                                m
+                                                n
+                                             
+                                          
+                                       
+                                       +
+                                       β
+                                    
+                                 
+                              
+                           
+                        where ξ
+                        =argmax
+                           k
+                        {p(e
+                        
+                           r
+                        |m
+                        
+                           k
+                        )} is the index that maximizes the error likelihood of a model label, a is related to the quality (in terms of errors of fit) of the set of candidate models and β is related to the percentage of outliers in the data points. In general, 1≤
+                        α
+                        ≤|
+                           M
+                        | and β
+                        ≥0.
+
+To define the singleton φ
+                        
+                           r
+                        , we treat the quantities a and β as parameters. Thus, φ
+                        
+                           r
+                         becomes the un-normalized measure of a distribution that approximates the true posterior of all labels in 
+                           M
+                        
+                        ∪{o} given the error vector e
+                        
+                           r
+                         with respect to the parameters α and β (the distribution implied by φ
+                        
+                           r
+                         will henceforth be referred to as the α-β approximation):
+                           
+                              (6)
+                              
+                                 
+                                    φ
+                                    r
+                                 
+                                 
+                                    
+                                       X
+                                       r
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      p
+                                                      
+                                                         
+                                                            
+                                                               
+                                                                  e
+                                                                  r
+                                                               
+                                                            
+                                                            
+                                                               X
+                                                               r
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ,
+                                                   
+                                                   
+                                                      
+                                                         X
+                                                         r
+                                                      
+                                                      ∈
+                                                      M
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                   ∑
+                                                   
+                                                      
+                                                         
+                                                            n
+                                                            =
+                                                            1
+                                                         
+                                                      
+                                                      
+                                                         
+                                                            n
+                                                            ≠
+                                                            ξ
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      M
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         
+                                                            p
+                                                            
+                                                               
+                                                                  
+                                                                     
+                                                                        e
+                                                                        r
+                                                                     
+                                                                  
+                                                                  
+                                                                     m
+                                                                     n
+                                                                  
+                                                               
+                                                            
+                                                            +
+                                                            
+                                                               
+                                                                  1
+                                                                  −
+                                                                  a
+                                                               
+                                                            
+                                                            p
+                                                            
+                                                               
+                                                                  
+                                                                     
+                                                                        e
+                                                                        r
+                                                                     
+                                                                  
+                                                                  
+                                                                     m
+                                                                     ξ
+                                                                  
+                                                               
+                                                            
+                                                            +
+                                                            β
+                                                            ,
+                                                         
+                                                         
+                                                            
+                                                               X
+                                                               r
+                                                            
+                                                            =
+                                                            o
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+Values of α in the vicinity of 1 will typically overestimate the quality of the given candidate models and, most likely, will cause many outliers to appear in the joint (i.e., the result of the GSW inference). However, as the set of candidate models is being re-computed after successive inference sweeps, the α–β approximation will move closer to the actual posterior and the joint produced by the GSW inference will become more representative of the ground truth. On the other hand, values of β close to 0 indicate a very low percentage of outliers in the data points, an assumption which typically is true (but not always).
+
+The error likelihood p(e
+                        
+                           r
+                        |m
+                        
+                           k
+                        ) is a multivariate Gaussian, but it depends only on the k-th error component, e
+                        
+                           r, k
+                        . Formally, the information matrix of the likelihood has zero elements everywhere except for the k-th diagonal entry:
+                           
+                              
+                                 
+                                    Ω
+                                    k
+                                 
+                                 =
+                                 
+                                    
+                                       σ
+                                       k
+                                    
+                                    
+                                       −
+                                       2
+                                    
+                                 
+                                 diag
+                                 
+                                    
+                                       a
+                                       i
+                                    
+                                 
+                                 ,
+                              
+                           
+                        
+                     
+
+where 
+                           
+                              a
+                              i
+                           
+                           =
+                           
+                              
+                                 1
+                                 +
+                                 
+                                    
+                                       
+                                          −
+                                          1
+                                       
+                                    
+                                    
+                                       J
+                                       
+                                          
+                                             i
+                                             −
+                                             k
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                           /
+                           2
+                           ,
+                           
+                           i
+                           =
+                           1
+                           ,
+                           ..
+                           ,
+                           
+                              M
+                           
+                         and 
+                           
+                              
+                                 σ
+                                 k
+                              
+                              2
+                           
+                         is the variance. Consequently, the likelihood is a degenerate multivariate (in practice, univariate) normal distribution:
+                           
+                              (7)
+                              
+                                 p
+                                 
+                                    
+                                       
+                                          e
+                                          r
+                                       
+                                       |
+                                       
+                                          m
+                                          κ
+                                       
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             1
+                                             
+                                                2
+                                                π
+                                             
+                                          
+                                          d
+                                          e
+                                          
+                                             t
+                                             †
+                                          
+                                          
+                                             Ω
+                                             k
+                                          
+                                       
+                                    
+                                    
+                                       1
+                                       2
+                                    
+                                 
+                                 exp
+                                 
+                                    
+                                       −
+                                       
+                                          1
+                                          2
+                                       
+                                       
+                                          
+                                             e
+                                             r
+                                          
+                                          T
+                                       
+                                       
+                                          Ω
+                                          k
+                                       
+                                       
+                                          e
+                                          r
+                                       
+                                    
+                                 
+                                 =
+                                 
+                                    1
+                                    
+                                       
+                                          
+                                             2
+                                             π
+                                          
+                                       
+                                       
+                                          σ
+                                          k
+                                       
+                                    
+                                 
+                                 exp
+                                 
+                                    
+                                       −
+                                       
+                                          1
+                                          2
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                   e
+                                                   
+                                                      r
+                                                      ,
+                                                      k
+                                                   
+                                                
+                                             
+                                             2
+                                          
+                                          
+                                             
+                                                σ
+                                                k
+                                             
+                                             2
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        where det
+                        †
+                        A denotes the pseudo-determinant of A.
+
+Pairwise factors impose label uniformity considering distances between vertices in the context of the graph. Specifically, a pairwise factor ψ
+                        
+                           r,s
+                         is given by the following expression:
+                           
+                              (8)
+                              
+                                 
+                                    ψ
+                                    
+                                       r
+                                       ,
+                                       s
+                                    
+                                 
+                                 
+                                    
+                                       
+                                          X
+                                          r
+                                       
+                                       ,
+                                       
+                                       
+                                          X
+                                          s
+                                       
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      exp
+                                                      
+                                                         
+                                                            −
+                                                            
+                                                               T
+                                                               1
+                                                            
+                                                            
+                                                               p
+                                                               
+                                                                  r
+                                                                  s
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ,
+                                                   
+                                                   
+                                                      
+                                                         X
+                                                         r
+                                                      
+                                                      =
+                                                      
+                                                         X
+                                                         s
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      exp
+                                                      
+                                                         
+                                                            
+                                                               T
+                                                               2
+                                                            
+                                                            
+                                                               p
+                                                               
+                                                                  r
+                                                                  s
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      ,
+                                                   
+                                                   
+                                                      
+                                                         X
+                                                         r
+                                                      
+                                                      ≠
+                                                      
+                                                         X
+                                                         s
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        where p
+                        〈r,s〉 is an activation probability for the edge 〈r,s〉 (see Section 2.3) and T
+                        1, T
+                        2 are positive “temperature” constants (in practice, T
+                        1
+                        ≪
+                        T
+                        2 or T
+                        1
+                        =0). Since p
+                        〈r,s〉 reflects distance in relation to other edges in the graph, the penalty is context aware. Clearly, considering the rich informational content of images, suggestions for a more elaborate prior can be limited only by imagination.
+
+The GSW algorithm produces samples from the joint of (3). It is therefore necessary, except new labels, to produce new edge activation states at each step of the sampling process. To do so, the algorithm activates or deactivates edges that have same label assignment on their vertices by some probability p
+                        
+                           η
+                         or 1−
+                        p
+                        
+                           η
+                         respectively. Activation probabilities do not depend on label assignments, but can be related to the edges and/or the image local/global features. Since new samples are assigned to groups of variables that belong to graph clusters, it would be reasonable for the activation probabilities to reflect distance or other image-based similarity criteria so that data points that belong to the same model seek to be clustered together.
+
+For the method introduced in this paper, edge activation probabilities are designed to reflect distance in the context of the graph. In other words, we seek to establish a soft distinction between edge vertices that are “close” to each other and edge vertices that are “far” from each other, in relation to all edge distances in the graph. This can be regarded as the problem of fitting a Gaussian discriminative model over 1D data; typically, this is done with the expectation maximization algorithm for two classes, C
+                        0 for small and C
+                        1 for large distances. The algorithm is initialized with two Gaussians of equal variance with means set to the minimum and maximum edge length respectively (see Fig. 2
+                        ) so that the EM iteration “pulls” these means more towards these extremes rather than risking settlement in some local minimum closer to a median point. Following convergence, the activation probabilities can be obtained as the joint probability of the length of an edge and class C
+                        0, p(‖r
+                        −
+                        s‖, C
+                        0):
+                           
+                              (9)
+                              
+                                 
+                                    p
+                                    
+                                       r
+                                       s
+                                    
+                                 
+                                 =
+                                 p
+                                 
+                                    
+                                       
+                                          
+                                             r
+                                             −
+                                             s
+                                          
+                                       
+                                       ,
+                                       
+                                       
+                                          C
+                                          0
+                                       
+                                    
+                                 
+                                 =
+                                 p
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                r
+                                                −
+                                                s
+                                             
+                                          
+                                       
+                                       
+                                          C
+                                          0
+                                       
+                                    
+                                 
+                                 
+                                    π
+                                    0
+                                 
+                              
+                           
+                        
+                     
+
+where p(‖r
+                        −
+                        s‖|C
+                        
+                           k
+                        ), k
+                        ∈{0,1} is the likelihood of the edge length given that the edge belongs to class C
+                        
+                           k
+                         and π
+                        
+                           k
+                         is the class prior. In detailed steps, the algorithm that computes the edge probabilities is as follows (EM steps are omitted):
+
+
+                        
+                           Computation of edge activation probabilities pη
+                           
+                        
+                     
+
+
+                        Input: Set of distances D(
+                           E
+                        )={d
+                        
+                           η
+                        
+                        :
+                        d
+                        
+                           η
+                        
+                        =‖r
+                        −
+                        s‖, η
+                        =〈r,s〉∈
+                        E}.
+
+
+                        Output : p
+                        〈r,s〉
+                        =
+                        p(‖r
+                        −
+                        s‖, C
+                        0)
+                           
+                              1.
+                              Initialize the EM algorithm with the following parameters: Two classes C
+                                 0 and C
+                                 1 with respective means μ
+                                 0
+                                 =
+                                 minD(
+                                    E
+                                 ) and μ
+                                 1
+                                 =
+                                 maxD(
+                                    E
+                                 ) and variances σ
+                                 1
+                                 2
+                                 =
+                                 σ
+                                 2
+                                 2
+                                 =(μ
+                                 1
+                                 −
+                                 μ
+                                 0)/2; the class priors π
+                                 0 and π
+                                 1 are set to ½. The marginal probability of length is therefore given by,
+
+Run EM until some convergence criterion is met.
+
+Obtain the edge probability p
+                                 〈r,s〉
+                                 =
+                                 p(‖r
+                                 −
+                                 s‖, C
+                                 0).
+
+Our choice of proposal distribution for the GSW algorithm results in a sampling process which can be regarded as a Gibbs sampler using p(U|X) and p(X|U) from (3). In the context of the GSW algorithm this is equivalent to the following acceptance probability:
+                           
+                              (10)
+                              
+                                 a
+                                 
+                                    
+                                       
+                                          S
+                                          t
+                                       
+                                       →
+                                       
+                                          S
+                                          prop
+                                       
+                                    
+                                 
+                                 =
+                                 min
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                ∏
+                                                
+                                                   η
+                                                   ∈
+                                                   E
+                                                   
+                                                      
+                                                         Y
+                                                         ↔
+                                                         
+                                                            
+                                                               
+                                                                  V
+                                                                  prop
+                                                               
+                                                               
+                                                                  
+                                                                     m
+                                                                     prop
+                                                                  
+                                                               
+                                                               −
+                                                               Y
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      1
+                                                      −
+                                                      
+                                                         p
+                                                         η
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                ∏
+                                                
+                                                   η
+                                                   ∈
+                                                   E
+                                                   
+                                                      
+                                                         Y
+                                                         ↔
+                                                         
+                                                            
+                                                               
+                                                                  V
+                                                                  t
+                                                               
+                                                               
+                                                                  
+                                                                     m
+                                                                     Y
+                                                                  
+                                                               
+                                                               −
+                                                               Y
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      1
+                                                      −
+                                                      
+                                                         p
+                                                         η
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             q
+                                             
+                                                
+                                                   
+                                                      X
+                                                      Y
+                                                   
+                                                   =
+                                                   
+                                                      m
+                                                      Y
+                                                   
+                                                   |
+                                                   
+                                                      S
+                                                      prop
+                                                   
+                                                   ,
+                                                   
+                                                   M
+                                                
+                                             
+                                          
+                                          
+                                             q
+                                             
+                                                
+                                                   
+                                                      X
+                                                      Y
+                                                   
+                                                   =
+                                                   
+                                                      m
+                                                      prop
+                                                   
+                                                   |
+                                                   
+                                                      S
+                                                      t
+                                                   
+                                                   ,
+                                                   
+                                                   M
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             P
+                                             
+                                                
+                                                   
+                                                      X
+                                                      prop
+                                                   
+                                                   |
+                                                   M
+                                                
+                                             
+                                          
+                                          
+                                             P
+                                             
+                                                
+                                                   
+                                                      X
+                                                      t
+                                                   
+                                                   |
+                                                   M
+                                                
+                                             
+                                          
+                                       
+                                       ,
+                                       1
+                                    
+                                 
+                              
+                           
+                        where S
+                        
+                           t
+                        
+                        =(X
+                        
+                           t
+                        , U
+                        
+                           t
+                        ) is the state of the graph at time t, 
+                           E
+                        (A
+                        ↔
+                        B) is the set of edges between the sets of vertices A and B, 
+                           
+                              V
+                              t
+                           
+                           
+                              m
+                           
+                         is the subset of vertices to which the label m is assigned, Y is a selected connected component in the graph, P(X|
+                           M
+                        ) is the target distribution as given in (2) and,
+                           
+                              (11)
+                              
+                                 q
+                                 
+                                    
+                                       
+                                          X
+                                          Y
+                                       
+                                       =
+                                       m
+                                       |
+                                       
+                                          S
+                                          t
+                                       
+                                       ,
+                                       
+                                       M
+                                    
+                                 
+                                 =
+                                 P
+                                 
+                                    
+                                       
+                                          X
+                                          Y
+                                       
+                                       =
+                                       m
+                                       ,
+                                       
+                                       
+                                          X
+                                          
+                                             
+                                                V
+                                                t
+                                             
+                                             −
+                                             Y
+                                          
+                                       
+                                       |
+                                       M
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+where 
+                           
+                              X
+                              
+                                 
+                                    V
+                                    t
+                                 
+                                 −
+                                 Y
+                              
+                           
+                         denotes the joint assignment to all data points except the ones belonging to Y. Obviously, 
+                           
+                              X
+                              
+                                 
+                                    V
+                                    t
+                                 
+                                 −
+                                 Y
+                              
+                           
+                           =
+                           
+                              X
+                              
+                                 
+                                    V
+                                    prop
+                                 
+                                 −
+                                 Y
+                              
+                           
+                         as a direct consequence of the fact that we only change the labels of data points in Y. Hence, the two right-most fractions of the ratio in (10) will cancel out, yielding the following simplified expression for the acceptance probability:
+                           
+                              (12)
+                              
+                                 a
+                                 
+                                    
+                                       
+                                          S
+                                          t
+                                       
+                                       →
+                                       
+                                          S
+                                          prop
+                                       
+                                    
+                                 
+                                 =
+                                 min
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                ∏
+                                                
+                                                   η
+                                                   ∈
+                                                   E
+                                                   
+                                                      
+                                                         Y
+                                                         ↔
+                                                         
+                                                            
+                                                               
+                                                                  V
+                                                                  prop
+                                                               
+                                                               
+                                                                  
+                                                                     m
+                                                                     prop
+                                                                  
+                                                               
+                                                               −
+                                                               Y
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                1
+                                                −
+                                                
+                                                   p
+                                                   η
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                ∏
+                                                
+                                                   η
+                                                   ∈
+                                                   E
+                                                   
+                                                      
+                                                         Y
+                                                         ↔
+                                                         
+                                                            
+                                                               
+                                                                  V
+                                                                  t
+                                                               
+                                                               
+                                                                  
+                                                                     m
+                                                                     Y
+                                                                  
+                                                               
+                                                               −
+                                                               Y
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                1
+                                                −
+                                                
+                                                   p
+                                                   η
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    1
+                                 
+                              
+                           
+                        
+                     
+
+Given a set of data points 
+                        V
+                     , the set of all possible models Ω is a space of combinations with size complexity 
+                        O
+                        
+                           
+                              Ω
+                           
+                        
+                        =
+                        
+                           2
+                           
+                              V
+                           
+                        
+                     . CSAMMFIT searches Ω by starting from a random subset and throughout successive inference sweeps, it discards and/or recombines models until it settles at a local minimum with respect to a global energy measure.
+
+Let 
+                        M
+                     
+                     0
+                     ⊆
+                     Ω be the initial set of candidate models. There are many ways to obtain 
+                        M
+                     
+                     0; typical strategies involve the classic RANSAC [21] approach that involves the sampling of random points in 
+                        V
+                     , or slightly more elaborate sampling schemes such as the one used in J-linkage [16]. Generally, at iteration-t, given a set of candidate models 
+                        M
+                     
+                     
+                        t
+                     , the algorithm constructs the respective factors (see Sections 2.1 and 2.2) and executes a GSW inference sweep. Following a sufficient number of Markov chain transitions, the assigned labels define the new supports of the models in 
+                        M
+                     
+                     
+                        t
+                     . The algorithm discards the models with no (or very little support), a step which can be thought of as regularization in terms of number of models and thereafter re-estimates the parameters of each remaining model from their new supports. Finally, if some of the re-estimated model parameters differ from others by a distance less than a threshold, the respective supports are fused and they are replaced by a single model in 
+                        M
+                     
+                     
+                        t
+                        +1. The process repeats until the change in a global energy measure is close to zero, or a maximum number of iterations has been reached.
+
+From the above, at a fairly abstract level, the algorithm can be described as follows:
+
+
+                     
+                        Clustering based Sampling for Multiple Model FITting (CSAMMFIT)
+                     
+                  
+
+
+                     Input: a) Set of data points 
+                     
+                        V
+                     
+                     
+                        , b) Model parameter vector (model type), c) Number of initial models, |
+                        M
+                     
+                     0|, and d) Maximum number of iterations, maxIter.
+                  
+
+
+                     Output: Optimal set of models 
+                     
+                        M
+                     
+                     
+                        opt
+                     
+                     ⊆
+                     Ω and respective joint assignment X
+                     
+                        opt
+                     
+                     ∼
+                     P(X|
+                        M
+                     
+                     
+                        opt
+                     ).
+                     
+                        
+                           1.
+                           Compute 
+                                 M
+                              
+                              0 by sampling random points in 
+                                 V
+                              .
+
+Generate a graph 
+                                 G
+                                 =
+                                 
+                                    V
+                                    E
+                                 
+                               and compute an edge activation probability p
+                              
+                                 η
+                               for each η
+                              ∈
+                              
+                                 E
+                              .
+
+
+                              t
+                              ←0. E
+                              
+                                 t
+                              
+                              ←0. E
+                              
+                                 t
+                                 −1
+                              ←0. ΔE
+                              
+                                 t
+                              
+                              ←∞.
+
+Repeat until t
+                              ≥
+                              maxIter or ΔE
+                              
+                                 t
+                              
+                              ≈0:
+
+Using the edges of G as a neighborhood system and the label set 
+                                 M
+                              
+                              
+                                 t
+                              
+                              ∪{o} compute singleton and pairwise factors as shown in Eqs. (6) and (8).
+
+Run the generalized Swendsen–Wang algorithm for the joint probability distribution defined by the singleton and pairwise factors, using edge activation probabilities p
+                              
+                                 η
+                               in order to sample new graph partitions.
+
+
+                              E
+                              
+                                 t
+                                 −1
+                              ←
+                              E
+                              
+                                 t
+                              .
+
+Compute E
+                              
+                                 t
+                               as a measure proportional to the un-normalized negative log likelihood.
+
+
+                              ΔE
+                              
+                                 t
+                              
+                              =
+                              E
+                              
+                                 t
+                              
+                              −
+                              E
+                              
+                                 t
+                                 −1.
+
+Create a set of models 
+                                 
+                                    
+                                       M
+                                       ¯
+                                    
+                                    t
+                                 
+                               by selecting the models in 
+                                 M
+                              
+                              
+                                 t
+                               which have non-empty support and re-estimate their parameters.
+
+For each model 
+                                 m
+                                 ∈
+                                 
+                                    
+                                       M
+                                       ¯
+                                    
+                                    t
+                                 
+                              , find the subset 
+                                 M
+                                 
+                                    
+                                       m
+                                       ,
+                                       
+                                       ε
+                                    
+                                 
+                                 ⊆
+                                 
+                                    
+                                       M
+                                       ¯
+                                    
+                                    t
+                                 
+                               such that for every model l
+                              ∈
+                              M(m, ε) the parameter vector of m differs from the parameter vector of l no more than ε. In other words, if we denote the parameter vector of m by θ(m), then ‖θ(m)−
+                              θ(l)‖<
+                              ε by a given metric.
+
+
+                              
+                                 M
+                              
+                              
+                                 t
+                                 +1
+                              =∅.
+
+For each class in partition 
+                                 
+                                    
+                                       M
+                                       
+                                          
+                                             
+                                                m
+                                                1
+                                             
+                                             ,
+                                             
+                                             ε
+                                          
+                                       
+                                       ,
+                                       
+                                       M
+                                       
+                                          
+                                             
+                                                m
+                                                2
+                                             
+                                             ,
+                                             
+                                             ε
+                                          
+                                       
+                                       ,
+                                       
+                                       …
+                                       ,
+                                       
+                                       M
+                                       
+                                          
+                                             
+                                                m
+                                                
+                                                   M
+                                                
+                                             
+                                             ,
+                                             
+                                             ε
+                                          
+                                       
+                                    
+                                 
+                              , generate a single model by unifying the supports of the models that belong to the class and adding the resulting set to 
+                                 M
+                              
+                              
+                                 t
+                                 +1.
+
+
+                              t
+                              ←
+                              t
+                              +1.
+
+The initial set of candidate models can be sampled in many different ways, given the nature of the models. For instance, it seems prudent to sample two random points from the dataset in order to obtain a line, yet if we sample four points uniformly at random, the resultant homography will have a very poor impact on the likelihood. On the other hand, if one chooses to obtain the minimal sampling set of a homography by randomly choosing a center point and then adding its three closest neighbors, the resulting model will have a greater likelihood than most homographies obtained by fitting the parameters to four random data points. In general, sampling strategies may vary depending on the type of model.
+
+In theory, the GSW inference maximizes the joint X. Using the label assignments X
+                        
+                           r
+                        
+                        ∈
+                        
+                           M
+                        
+                        
+                           t
+                        , the supporting sets 
+                           S
+                           
+                              m
+                           
+                           ⊆
+                           V
+                         for every m
+                        ∈
+                        
+                           M
+                         are obtained. From the supports, a new set of models is obtained as,
+                           
+                              (13)
+                              
+                                 
+                                    
+                                       M
+                                       ¯
+                                    
+                                    t
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          m
+                                          ¯
+                                       
+                                       ∈
+                                       Ω
+                                       :
+                                       
+                                       θ
+                                       
+                                          
+                                             m
+                                             ¯
+                                          
+                                       
+                                       
+                                       =
+                                       
+                                          argmin
+                                          θ
+                                       
+                                       
+                                       f
+                                       
+                                          
+                                             θ
+                                             ,
+                                             
+                                             S
+                                             
+                                                m
+                                             
+                                          
+                                       
+                                       
+                                       ,
+                                       
+                                       m
+                                       ∈
+                                       
+                                          M
+                                          t
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+where f(θ, S) is an error function expressing goodness of fit of the parameter vector θ to the point set S, Ω is the space of all possible models that can be obtained from 
+                           V
+                         and θ(m) is the parameter vector associated with model m. In other words, 
+                           
+                              
+                                 M
+                                 ¯
+                              
+                              t
+                           
+                         is the set of new models obtained by re-estimating the models in 
+                           M
+                        
+                        
+                           t
+                         that end up having non-empty support following the inference sweep. It is evident that the re-estimation of the original models can only improve a global likelihood measure, as pointed out in [17].
+
+Another factor that must be accounted for during the re-estimation of candidate models is the multiplicity of entries in 
+                           
+                              
+                                 M
+                                 ¯
+                              
+                              t
+                           
+                         that correspond to the same model. We dub these entries spurious models. To account for spurious models, a distance metric ‖⋅‖ in parameter space is considered. Such metrics can be geodesics on the manifolds on which the model parameters lie. Given a threshold ε, one can define a simple equivalence relationship using the following classes for each 
+                           
+                              m
+                              ¯
+                           
+                           ∈
+                           
+                              
+                                 M
+                                 ¯
+                              
+                              t
+                           
+                        :
+                           
+                              (14)
+                              
+                                 M
+                                 
+                                    
+                                       
+                                          m
+                                          ¯
+                                       
+                                       ,
+                                       
+                                       ε
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       l
+                                       ∈
+                                       
+                                          
+                                             M
+                                             ¯
+                                          
+                                          t
+                                       
+                                       :
+                                       
+                                          
+                                             θ
+                                             
+                                                
+                                                   m
+                                                   ¯
+                                                
+                                             
+                                             −
+                                             θ
+                                             
+                                                l
+                                             
+                                          
+                                       
+                                       <
+                                       ε
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+Having obtained the set of classes, 
+                           C
+                           =
+                           
+                              
+                                 M
+                                 
+                                    
+                                       
+                                          
+                                             m
+                                             ¯
+                                          
+                                          1
+                                       
+                                       ,
+                                       
+                                       ε
+                                    
+                                 
+                                 ,
+                                 
+                                 M
+                                 
+                                    
+                                       
+                                          
+                                             m
+                                             ¯
+                                          
+                                          2
+                                       
+                                       ,
+                                       
+                                       ε
+                                    
+                                 
+                                 ,
+                                 
+                                 …
+                                 ,
+                                 
+                                 M
+                                 
+                                    
+                                       
+                                          
+                                             m
+                                             ¯
+                                          
+                                          
+                                             M
+                                          
+                                       
+                                       ,
+                                       
+                                       ε
+                                    
+                                 
+                              
+                           
+                        , which is a partition of 
+                           
+                              
+                                 M
+                                 ¯
+                              
+                              t
+                           
+                        , the new set of candidate models 
+                           M
+                        
+                        
+                           t
+                           +1 is obtained by computing the parameters of a single model for each equivalence class, using the combined supports of the models that belong to the class:
+                           
+                              (15)
+                              
+                                 
+                                    M
+                                    
+                                       t
+                                       +
+                                       1
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          l
+                                          i
+                                       
+                                       ∈
+                                       Ω
+                                       :
+                                       i
+                                       ∈
+                                       
+                                          1
+                                          …
+                                          
+                                             C
+                                          
+                                       
+                                       
+                                       ,
+                                       
+                                       θ
+                                       
+                                          
+                                             l
+                                             i
+                                          
+                                       
+                                       =
+                                       
+                                          argmin
+                                          θ
+                                       
+                                       
+                                       f
+                                       
+                                          
+                                             θ
+                                             ,
+                                             
+                                             
+                                                
+                                                   ∪
+                                                   
+                                                      
+                                                         m
+                                                         ¯
+                                                      
+                                                      ∈
+                                                      M
+                                                      
+                                                         
+                                                            
+                                                               
+                                                                  m
+                                                                  ¯
+                                                               
+                                                               i
+                                                            
+                                                            ,
+                                                            
+                                                            ε
+                                                         
+                                                      
+                                                   
+                                                
+                                                
+                                                   S
+                                                   
+                                                      
+                                                         m
+                                                         ¯
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+Although the un-normalized negative log-likelihood (energy) of each GSW sweep is a valid quality measure of convergence, it cannot however be used for comparison between successive inferences. This is because each inference sweep concerns a distinct set of factors, corresponding to a distinct set of candidate models. To obtain a measure of convergence which is independent of the formulations of the GSW sweeps, one is required to consider a more global view of the problem.
+
+Formally stated, the distribution of label assignments to a data point r in terms of the sample space Ω and its subsets can be expressed as the following marginal over all possible model subsets:
+                           
+                              (16)
+                              
+                                 P
+                                 
+                                    
+                                       X
+                                       r
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   ∑
+                                                   
+                                                      M
+                                                      ∈
+                                                      P
+                                                      
+                                                         Ω
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         
+                                                            P
+                                                            
+                                                               
+                                                                  X
+                                                                  r
+                                                               
+                                                               M
+                                                            
+                                                            ,
+                                                         
+                                                         
+                                                            
+                                                               X
+                                                               r
+                                                            
+                                                            ≠
+                                                            o
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             1
+                                             −
+                                             
+                                                
+                                                   ∑
+                                                   
+                                                      M
+                                                      ∈
+                                                      P
+                                                      
+                                                         Ω
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         
+                                                            P
+                                                            
+                                                               
+                                                                  X
+                                                                  r
+                                                               
+                                                               M
+                                                            
+                                                            ,
+                                                         
+                                                         
+                                                            
+                                                               X
+                                                               r
+                                                            
+                                                            
+                                                            =
+                                                            o
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        where 
+                           P
+                           
+                              Ω
+                           
+                         is the power set of Ω.
+
+In this global model, it is reasonable to assume independence between any two labels X
+                        
+                           r
+                         and X
+                        
+                           q
+                        , since all possible model subsets are taken into consideration in the marginal distribution and therefore, the singletons should be “strong enough” to beat the effects of any interactions in the joint:
+                           
+                              (17)
+                              
+                                 P
+                                 
+                                    
+                                       X
+                                       r
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       ∏
+                                       
+                                          r
+                                          ∈
+                                          V
+                                       
+                                    
+                                 
+                                 
+                                    
+                                       ∑
+                                       
+                                          M
+                                          ∈
+                                          P
+                                          
+                                             Ω
+                                          
+                                          
+                                             ∪
+                                          
+                                          
+                                             o
+                                          
+                                       
+                                    
+                                 
+                                 P
+                                 
+                                    
+                                       X
+                                       r
+                                    
+                                    M
+                                 
+                              
+                           
+                        
+                     
+
+Following several manipulations on (17) (see Appendix B for derivations and rationale), we conclude that maximizing P(X
+                        
+                           r
+                        ) depends mainly on the maximization of the joint P(X
+                        
+                           r
+                        , 
+                           M
+                        ). The latter can be expressed in the following regularized likelihood measure:
+                           
+                              (18)
+                              
+                                 E
+                                 
+                                    
+                                       X
+                                       ,
+                                       
+                                       M
+                                    
+                                 
+                                 =
+                                 −
+                                 
+                                    
+                                       
+                                          
+                                             ∑
+                                             
+                                                r
+                                                ∈
+                                                V
+                                             
+                                          
+                                       
+                                       logP
+                                       
+                                          
+                                             
+                                                
+                                                   X
+                                                   r
+                                                
+                                             
+                                             M
+                                          
+                                       
+                                       −
+                                       
+                                          V
+                                       
+                                       
+                                          
+                                             ∑
+                                             
+                                                m
+                                                ∈
+                                                M
+                                             
+                                          
+                                       
+                                       log
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                   
+                                                      V
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      
+                                                         S
+                                                         
+                                                            m
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+
+A quick examination of (18) reveals that the energy does not concern outliers as defined for use in the GSW sweeps. The likelihood term refers to labels in 
+                           M
+                         only. To cope with this in practice, for the case that some point is labeled outlier by inference, then the worst model posterior is used in the formula. Evidently, the energy measure of (18) resembles the Bayesian information criterion (BIC) [24] in that the first summation is the negative log-likelihood, while the second summation is a regularization term that penalizes the number of models inversely proportionally to the respective number of points in the support sets.
+
+@&#RESULTS@&#
+
+Since PeARL [17] is the closest known method to CSAMMFIT, we used the Oxford buildings dataset [22] as a benchmark for loose comparison with it.
+
+Typically, neighboring points in two-view geometry support the same projectivity, whereas randomly sampled points are unlikely to verify the same model. Hence, a reasonable strategy to obtain the initial set of candidate models would be to randomly sample a point and thereafter, obtain the 3 closest neighbors in the graph.
+
+
+                        Fig. 3
+                         illustrates plane detection using views 1 and 2 of the first Merton College scene (Merton 1) in the Oxford buildings dataset [22]. Fig. 3a and b displays the results obtained with CSAMMFIT; in order to loosely “emulate” PeARL without using graph cuts, we obtained results (Fig. 4
+                        ) using singleton factors with a very large value for a (i.e., outlier labels have very low probability) and the Potts prior of (2).
+
+Typical parameter values were, α
+                        =1.1, β
+                        =0, T
+                        1
+                        =5⋅103 and T
+                        2
+                        =0, number of initial candidate planes, 40 (4 points used for homography estimation), the threshold for model fusion was 0.01 using the Euclidean distance (Frobenius norm) between normalized homography matrices (normalization constant is obtained from the singular value decomposition of the matrix [25]), tolerance for the logarithm of the energy measure was 0.004 and maximum number of iterations, 15. The GSW algorithm is always employed for inference sweeps of 800 Markov chain transitions. The rationale behind this selection relies on the results by Barbu and Zhu [21] favoring the GSW algorithm against graph cuts.
+
+We executed the algorithm with the PeARL energy based configuration using the same parameters that we used with our method. It becomes obvious that PeARL overestimates spurious models, although the energy levels achieved are slightly worse than the ones achieved by CSAMMFIT. At the end of the process, the results obtained with PeARL contain a great deal of spurious models (the few outliers appear as a consequence of using a near-to-but-not-zero outlier posterior of 10−18). This suggests that CSAMMFIT is more robust to lower fusion thresholds than PeARL, owed to the underlying cluster based inference and the use of a context-aware prior.
+
+Results for views 2 and 3 of Merton 1 (Figs. 5 and 6
+                        
+                        ) again suggest that PeARL's energy formulation performs less effectively in grouping similar models; hence the squared errors dominate energy at the expense of the regularization term.
+
+Except for energy formulations, the effects of priors in the results were explored. Figs. 7 and 8
+                        
+                         depict the results obtained with the CSAMMFIT prior and the PeARL prior respectively for views 1 and 2 of Merton 2. As mentioned earlier, the PeARL prior considers the distance between two nodes, but only in absolute terms, whereas the proposed prior uses the edge activation probability to regulate the pairwise penalty. The temperature was increased to T
+                        1
+                        =5⋅104 in order to slightly amplify the effects of prior-imposed grouping in the results.
+
+Please note here that the algorithms will always require initial tuning of a few parameters (namely, α, β, T and the threshold used in model fusion). We note however that CSAMMFIT yields good results for a wide variety of settings, while the PeARL energy appears to be very sensitive to temperature changes. Moreover, the PeARL prior needs to be “hand-tuned” every time a new pair of images is used; this is most likely due to the fact that coefficients w
+                        
+                           r,s
+                         reflect absolute distances. Model fusion is also a process that CSAMMFIT seems to be more robust than PeARL, since it generally produces uniform label assignments just throughout the inference process, while fusion occurs rarely. Figs. 4 and 6 suggest that spurious models are generally resilient to inference in PeARL and therefore, in order to eliminate them, one must increase the fusion threshold. Table 1
+                         reports success rates for the Oxford dataset without counting spurious models as misses; outliers on the other hand do count.
+
+Multiple motions in two views are similarly characterized by bilinear relationships between the tracked points. Thus, it is possible to formulate singletons based on some error function that evaluates model fitness, typically the Sampson distance [8]. For the sake of completeness, we report results obtained from several different pairs of views taken from two sequences in the Hopkins 155 dataset [26]. Illustrative results are shown in Figs. 9 and 10
+                        
+                        .
+
+
+                        Table 2
+                         reports success rates on two different pairs of frames in sequences cars1 and cars2_06 of the Hopkins 155 dataset.
+
+@&#CONCLUSION@&#
+
+An algorithm that fits multiple projective models (or generally, algebraic varieties) to a set of data points matched across views was introduced in this paper. The algorithm treats the problem in terms of probabilistic inference over a MRF, generated by a graph structure obtained from the data points. Inference is performed using the MCMC Metropolis-Hastings generalized Swendsen–Wang clustering for arbitrary distributions. The underlying idea is to, not only consider the errors of fit, but also consider interactions between data points in the image(s), such as distance, local color or gradient histogram differences, etc. and specify suitable priors. A global measure of likelihood (i.e., it characterizes the goodness of fit in an absolute manner) is also devised to evaluate the convergence of the process.
+
+The method is novel to the best of our knowledge, since, with the exception of PeARL, the existing algorithms (RANSAC, MultiRANSAC, J-linkage) that attempt to resolve multiple models do not face the problem in terms of a joint posterior distribution (i.e, priors are absent). On the other hand, PeARL runs graph-cut optimization for an energy function using an error based singleton factor and a simple Potts prior for label uniformity.
+
+The results reported by Isack and Boykov are all in favor of PeARL, so it is logical to compare CSAMFIT with their method. Please note here that detection of multiple varieties in single or multiple view geometry is a process that is inherently parametric. We therefore argue that there can be no absolutely rigorous comparison measure with other methods, since they also perform descent towards local minima, a process which may be affected by numerous parameters. For instance, the number of initial candidate models is clearly a decisive factor affecting how close to the ground truth will the process eventually get. It is possible however, one method to achieve lower energy for a number of initial models, while another that achieves slightly greater energy, requires a significantly smaller number of such models. The trade-off obviously favors the algorithm that achieves results of slightly lower quality but with fewer initial models. Other examples of such differences in process “tuning” include the numerical methods for error and model parameter estimation, the threshold and respective metric in parameter space used for model fusion and the temperature in the prior term.
+
+An essential limitation of PeARL is that graph-cuts work only with certain types of priors (metrics or semi-metrics); hence, it cannot generalize to arbitrary types of constraints, whereas the GSW inference used by CSAMMFIT allows for arbitrary prior formulations; moreover, the proposed CSAMMFIT prior penalizes discontinuities and/or uniformity by considering distances between points in the context of the graph, while PeARL does this only in absolute terms. Also, the PeARL singletons assume labels only from the set of candidate models, while the α–β approximation (i.e., the singleton proposed in this paper) models outliers explicitly; results suggest that this formulation limits the number of spurious models, since inference avoids the weakest models and assigns outlier labels to the respective data points.
+
+Although CSAMMFIT performs well on the Oxford dataset for various parameter settings, it is possible that entirely different circumstances and/or model types may require a certain amount of parameter “tuning”. Parameters α and β heuristically are chosen to be 1.1 and 0 respectively, but in environments with greater numbers of outliers, different values could converge closer to the true minimum. With respect to pairwise interactions, the temperature parameter can generally vary from 5⋅103 to 5⋅105 without significant changes in the results from the Oxford dataset. However, such a variation may cause significant changes in the results when pursuing different types of models in another pair of images. Finally, model fusion accuracy greatly depends on the choice of metric over the parameter space. If the manifold is highly non-linear, Euclidean metrics can easily mislead the fusion process. CSAMMFIT showed great tolerance to spurious models, thereby significantly reducing the need for fusion. The latter suggests that the algorithm can descent “optimally” (i.e., without having to fuse spurious models) given a set of initial models of reasonable quality.
+
+Using Bayes' rule the posterior probability of a model m
+                     
+                        k
+                      given e
+                     
+                        r
+                      is:
+                        
+                           (19)
+                           
+                              P
+                              
+                                 
+                                    
+                                       
+                                          m
+                                          k
+                                       
+                                    
+                                    
+                                       e
+                                       r
+                                    
+                                 
+                              
+                              =
+                              λ
+                              
+                                 
+                                    p
+                                    
+                                       
+                                          
+                                             
+                                                e
+                                                r
+                                             
+                                          
+                                          
+                                             m
+                                             k
+                                          
+                                       
+                                    
+                                    P
+                                    
+                                       
+                                          m
+                                          k
+                                       
+                                    
+                                 
+                                 
+                                    p
+                                    
+                                       
+                                          e
+                                          r
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                  
+
+Using (4) and (19), the posterior of an outlier is obtained:
+                        
+                           (20)
+                           
+                              P
+                              
+                                 
+                                    
+                                       o
+                                    
+                                    
+                                       e
+                                       r
+                                    
+                                 
+                              
+                              =
+                              1
+                              −
+                              λ
+                              
+                                 
+                                    ∑
+                                    
+                                       k
+                                       =
+                                       1
+                                    
+                                    
+                                       M
+                                    
+                                 
+                              
+                              
+                                 
+                                    p
+                                    
+                                       
+                                          
+                                             
+                                                e
+                                                r
+                                             
+                                          
+                                          
+                                             m
+                                             k
+                                          
+                                       
+                                    
+                                    P
+                                    
+                                       
+                                          m
+                                          k
+                                       
+                                    
+                                 
+                                 
+                                    p
+                                    
+                                       
+                                          e
+                                          r
+                                       
+                                    
+                                 
+                              
+                              =
+                              1
+                              −
+                              λ
+                              
+                                 
+                                    ∑
+                                    
+                                       k
+                                       =
+                                       1
+                                    
+                                    
+                                       M
+                                    
+                                 
+                              
+                              
+                                 
+                                    p
+                                    
+                                       
+                                          
+                                             
+                                                e
+                                                r
+                                             
+                                          
+                                          
+                                             m
+                                             k
+                                          
+                                       
+                                    
+                                    P
+                                    
+                                       
+                                          m
+                                          k
+                                       
+                                    
+                                 
+                                 
+                                    λ
+                                    
+                                       
+                                          ∑
+                                          
+                                             n
+                                             =
+                                             1
+                                          
+                                          
+                                             M
+                                          
+                                       
+                                    
+                                    p
+                                    
+                                       
+                                          
+                                             
+                                                e
+                                                r
+                                             
+                                          
+                                          
+                                             m
+                                             n
+                                          
+                                       
+                                    
+                                    p
+                                    
+                                       
+                                          m
+                                          n
+                                       
+                                    
+                                    +
+                                    
+                                       
+                                          1
+                                          −
+                                          λ
+                                       
+                                    
+                                    c
+                                 
+                              
+                           
+                        
+                     
+                  
+
+We now drop data point indexing for simplicity and introduce the notation l
+                     
+                        k
+                     
+                     =
+                     p(e|m
+                     
+                        k
+                     ) for the k-th error likelihood. Assuming a uniform model prior 
+                        p
+                        
+                           
+                              m
+                              k
+                           
+                        
+                        =
+                        
+                           1
+                           
+                              M
+                           
+                        
+                     , the expression in (20) can be rewritten as follows:
+                        
+                           (21)
+                           
+                              P
+                              
+                                 
+                                    
+                                       o
+                                    
+                                    
+                                       e
+                                       r
+                                    
+                                 
+                              
+                              =
+                              1
+                              −
+                              λ
+                              
+                                 1
+                                 
+                                    M
+                                 
+                              
+                              
+                                 
+                                    ∑
+                                    
+                                       k
+                                       =
+                                       1
+                                    
+                                    
+                                       M
+                                    
+                                 
+                              
+                              
+                                 
+                                    l
+                                    k
+                                 
+                                 
+                                    λ
+                                    
+                                       1
+                                       
+                                          M
+                                       
+                                    
+                                    
+                                       
+                                          ∑
+                                          
+                                             n
+                                             =
+                                             1
+                                          
+                                          
+                                             M
+                                          
+                                       
+                                    
+                                    
+                                       l
+                                       n
+                                    
+                                    +
+                                    
+                                       
+                                          1
+                                          −
+                                          λ
+                                       
+                                    
+                                    c
+                                 
+                              
+                              ⇔
+                              P
+                              
+                                 
+                                    
+                                       o
+                                    
+                                    
+                                       e
+                                       r
+                                    
+                                 
+                              
+                              =
+                              1
+                              −
+                              
+                                 
+                                    ∑
+                                    
+                                       k
+                                       =
+                                       1
+                                    
+                                    
+                                       M
+                                    
+                                 
+                              
+                              
+                                 
+                                    l
+                                    k
+                                 
+                                 
+                                    
+                                       
+                                          ∑
+                                          
+                                             n
+                                             =
+                                             1
+                                          
+                                          
+                                             M
+                                          
+                                       
+                                    
+                                    
+                                       l
+                                       n
+                                    
+                                    +
+                                    
+                                       M
+                                    
+                                    
+                                       
+                                          
+                                             1
+                                             −
+                                             λ
+                                          
+                                       
+                                       λ
+                                    
+                                    c
+                                 
+                              
+                              =
+                              1
+                              −
+                              
+                                 1
+                                 
+                                    
+                                       
+                                          ∑
+                                          
+                                             n
+                                             =
+                                             1
+                                          
+                                          
+                                             M
+                                          
+                                       
+                                    
+                                    
+                                       l
+                                       n
+                                    
+                                    +
+                                    
+                                       M
+                                    
+                                    
+                                       
+                                          
+                                             1
+                                             −
+                                             λ
+                                          
+                                       
+                                       λ
+                                    
+                                    c
+                                 
+                              
+                              
+                                 
+                                    ∑
+                                    
+                                       κ
+                                       =
+                                       1
+                                    
+                                    
+                                       M
+                                    
+                                 
+                              
+                              
+                                 l
+                                 k
+                              
+                           
+                        
+                     
+                  
+
+Let now 
+                        ξ
+                        =
+                        
+                           argmax
+                           k
+                        
+                        
+                           
+                              l
+                              k
+                           
+                        
+                      be the index of the greatest likelihood. By factoring l
+                     
+                        ξ
+                      out of the sum in the numerator in (21), the posterior assumes the following form:
+                        
+                           (22)
+                           
+                              P
+                              
+                                 
+                                    
+                                       o
+                                    
+                                    
+                                       e
+                                       r
+                                    
+                                 
+                              
+                              =
+                              1
+                              −
+                              
+                                 
+                                    l
+                                    ξ
+                                 
+                                 
+                                    
+                                       
+                                          ∑
+                                          
+                                             n
+                                             =
+                                             1
+                                          
+                                          
+                                             M
+                                          
+                                       
+                                    
+                                    
+                                       l
+                                       n
+                                    
+                                    +
+                                    
+                                       M
+                                    
+                                    
+                                       
+                                          
+                                             1
+                                             −
+                                             λ
+                                          
+                                       
+                                       λ
+                                    
+                                    c
+                                 
+                              
+                              
+                                 
+                                    ∑
+                                    
+                                       κ
+                                       =
+                                       1
+                                    
+                                    
+                                       M
+                                    
+                                 
+                              
+                              
+                                 
+                                    l
+                                    k
+                                 
+                                 
+                                    l
+                                    ξ
+                                 
+                              
+                           
+                        
+                     
+                  
+
+Setting 
+                        α
+                        =
+                        
+                           
+                              ∑
+                              
+                                 κ
+                                 =
+                                 1
+                              
+                              
+                                 M
+                              
+                           
+                        
+                        
+                           
+                              l
+                              k
+                           
+                           
+                              l
+                              ξ
+                           
+                        
+                      and 
+                        =
+                        
+                           M
+                        
+                        
+                           
+                              
+                                 1
+                                 −
+                                 λ
+                              
+                           
+                           λ
+                        
+                        c
+                     , Eq. (22) yields:
+                        
+                           (23)
+                           
+                              P
+                              
+                                 
+                                    
+                                       o
+                                    
+                                    
+                                       e
+                                       r
+                                    
+                                 
+                              
+                              =
+                              1
+                              −
+                              
+                                 
+                                    α
+                                    
+                                       l
+                                       ξ
+                                    
+                                 
+                                 
+                                    
+                                       
+                                          ∑
+                                          
+                                             n
+                                             =
+                                             1
+                                          
+                                          
+                                             M
+                                          
+                                       
+                                    
+                                    
+                                       l
+                                       n
+                                    
+                                    +
+                                    β
+                                 
+                              
+                           
+                        
+                     
+                  
+
+Quantity α is lower bounded by 1 and upper bounded by |
+                        M
+                     |. It characterizes the quality of a set of candidate models; if this set is close to (or contains) the ground truth models, then, naturally, the likelihood associated to one specific model will be much greater than all other likelihood terms; hence α will be very close to 1. Quantity β can be considered as a measure of outlier presence in the population of data points.
+
+Clearly, parameters α and β are heuristically selected and can be fine-tuned throughout consecutive inference sweeps. However, a fairly reasonable initial choice would be α
+                     =1 and β
+                     =1. Choosing α
+                     =1 would imply that the quality of the solution is far better than the one of any other candidate, something which is generally true (but not always). On the other hand, choosing β
+                     =0 implies that λ
+                     ≫1−
+                     λ and therefore the probability of a point being an inlier is very high, which also is true in many sequences (but not a general rule).
+
+Formally stated, the distribution of label assignments to a data point r, in terms of the sample space Ω and its subsets can be expressed as the following marginal over all possible model subsets:
+                        
+                           (24)
+                           
+                              P
+                              
+                                 
+                                    X
+                                    r
+                                 
+                              
+                              =
+                              
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                ∑
+                                                
+                                                   M
+                                                   ∈
+                                                   P
+                                                   
+                                                      Ω
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      
+                                                         P
+                                                         
+                                                            
+                                                               X
+                                                               r
+                                                            
+                                                            M
+                                                         
+                                                         ,
+                                                      
+                                                      
+                                                         
+                                                            X
+                                                            r
+                                                         
+                                                         ≠
+                                                         o
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          1
+                                          −
+                                          
+                                             
+                                                ∑
+                                                
+                                                   M
+                                                   ∈
+                                                   P
+                                                   
+                                                      Ω
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      
+                                                         P
+                                                         
+                                                            
+                                                               X
+                                                               r
+                                                            
+                                                            M
+                                                         
+                                                         ,
+                                                      
+                                                      
+                                                         
+                                                            X
+                                                            r
+                                                         
+                                                         =
+                                                         o
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     where 
+                        P
+                        
+                           Ω
+                        
+                      is the power set of Ω.
+
+In this global model, it is reasonable to assume conditional independence between any two labels X
+                     
+                        r
+                      and X
+                     
+                        q
+                     , since all possible model subsets are taken into consideration in the marginal distribution and therefore, the singletons should be “strong” enough to beat the effects of any interactions in the joint:
+                        
+                           (25)
+                           
+                              P
+                              
+                                 X
+                              
+                              =
+                              
+                                 
+                                    ∏
+                                    
+                                       r
+                                       ∈
+                                       V
+                                    
+                                 
+                              
+                              
+                                 
+                                    ∑
+                                    
+                                       M
+                                       ∈
+                                       P
+                                       
+                                          Ω
+                                       
+                                       
+                                          ∪
+                                       
+                                       
+                                          o
+                                       
+                                    
+                                 
+                              
+                              P
+                              
+                                 
+                                    X
+                                    r
+                                 
+                                 M
+                              
+                           
+                        
+                     
+                  
+
+Since outliers and models are competing for more likelihood across data points, an optimal joint assignment of labels X
+                     
+                        opt
+                      to the dataset can be thought as the one that minimizes the probability of outliers in the joint. In other words,
+                        
+                           (26)
+                           
+                              
+                                 X
+                                 opt
+                              
+                              =
+                              
+                                 argmin
+                                 X
+                              
+                              
+                                 
+                                    
+                                       
+                                          ∏
+                                          
+                                             r
+                                             ∈
+                                             V
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          1
+                                          −
+                                          
+                                             
+                                                ∑
+                                                
+                                                   M
+                                                   ∈
+                                                   P
+                                                   
+                                                      Ω
+                                                   
+                                                
+                                             
+                                          
+                                          P
+                                          
+                                             
+                                                X
+                                                r
+                                             
+                                             M
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                  
+
+Let 
+                        P
+                        
+                           
+                              X
+                              r
+                           
+                           m
+                        
+                      the greatest joint probability over all X
+                     
+                        r
+                      and 
+                        M
+                     . By factoring out this joint, (26) becomes:
+                        
+                           (27)
+                           
+                              X
+                              =
+                              
+                                 argmax
+                                 X
+                              
+                              
+                                 
+                                    
+                                       
+                                          ∏
+                                          
+                                             r
+                                             ∈
+                                             V
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          P
+                                          
+                                             
+                                                X
+                                                r
+                                             
+                                             m
+                                          
+                                          
+                                             
+                                                ∑
+                                                
+                                                   
+                                                      
+                                                         M
+                                                         ∈
+                                                         P
+                                                         
+                                                            Ω
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      
+                                                         M
+                                                         ≠
+                                                         m
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                P
+                                                
+                                                   
+                                                      X
+                                                      r
+                                                   
+                                                   M
+                                                
+                                             
+                                             
+                                                P
+                                                
+                                                   
+                                                      
+                                                         X
+                                                         r
+                                                      
+                                                      ,
+                                                      
+                                                      m
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                  
+
+Eq. (27) implies that maximizing the global likelihood is practically a problem of finding an optimal subset of Ω and maximizing the joint assignment for this set of models. Hence, to “push” P(X) to its maximum value, one needs to maximize P(X
+                     
+                        r
+                     |
+                        M
+                     )P(
+                        M
+                     ) where 
+                        M
+                      is a set of model-only labels (i.e., does not contain the outlier label). The latter implies that the likelihood of the joint P(X,
+                        M
+                     ) can be used as a global energy measure:
+                        
+                           (28)
+                           
+                              E
+                              
+                                 
+                                    X
+                                    ,
+                                    
+                                    M
+                                 
+                              
+                              =
+                              −
+                              
+                                 
+                                    
+                                       ∑
+                                       
+                                          r
+                                          ∈
+                                          V
+                                       
+                                    
+                                    
+                                       logP
+                                       
+                                          
+                                             
+                                                
+                                                   X
+                                                   r
+                                                
+                                             
+                                             M
+                                          
+                                       
+                                       +
+                                       
+                                          V
+                                       
+                                       logP
+                                       
+                                          M
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                  
+
+The prior P(
+                        M
+                     ) is estimated as a Bernoulli product, such that each of the models in 
+                        M
+                      corresponds to one (of many) combination of 
+                        
+                           V
+                        
+                      nodes in a group of size equal to the size of support of the respective support, 
+                        S
+                        
+                           m
+                        
+                     :
+                        
+                           (29)
+                           
+                              P
+                              
+                                 M
+                              
+                              =
+                              
+                                 
+                                    ∏
+                                    
+                                       m
+                                       ∈
+                                       
+                                          M
+                                          t
+                                       
+                                    
+                                 
+                              
+                              
+                                 1
+                                 
+                                    
+                                       
+                                          
+                                             
+                                             
+                                                V
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                
+                                                   S
+                                                   
+                                                      m
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     where 
+                        
+                           
+                              
+                                 
+                                    
+                                    n
+                                 
+                              
+                              
+                                 
+                                    k
+                                 
+                              
+                           
+                        
+                        =
+                        
+                           
+                              n
+                              !
+                           
+                           
+                              
+                                 
+                                    n
+                                    −
+                                    k
+                                 
+                              
+                              !
+                              k
+                              !
+                           
+                        
+                     . By substituting (29) in (28), we obtain the following expression for the global energy measure:
+                        
+                           (30)
+                           
+                              E
+                              
+                                 
+                                    X
+                                    ,
+                                    
+                                    M
+                                 
+                              
+                              =
+                              −
+                              
+                                 
+                                    
+                                       
+                                          ∑
+                                          
+                                             r
+                                             ∈
+                                             V
+                                          
+                                       
+                                    
+                                    logP
+                                    
+                                       
+                                          
+                                             
+                                                X
+                                                r
+                                             
+                                          
+                                          M
+                                       
+                                    
+                                    −
+                                    
+                                       V
+                                    
+                                    
+                                       
+                                          ∑
+                                          
+                                             m
+                                             ∈
+                                             
+                                                M
+                                                t
+                                             
+                                          
+                                       
+                                    
+                                    log
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                
+                                                   V
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   
+                                                      S
+                                                      
+                                                         m
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     
+                  
+
+The problem with the energy expression in (30) is that it regards all data points as inliers, whereas the GSW joint contains outliers. To circumvent this “incompatibility”, the smallest model likelihood is used for data points labeled as outliers. This is a valid choice since, although it will be much lower than the GSW un-normalized negative log-likelihood, it will nevertheless be comparable to the energy obtained by a GSW sweep over another set of candidate models.
+
+@&#REFERENCES@&#
+

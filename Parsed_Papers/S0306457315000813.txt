@@ -1,0 +1,1592 @@
+@&#MAIN-TITLE@&#Design and evaluation of a parallel algorithm for inferring topic hierarchies
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We propose a novel parallel Algorithm for inferring topic hierarchies using HLDA.
+
+
+                        
+                        
+                           
+                           We use loosely-coupled parallel tasks that do not require frequent synchronization.
+
+
+                        
+                        
+                           
+                           The parallel Algorithm is well-suited to be run on distributed computing systems.
+
+
+                        
+                        
+                           
+                           The proposed Algorithm achieves a predictive accuracy on par with that of HLDA.
+
+
+                        
+                        
+                           
+                           The parallel Algorithm exhibits a near-linear speed-up and scales well.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Topic modeling
+
+Hierarchical clustering
+
+Information retrieval
+
+Parallel algorithm
+
+Cluster computing
+
+Message passing interface
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  The rapid growth of information in the digital world especially on the web, calls for automated methods of organizing the digital information for convenient access and efficient information retrieval. Topic modeling is a branch of machine learning and probabilistic graphical modeling that helps in arranging the web pages according to their topical structure. The topic distribution over a set of documents (web pages) and the affinity of a document toward a specific topic can be revealed using topic modeling. Topic modeling algorithms are typically computationally expensive due to their iterative nature. Recent research efforts have attempted to parallelize specific topic models and are successful in their attempts. These parallel algorithms however have tightly-coupled parallel processes which require frequent synchronization and are also tightly coupled with the underlying topic model which is used for inferring the topic hierarchy. In this paper, we propose a parallel algorithm to infer topic hierarchies from a large scale document corpus. A key feature of the proposed algorithm is that it exploits coarse grained parallelism and the components running in parallel need not synchronize after every iteration, thus the algorithm lends itself to be implemented on a geographically dispersed set of processing elements interconnected through a network. The parallel algorithm realizes a speed up of 53.5 on a 32-node cluster of dual-core workstations and at the same time achieving approximately the same likelihood or predictive accuracy as that of the sequential algorithm, with respect to the performance of Information Retrieval tasks.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Automated algorithms and models are required to tackle the scale of the World Wide Web, so that the documents in the web can be automatically organized according to their underlying semantics and any search for information, can be efficiently facilitated. Topics represent the key semantics of a set of documents in a terse manner (Blei, Griffiths, & Jordan, 2010). Topic models are probabilistic graphical models, which have been built by researchers to automatically infer the distribution over a set of topics in a document or across a document set. After the latent topic inference, the document corpus can be organized according to the topics inferred and hence the performance of the subsequent information-retrieval tasks can be enhanced (Blei et al., 2010).
+
+The huge amount of information in the web is growing everyday with the evolution of new technologies and web portals like Flickr, Yahoo!, Orkut, Facebook, Twitter, and Google. Such web-scale datasets pose a non-trivial problem to probabilistic graphical model learning algorithms, in the form of the time and space complexity needs of the algorithm (Newman, Asuncion, Smyth, & Welling, 2009). An important aspect of these learning algorithms which is detrimental to their performance is that they are iterative in nature and might run for thousands of iterations before convergence.
+
+An iteration of these model building algorithms typically involves computing Bayesian conditional probability estimates of words over different topics in the document corpus (Newman et al., 2009). As there are of the order of millions of words in any web-scale document store, the time required for computing and the memory needed for storing these probability estimates are very high. Thus, the memory available in a typical workstation computer is not sufficient to store the probability estimates and even if we assume the existence of sufficient memory, a model building algorithm might run for weeks before converging to a useful optima, if run on a single processor (Newman et al., 2009).
+
+Further with the advent of novel parallel processing platforms like MPI, Open-MP, CUDA and Hadoop there is a pressing requirement to exploit the available processing power of the underlying parallel computer (Multi-core, GPU, cluster of compute nodes). Hence there is an imminent and mandatory need to port state-of-the-art sequential model learning algorithms to their parallel variants to make these algorithms run on web-scale corpuses and to speed them up. Even for document sets that are not of web-scale, their processing can be speed-up considerably by using the parallel variants of the model learning algorithms and the topic models constructed can be used for online applications.
+
+Recent research efforts have focussed on parallelizing the learning of a single topic model like Hierarchical Latent Dirichlet Allocation (HLDA). The individual parallel iterations in these algorithms (Newman et al., 2009) are tightly coupled and require a global synchronization step to aggregate all the local parameters of the model from the individual processing elements to get a global set of parameters to be used for the next iteration. This arguably discourages the application of these algorithms to processing elements that are geographically distributed; this geographical distribution is now inevitable with the advent of the grid/cloud computing paradigms. These algorithms also have synchronization overheads and a limited application to a specific topic model. With the arrival of novel topic models, it would be desirable to have a reasonably generic algorithm that can parallelize the learning of a group of similar topic models to be run on a parallel computer.
+
+From an orthogonal point of view, the parallel algorithm proposed in this paper can also help in boosting the performance of Information Retrieval (IR) applications by providing a generic parallel framework that can merge compatible topic models generated by disparate learning algorithms and can provide an efficient aggregate topic model to work with.
+
+Latent Dirichlet Allocation (LDA) is one of the popular models to infer a set of topics and their distribution across a set of documents in a corpus (Blei, Ng, & Jordan, 2003). The model infers only a flat set of topics based on the concept of co-occurrence of words; to adapt the LDA model to infer a hierarchy of topics, an extended version of LDA called Hierarchical LDA (HLDA) was proposed by Blei et al. (2010). HLDA is motivated by the nested Chinese Restaurant Process (nCRP) to form a hierarchy of topics, in such a way that generic topics are near the top of the tree and as we descend the tree, we see levels containing specific or more concrete topics (Blei et al., 2010). The HLDA training is expensive in terms of computations and hence parallelization becomes inevitable.
+
+In this paper, we propose a parallel algorithm for discovering topic hierarchies from web-scale document corpuses. Following are the major contributions of this paper to the existing literature on topic hierarchy formation:
+                        
+                           •
+                           Proposes a novel parallel algorithm to parallelize topic models similar to HLDA.
+
+Proposes a parallel algorithm that involves loosely-coupled parallel components which do not require frequent synchronization.
+
+Adopts a novel merging strategy to merge the topic trees generated by different processors in parallel.
+
+Compares the efficiency of different distance metrics like quadratic chi-histogram distance, earth mover’s distance and KL-divergence in measuring the similarity between two topic trees.
+
+Empirically show cases the performance of the proposed parallel algorithm by parallelizing the HLDA model.
+
+Section 2 discusses some of the related research efforts and also highlights the key similarities and differences between our work and the existing research efforts. Section 3 details the preliminaries of the HLDA graphical model, which is followed by a discussion on the proposed parallel algorithm in Section 4. Section 5 highlights some of the key empirical observations while testing the algorithm, and the next section summarizes and concludes the paper with some pointers for future research.
+
+@&#RELATED WORK@&#
+
+Newman et al. proposed a scalable parallel topic modeling algorithm (Newman, Smyth, & Steyvers, 2006) to infer topics from a corpus containing billions of documents. For parallelizing the inference of latent variables through Gibbs sampling, the authors have used OpenMP across Shared Memory Processors. Their empirical experiments depict that the topic model computations on an eight-processor system achieved a 7× speed-up over a single processor. Asuncion et al. proposed two asynchronous distributed algorithms for LDA and Hierarchical Dirichlet Process (HDP) (Asuncion, Smyth, & Welling, 2008). Each processor executes Gibbs sampling on a subset of the documents allocated to it. The asynchronous algorithm is found to yield a log-likelihood score comparable to that of its synchronous variants; it also runs faster and consumes less memory than the synchronous algorithms. This is considered to be a seminal work that led to the development of parallel HDP samplers.
+
+The GraphLab project (GraphLab) has architected a parallel topic modeling framework, which uses LDA and an asynchronous collapsed Gibbs Sampling algorithm to group documents into coherent topics. The clusters identified can be used for efficiently supporting IR tasks, with the help of an API exposed by the GraphLab framework. The algorithm operates in three phases (gather, apply and scatter) and constructs a bipartite graph between documents and terms, to infer the latent assignment of the terms in documents to topics.
+
+As an extension to their earlier work (Newman et al., 2006) Newman et al. proposed two distributed algorithms (Newman et al., 2009) respectively for LDA and HDP. The first algorithm infers a flat set of topics and the second infers a hierarchy of topics. After mapping documents to processors, the first algorithm makes each processor infer a set of topics on the local document set by executing a local Gibbs sampler per processor. The parallel iterations are synchronized periodically to update the global topic proportions from processor-specific local topical values. The second algorithm runs the hierarchical Bayesian HLDA in parallel on a set of documents assigned to individual processors. The topic hierarchies generated are then fused into a single consistent topic hierarchy, using bipartite graph matching or using topic IDs. However, the distributed LDA algorithms might infer inferior topic models, when the parameter synchronization is done sporadically between the processing elements (Newman et al., 2009).
+
+Wang et al. proposed an algorithm for Parallel Latent Dirichlet Allocation (PLDA) for large scale applications such as community recommendation and document summarization on MPI and MapReduce (Wang, Bai, Stanton, Chen, & Chang, 2009). The parallel algorithm predominantly uses the AllReduce operation in MPI and the shuffle-operation of the key-value pairs in MapReduce. The algorithm yielded a speed-up of 436 when run on a cluster containing 1024 machines and an open source implementation has been released by the authors under the Apache License.
+
+A parallel algorithm for inferring topics using LDA has been proposed by Smola and Narayanamurthy (2010); the algorithm makes use of an intelligent distributed storage sub-system to synchronize the inferred latent variables across the distributed local Gibbs samplers. It reduces the synchronization overhead by performing communication, computation and synchronization phases in parallel at the same time step. A distributed algorithm is proposed by Jay and Peter (2012) to infer a topic hierarchy from a web-scale document corpus. Initially the algorithm constructs a topic hierarchy from the available pool of initial documents. Upon arrival of a new set of documents, the initially built topic hierarchy is split into multiple sub-trees and sent to the available processors to merge the new document set with the nodes in the sub-trees at different levels of topical abstraction.
+
+A scalable strategy to perform topic inference using probabilistic graphical models is proposed by Ahmed, Aly, Gonzalez, Narayanamurthy, and Smola (2012). A key novelty of their work is an incremental aggregation strategy to synchronize the global topic proportions with the local proportions and an efficient approximation strategy for look-ahead sampling to account for the new data that is not yet sampled. Three parallel algorithms were proposed by Seshadri and Shalinie (2015) for merging topic trees generated by threads executing on different cores of a multi-core processor; these algorithms are suitable to be implemented only on a single multi-core workstation and further require extensive locking to ensure that the topic trees generated by different cores are merged into a single tree without running into race conditions among the threads. A ‘communication aware parallel algorithm’ for topic inference was proposed by Yan, Zeng, Liu, and Gao (2013). The algorithm uses belief propagation and is motivated by the power law to select few terms as power terms and associates every power term with a ‘power-topic’ that yields the largest likelihood in the current parallel iteration (Yan et al., 2013). It also has an appropriate logic to select each word and topic, for the power set, in at least one of the parallel iterations in the algorithm so that the algorithm will eventually converge. The empirical experiments performed by the authors reveal that the algorithm is communication efficient and achieves better accuracy than its then contemporary counterparts (Yan et al., 2013).
+
+To the best of our knowledge we could not find any mature work for devising model agnostic generic parallel algorithms to parallelize the inference of topic models. Following are the key differences between the work described in this section and our work:
+                        
+                           •
+                           Compared to the proposed algorithm, these algorithms have tightly coupled parallel components in terms of both parallel iterations and concurrent processes.
+
+Our algorithm does not require a global synchronization step at the end of each fine-grained parallel iteration.
+
+Our approach uses a novel graph-theoretic merge strategy to aggregate the topic models produced by the individual processing elements.
+
+Though our algorithm show cases its applicability using HLDA, with some effort, it can be adapted to parallelize other hierarchical topic models similar to HLDA.
+
+It can also be used as a parallel boosting framework to aggregate different yet compatible topic models to enhance the performance of several IR tasks.
+
+HLDA uses a stochastic process called ‘nested Chinese Restaurant Process’ (nCRP) (Blei et al., 2010) to set a prior probability over the various topic hierarchies that can be inferred from the document corpus. nCRP is used to arrive at a generative process that is assumed to have generated the document corpus, based on a latent topic hierarchy. The hierarchy is characterized as a multi-way tree that comprises a set of nodes representing topics and each topic is a distribution over a set of words. Each path in the multi-way tree from the root to a leaf node is supposed to contain a set of hierarchically related topics with the generic topics near the top and concrete topics near the bottom levels of the tree (Blei et al., 2010). nCRP allocates every document to one of the paths in the tree, after which it picks a topic in the path according to the GEM distribution over the topics in the path (Blei et al., 2010). A word for the document is picked according to the word distribution of the topic drawn from the GEM distribution. This probabilistic generative process has to be backtracked to infer the latent topic hierarchy underlying the document corpus.
+
+Finally, topic inference is done through approximation methods such as Markov Chain Monte Carlo (MCMC) algorithm that determines the posterior distribution over the topic hierarchies, levels in the hierarchy and the mapping of documents to topic proportions, using a sampling technique called ‘Collapsed Gibbs Sampling’ (Andrieu, de Freitas, Doucet, & Jordan, 2003; Liu, 1994; Markov, 1971). Typically topic inference is iterative in nature that requires repeatedly sampling latent parameters given the document corpus and other fixed latent parameters in the current sampling iteration (Blei et al., 2010). Even after marginalizing out latent variables that are not of significant interest, the topic inference is known to be a computationally intensive process, due to the large number of sampling iterations before convergence (Blei et al., 2010) and a handful of relevant latent variables. This calls for devising efficient ways to parallelize the task of hierarchical topic inference.
+
+The main objective of this paper is to evolve a reasonably generic and efficient skeleton for parallelization to infer a hierarchy of topics from a set of documents. The inferred hierarchy holds the distribution of topics over words at various levels of topical abstraction. Such a topic hierarchy can be used in retrieving related topics and their associated documents. This in turn paves the way for better organization of large voluminous data and for subsequently searching the document corpus efficiently. Though we have used the HLDA model to demonstrate our parallelization strategy, the algorithm is designed to be reasonably model agnostic and can be used with graphical models compatible with HLDA. A probabilistic graphical model is assumed to be compatible with HLDA if:
+                        
+                           (i)
+                           It infers a hierarchy of topics, in which each topic is construed as a probability distribution over words.
+
+The topic tree generated contains generic topics (topics having higher entropy) near the root and concrete topics (topics having relatively lower entropy) near the leaf-levels in the topic tree.
+
+The parallel algorithm operates in two phases: (i) Phase 1: Inference of local topic hierarchy and (ii) Phase 2: Global topic hierarchy generation by merging the local hierarchies. Data parallelism is achieved by dividing the documents in the corpus equally among the available processing elements (PE). The bootstrap values for the parameters of the topic model are set globally and are then broadcast to all the PEs. For instance, the HLDA model needs the following parameters: α-Dirichlet parameter, η-topic hyper-parameter and γ-nCRP parameter that characterizes the stochastic nCRP (Blei et al., 2010). Every PE operates in parallel and infers a topic hierarchy to model the local subset of the documents assigned to the PE. Fig. 1
+                         and Algorithm 1 depicts the data parallel execution of the model-learning algorithm in Phase 1, which results in several hierarchical topic trees. It is worth mentioning that, as the PEs operate independent of each other, every PE is able to use any probabilistic topic model to generate the topic tree, provided the models used by different PEs are compatible with each other. The local topic hierarchies produced by the PEs during Phase 1 are then merged to form a single consistent topic hierarchy in Phase 2 of the parallel algorithm. In other words, pairs of trees that have a relatively higher topical similarity are merged in parallel to arrive at a single consistent topic tree. The process of merging in Phase 2 involves several sub-processes, which are detailed in the subsequent sections.
+
+Prior to the merging of the local topic trees, the following two pre-processing steps are performed on the local topic trees to make them amenable for the merging algorithm and to reduce the running time of the parallel implementation.
+                           
+                              (i)
+                              Topic summary construction.
+
+Pruning generic node chains (an optional pre-processing step).
+
+A map data structure is created for every node in the tree to hold the distribution over words associated with the corresponding topic. The internal non-leaf nodes host a consolidated summary of all its descendants. The root node of the topic tree contains a summary representing all the sub-trees/sub-topics present in the topic tree. Along with the word distribution every node also contains the set of document identifiers (docIds) assigned to the node/topic. The set of docIds is maintained using a set data structure.
+
+This is an optional step introduced to prune long chains of generic nodes near the root of the local trees as depicted in Fig. 2
+                           . These long chains of generic nodes correspond to a sequence of topics with just a minor shade of difference in the abstraction level of different topics along the chain. As we have empirically observed in the model constructed by the nCRP stochastic process, this variation is too trivial to treat the topics along the chain as different topics in many cases. However, if there is some path in the tree from the root until the leaf without any branching nodes, such paths are not subjected to this pre-processing step. This is an optional pre-processing step, which typically does not seem to affect the likelihood of the resultant topic tree.
+
+At the end of the pre-processing step, we obtain several local topic trees populated with their node summaries. These individual topic hierarchy trees are to be merged into a single consistent topic tree. The process of merging involves a Selective Breadth First Search (SBFS) through the reference tree to find out the exact merge-point at which another tree could be merged. This process is explained in the following sub-sections that detail Phase 2 of the parallel algorithm.
+
+The set of topic trees generated in Phase 1 of the parallel algorithm is put into an input queue. PEs split the input trees into equivalence classes of similar topical trees and these equivalence classes of trees are enqueued into a work queue. Processing elements pick up these equivalence classes, one class per PE from the work queue to merge all the topical trees in an equivalence class. The single merged tree is enqueued into an output queue. For the next parallel iteration the output queue of the previous iteration becomes the input queue and vice-versa.
+
+This repeated application of equivalence class computation, merging the topical trees in an equivalence class into a single tree and storing the merged tree in the output queue continues, until there is just one tree in the output queue. Even with the assumption that every equivalence class just contains two trees, the number of parallel iterations cannot exceed O(log
+                        2 (k/2)), where k is the number of topic trees generated by Phase 1 of the parallel algorithm. In shared memory parallel processing systems, the queues can be maintained in the shared heap memory and access to these queues can be synchronized through locks. In distributed memory parallel programming systems, a separate queuing server like MQServer can be made use of to store the temporary work items. Phase 2 of the parallel algorithm is depicted in Algorithm 2 and the algorithms to compute the distance between two topic trees, determining equivalence classes and merging the topic trees in an equivalence class are explained in the subsequent sub-sections.
+
+Let T
+                           1, T
+                           2,
+                           ...
+                           ,
+                           Tk
+                            be the set of trees produced by all the processing elements after the pre-processing step. Initially, a k
+                           ×
+                           k matrix M is formed in which an entry M[i,
+                           j] represents how dissimilar the trees Ti and Tj
+                            are. This dissimilarity is measured in terms of the dissimilarity between the distribution of words stored in the root of the trees Ti
+                            and Tj
+                           . We have compared the KL-Divergence (Kullback & Leibler, 1951), Earth Mover’s distance (Rubner, Tomasi, & Guibas, 2000) and the quadratic chi-histogram distance (Pele & Werman, 2010) metrics with respect to the likelihood of the resultant merged topic tree in Section 5. We have followed the same notations as that in Kullback and Leibler (1951) and Pele & Werman, 2010 for defining KL-divergence and the quadratic chi-histogram distance. For instance, the KL Divergence (akin to the other metrics listed above) computes the distance between two word distributions U and V. The KL Divergence of V from U is given by Eq. (1) as,
+                              
+                                 (1)
+                                 
+                                    
+                                       
+                                          Dist
+                                       
+                                       
+                                          KL
+                                       
+                                    
+                                    (
+                                    U
+                                    ,
+                                    V
+                                    )
+                                    =
+                                    
+                                       
+                                          
+                                             ∑
+                                          
+                                          
+                                             j
+                                          
+                                       
+                                    
+                                    ln
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         U
+                                                      
+                                                      
+                                                         j
+                                                      
+                                                   
+                                                
+                                                
+                                                   
+                                                      
+                                                         V
+                                                      
+                                                      
+                                                         j
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          U
+                                       
+                                       
+                                          j
+                                       
+                                    
+                                 
+                              
+                           
+                           
+                              
+                                 
+                                    
+                                    
+                                       
+                                          Algorithm 2: Parallel_Topic_Hierarchy_builder_phase 2
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             
+                                                Input:
+                                                
+                                              
+                                             Input queue Q containing set of trees T1, T2,
+                                             
+                                             ...
+                                             
+                                             ,
+                                             
+                                             Tk produced by Phase 1 of the parallel algorithm
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                Output:
+                                              
+                                             Single output tree To
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             0.
+                                             
+                                             Iq, Wq, Oq are the input, work and output queues respectively
+                                          
+                                       
+                                       
+                                          
+                                             1.
+                                             
+                                             Compute the dissimilarity matrix Mk×k in which M[i, j]
+                                             =
+                                                dist(root(Ti)
+                                             
+                                             →
+                                             
+                                             distribution,root(Tj)
+                                             →
+                                             distribution)
+                                          
+                                       
+                                       
+                                          
+                                             2.
+                                             
+                                             Compute the equivalence classes of similar topical trees and enqueue them in the Work Queue Wq
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             3.
+                                             
+                                             For all PE1, PE2,
+                                             
+                                             ...
+                                             
+                                             ,
+                                             
+                                             PEp do in parallel {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             3.1 if (|Wq|≠0) do {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             3.1.1. E = dequeue(Wq)
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             3.1.2. while (|E|≠1) do {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             
+                                             3.1.2.1. pick any two trees T1 and T2 from E
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             
+                                             3.1.2.2. E = E ⋃ Merge_Two_Topic_Trees(T1, T2)
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             }
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             3.1.3. enqueue(Oq, E)
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             }
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             }
+                                          
+                                       
+                                       
+                                          
+                                             4.
+                                             
+                                             if (|Oq|==1) then {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             4.1. Dequeue(Oq) and return the reference of the single tree in Oq to the caller.
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             else
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             4.2. set Iq
+                                             
+                                             
+                                             ←
+                                             
+                                             Oq
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             4.3. set Oq
+                                             
+                                             
+                                             ←
+                                             
+                                             Iq and k
+                                             
+                                             ←
+                                             |Iq|
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             4.4. Goto step 1
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             }
+                                          
+                                       
+                                    
+                                 
+                              
+                           Similarly Earth Mover’s distance can be defined as the aggregate distance-weighted amount of probability values to be moved between different bins to make histogram U exactly similar to the other histogram V (Rubner et al., 2000). This can be computed using the Hungarian Algorithm after recasting the distance finding problem as a transportation problem (Rubner et al., 2000). To compute the quadratic chi-histogram distance (Distchi
+                           ) (Pele & Werman, 2010), we initially compute the bin-similarity matrix S, in which an entry S[i,
+                           j] is 1 if the ith word in the bin U is the same as the jth word in V (Ui
+                            and Vj
+                            are the corresponding probabilities), or if the words represented by i and j are synonyms according to wordnet, otherwise S[i,
+                           j] is 0. After computing the bin-similarity matrix, the distance Distχ
+                            is computed using Eq. (2) (Pele & Werman, 2010), n is a normalization constant.
+                              
+                                 (2)
+                                 
+                                    
+                                       
+                                          Dist
+                                       
+                                       
+                                          χ
+                                       
+                                    
+                                    (
+                                    U
+                                    ,
+                                    V
+                                    )
+                                    =
+                                    
+                                       
+                                          
+                                             
+                                                ∑
+                                             
+                                             
+                                                ij
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               
+                                                                  
+                                                                     
+                                                                        U
+                                                                     
+                                                                     
+                                                                        i
+                                                                     
+                                                                  
+                                                                  -
+                                                                  
+                                                                     
+                                                                        V
+                                                                     
+                                                                     
+                                                                        i
+                                                                     
+                                                                  
+                                                               
+                                                               
+                                                                  
+                                                                     
+                                                                        ∑
+                                                                     
+                                                                     
+                                                                        m
+                                                                     
+                                                                  
+                                                                  
+                                                                     
+                                                                        (
+                                                                        (
+                                                                        
+                                                                           
+                                                                              U
+                                                                           
+                                                                           
+                                                                              m
+                                                                           
+                                                                        
+                                                                        +
+                                                                        
+                                                                           
+                                                                              V
+                                                                           
+                                                                           
+                                                                              m
+                                                                           
+                                                                        
+                                                                        )
+                                                                        S
+                                                                        [
+                                                                        m
+                                                                        ,
+                                                                        i
+                                                                        ]
+                                                                        )
+                                                                     
+                                                                     
+                                                                        n
+                                                                     
+                                                                  
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               
+                                                                  
+                                                                     
+                                                                        U
+                                                                     
+                                                                     
+                                                                        j
+                                                                     
+                                                                  
+                                                                  -
+                                                                  
+                                                                     
+                                                                        V
+                                                                     
+                                                                     
+                                                                        j
+                                                                     
+                                                                  
+                                                               
+                                                               
+                                                                  
+                                                                     
+                                                                        ∑
+                                                                     
+                                                                     
+                                                                        m
+                                                                     
+                                                                  
+                                                                  
+                                                                     
+                                                                        (
+                                                                        (
+                                                                        
+                                                                           
+                                                                              U
+                                                                           
+                                                                           
+                                                                              m
+                                                                           
+                                                                        
+                                                                        +
+                                                                        
+                                                                           
+                                                                              V
+                                                                           
+                                                                           
+                                                                              m
+                                                                           
+                                                                        
+                                                                        )
+                                                                        S
+                                                                        [
+                                                                        m
+                                                                        ,
+                                                                        j
+                                                                        ]
+                                                                        )
+                                                                     
+                                                                     
+                                                                        n
+                                                                     
+                                                                  
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   S
+                                                   [
+                                                   i
+                                                   ,
+                                                   j
+                                                   ]
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           With the exception of KL-Divergence the other distance metrics discussed above are symmetric in nature. We have used a symmetric variant of KL-Divergence called Jensen Shannon (JS) divergence (Eq. (3)) in our experiments.
+                              
+                                 (3)
+                                 
+                                    
+                                       
+                                          Dist
+                                       
+                                       
+                                          JS
+                                       
+                                    
+                                    (
+                                    U
+                                    ,
+                                    V
+                                    )
+                                    =
+                                    
+                                       
+                                          
+                                             
+                                                Dist
+                                             
+                                             
+                                                KL
+                                             
+                                          
+                                          (
+                                          U
+                                          ,
+                                          V
+                                          )
+                                          +
+                                          
+                                             
+                                                Dist
+                                             
+                                             
+                                                KL
+                                             
+                                          
+                                          (
+                                          V
+                                          ,
+                                          U
+                                          )
+                                       
+                                       
+                                          2
+                                       
+                                    
+                                 
+                              
+                           A tree Ti
+                            is assigned to the same equivalence class as a tree Tj
+                            if M[i,
+                           j] is the minimum value in the ith row and the jth column in the matrix M. In the event of more than one tree having the same distance from a tree Ti
+                           , all the similar trees will be assigned to the same equivalence class as that of Ti
+                           . Based on our empirical observations, the most likely cardinality of the set of trees in an equivalence class is just two. The topic trees that belong to an equivalence class are merged into a single tree by merging pairs of trees.
+
+Let Ti
+                            and Tj
+                            be the two trees to be merged. The first step is to select one of the two trees as the reference tree Tr
+                           . Let the non-reference tree be denoted as Tnr
+                           . For notational convenience let Tnr
+                           (i,
+                           j) represent the jth node in the ith level of the tree. Tnr
+                           (0,0) represents the root node. The next sub-section details the process adopted to select a reference tree out of the two topic trees. If M[i,
+                           j] is greater than the threshold distance θ, then the word distributions in the root of the trees Ti
+                            and Tj
+                            are combined by computing the arithmetic mean of the probabilities of the corresponding words in the two distributions, and the combined word distribution is represented using a new node N. Ti
+                            and Tj
+                            are linked as the children of the new node N and N becomes the root of the merged topic tree Tm
+                           . θ is the maximum threshold distance between two topic nodes, beyond which the nodes are considered to be dissimilar and in this case, merging is not a meaningful option among the nodes representing the sub-topics of the topical trees Ti
+                            and Tj
+                           .
+
+On the other hand, if M[i,
+                           j]⩽
+                           θ, then the root of the tree Tnr
+                            is compared with each of the child nodes of the root of Tr
+                           , with respect to the distance between the distributions represented by the corresponding pair of nodes. Let Tr
+                           (i,
+                           b) be the tree node that yields the least distance from Tnr
+                           (0,0) at level i, which we denote with the function ldist(i). In the next iteration of the algorithm, the distance between Tnr
+                           (0,0) and each of the child nodes of Tr
+                           (1,
+                           b) will be computed by the algorithm. If ldist(i
+                           +1)
+                           <
+                           
+                           ldist(i), the algorithm proceeds with the computation of distance between Tnr
+                           (0,0) and each of the child nodes of the node in Tr
+                            that yielded the least distance at level i
+                           +1 i.e. Tr
+                           (i
+                           +1,
+                           b); otherwise the algorithm terminates and declares the node Tr
+                           (i,
+                           b) as the merge point. This process also stops once the leaf level is reached, declaring the corresponding leaf node as the merge point. This logic is illustrated in Fig. 3
+                            for clarity. The topic sub-trees in the reference tree that are dissimilar to the root of the non-reference tree, are ignored from consideration as the search for the merge-point progresses down the reference tree.
+
+This aids in the elimination of irrelevant candidates along with their sub-trees, thereby retaining only the relevant candidates for the merge point. The intuition behind the merge-point finding algorithm is that the similarity between the reference tree nodes and Tnr
+                           (0,0), along a matching path from the root to a leaf, is a non-decreasing function both from the root to the merge-point as well as from the leaf to the merge-point of the topic tree Tr
+                            (Seshadri et al., 2015). As we trace the matching depth first path from the root to the leaf in Tr
+                           , at a particular node the similarity between the node in the path and Tnr
+                           (0,0) decreases indicating that the merge point has been crossed. This is the stage where the search process is halted and the node in Tr
+                            along the depth first matching path, that yielded the maxima in the similarity function is declared as the merge point in Tr
+                           .
+
+To merge the two trees Ti
+                            and Tj
+                           , the root of the tree Tnr
+                            is fused with the merge point in Tr
+                            by performing an averaging of the distributions in the merge-point and Tnr
+                           (0,0). The word distribution in Tnr
+                           (0,0) is also merged with the word distributions in all the other tree nodes in Tr
+                            which are in the path between the merge point and Tr
+                           (0,0). The topics represented by the nodes in the sub-tree rooted at the merge-point in Tr
+                            have to be now merged with the nodes in Tnr
+                           . Let c represent the number of nodes in the sub-tree rooted at the merge point and e represent the number of non-root nodes in Tnr
+                           . A complete weighted bipartite graph Kc
+                           
+                           ,
+                           
+                              e
+                            is formed in which each node represents one of the c
+                           +
+                           e topics to be merged and the weight on an edge is the distance between the word distributions hosted in the nodes connected by that edge.
+
+A minimum spanning tree (MST) is constructed for the graph Kc
+                           
+                           ,
+                           
+                              e
+                           . Let μ and σ be the mean and the standard deviation of the weighted distribution of the edges in the MST. The nodes that are connected by edges having a weight less than μ
+                           +
+                           σ are fused by merging the corresponding word distributions. Pairs of nodes<vi
+                           , vj
+                           
+                           
+                           >to be merged are considered in the decreasing order of their (μ
+                           +
+                           σ
+                           −
+                           w(vi
+                           , vj
+                           )) values; this ordering is enforced so as to give priority for merging two nodes<vi
+                           , vj>
+                           having relatively high similarity than some other pairs of nodes<vi
+                           , vk>
+                           or<vj
+                           , vk>.
+
+As there could be more than one MST for Kc
+                           
+                           ,
+                           
+                              e
+                           , we compute two MSTs (if possible) using the Kruskal Algorithm (Cormen, Leiserson, Rivest, & Stein, 2001), to reduce the error in the estimates of μ and σ. An alternative approach is to find optimal pairs of nodes to be merged by recasting this problem as a bipartite graph matching problem and to find out a topic-matching through the Hungarian algorithm (Newman et al., 2009). However, a node can be merged with only one node after a single matching operation, and we have observed that, this empirically has a negative effect on the performance of the algorithm, especially when there is a considerable overlap between the topics formed in two local topic trees by different PEs.
+
+Algorithm 3 formalizes our discussion on merging a tree with a reference tree, given the merge-point. Percolating the word distribution of the root node in Tnr
+                            with all the nodes from the merge-point till the root of the tree Tr
+                            is done in parallel as these individual averaging operations are independent. Similarly once the pairs of nodes to be merged are determined after the MST construction, the process to fuse the node pairs by averaging their distributions also proceeds in parallel to merge as many node pairs as possible at the same time instant.
+
+Assuming that a single physical processor executes Algorithm 3, parallelism is achieved across different cores of the same processor by instantiating as many threads as the number of available processing cores in the processor. It could also be noted that the individual work items such as the pairs of nodes to be merged and the nodes to be merged with the root of the tree Tnr
+                            are maintained in a shared queue of work items to be processed and as individual threads become available, they attempt to fetch a work item from the shared queue and process the item. The queue is a shared resource across threads and hence is protected through locks to ensure exclusive access at a time instant, to preserve its integrity. We have ensured that these locks are implemented using hardware level TestAndSet instructions to keep the locking overhead to a minimal extent.
+
+To reduce the network communication and synchronization overhead between different processors in a cluster, all the work items created for merging two trees by Algorithm 3, are processed within the same physical processor. But for executing Algorithm 2, the work items can be executed on different physical processors and a common shared Message Queue (MQ) server is maintained as the work queue Wq
+                           . This design decision is made, because the work items generated by Algorithm 2 are independent of each other, whereas the work items generated by Algorithm 3 are not independent. As the number of processors increases, the Wq
+                            can even be maintained as a decentralized set of MQ Servers to reduce hotspots while accessing the shared work queue.
+                              
+                                 
+                                    
+                                    
+                                       
+                                          Algorithm 3: Merge_Two_Topic_Trees
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             
+                                                Input:
+                                             
+                                             
+                                             References to the root of the trees T1 and T2
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                Output:
+                                             
+                                             
+                                             Reference to the root of the merged tree
+                                          
+                                       
+                                       
+                                          
+                                             1.
+                                             
+                                             if Dist(T1
+                                                →distribution, T2→distribution)>θ then {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             1.1 Create a new node n and set n→distribution=average(T1
+                                                →distribution, T2→distribution),
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             n→docIds=T1
+                                                →docIds ⋃ T2
+                                                →docIds and link T1 and T2 as the child nodes of the node n.
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             1.2 return.
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             }
+                                          
+                                       
+                                       
+                                          
+                                             2.
+                                             
+                                             <Tr, Tnr>←Determine_Reference_Tree(T1, T2)
+                                          
+                                       
+                                       
+                                          
+                                             3.
+                                             
+                                             Tmerge
+                                                ←Determine_Merge_Point(Tr, Tnr)
+                                          
+                                       
+                                       
+                                          
+                                             4.
+                                             
+                                             P=Word distribution in Tmerge
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             5.
+                                             
+                                             Q=Word distribution in the root of Tnr
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             6.
+                                             
+                                             TempPtr=Tmerge
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             7.
+                                             
+                                             while(TempPtr≠NULL) do in parallel {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             7.1 TempPtr→distribution=average(TempPtr→distribution, Q)
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             7.2 TempPtr→docIds=TempPtr→docIds υ Tnr(0,0)→docIds
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             7.3 TempPtr=TempPtr→parentNode
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             }
+                                          
+                                       
+                                       
+                                          
+                                             8.
+                                             
+                                             S1
+                                                ←Extract references to the nodes in the sub-tree rooted at Tmerge
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             9.
+                                             
+                                             S2
+                                                ←Extract references to the nodes in the sub-tree rooted at Tnr
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             10.
+                                             
+                                             c←
+                                             |S1| and e←
+                                             |S2|
+                                       
+                                       
+                                          
+                                             11.
+                                             
+                                             Form a complete bipartite graph Kc,e with an edge introduced between every pair of vertices (vi, vj) such that
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             vi ε S1 and vj ε S2, with an edge weight w(vi,vj)=distance(vi
+                                                →distribution, vj
+                                                →distribution)
+                                          
+                                       
+                                       
+                                          
+                                             12. 
+                                             
+                                             Form an MST1 of Kc,e using Kruskal’s algorithm and if possible form another distinct MST2
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             13. 
+                                             
+                                             Compute the mean μ and the standard deviation σ of the edge weight distributions in MST1 and MST2.
+                                          
+                                       
+                                       
+                                          
+                                             14. 
+                                             
+                                             For all edges <vi, vj> in MST1⋃ MST2 such that w(vi, vj)<μ+σ taken in the decreasing order of (μ+σ−w(vi, vj)) do
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             in parallel {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             14.1 if <vi, vj> are not already fused then {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             14.1.1. vi
+                                                →distribution=average(vi
+                                                →distribution, vj
+                                                →distribution)
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             14.1.2 vi
+                                                →docIds=vi
+                                                →docIds ⋃ vj
+                                                →docIds
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             }}
+                                          
+                                       
+                                       
+                                          
+                                             15.
+                                             
+                                             Return the root of Tr as the resultant merged tree.
+                                       
+                                    
+                                 
+                              
+                           Algorithm 3.1 depicts the logic used in determining the merge point in the reference tree. minDist(i) refers to the variable holding the minimum distance to the word distribution in root(Tnr
+                           ) seen so far across the nodes in level i of the tree Tr
+                           . candidate(i) holds a reference to the node in Tr
+                            at level i that has the least distance to root(Tnr
+                           ) as measured by one of the distance metrics defined previously. Loop 4.1 is a parallel loop executed by different threads running on the same PE across its processing cores. Before executing Algorithm 3.1, we have to determine the reference tree among the two trees T
+                           1 and T
+                           2 to be merged. A Support Vector Machine (SVM) with a Gaussian kernel has been trained to determine whether the relationship between the root(T
+                           1) and root(T
+                           2) is an Ancestor–Descendant (AD) relationship or a Descendant–Ancestor (DA) relationship. The SVM is initially trained using a topic tree generated by executing the sequential HLDA algorithm on a sample training set of the document corpus. The dimensionality of the feature space is the cardinality n of the set of all words in the vocabulary of the model. Training samples are generated by randomly picking two nodes Tn
+                           
+                           1 and Tn
+                           
+                           2 in the training hierarchy and by setting the feature vector<f
+                           1,
+                           f
+                           2,...,
+                           fn>
+                           as the difference in the corresponding bins representing the distributions in Tn
+                           
+                           1 and Tn
+                           
+                           2
+                           . i.e. (Tn
+                           
+                           1
+                           
+                              →distribution–Tn
+                           
+                           2
+                           
+                              →distribution). We refer to the terms that frequently appear in generic nodes near the root as general-terms and the terms that frequently appear in focussed sub-topics of broader topics as specific-terms. The intuition behind the chosen feature set is as follows:
+
+In a topic hierarchy, the nodes near the root have higher entropy than the nodes near the leaves and the probability of a general-term appearing in such nodes is higher than the probability of a specific term. Similarly for the nodes near the leaf level, the probability of specific words appearing is more than the probability of the general words. Hence, while subtracting the word distribution of a descendant node from that of an ancestor, we get numerically smaller difference values for specific words than for general words. Similarly, while subtracting the word distribution of an ancestor node from that of a descendant node, we get numerically larger differences for specific words than for generic words. This polarization of features into two sets helps the SVM in identifying generic and specific words with respect to the ancestor nodes and descendant nodes in the training set and helps the SVM in learning the desired hyper-plane to use, for the subsequent task of classifying ordered node pairs into either AD or DA.
+                              
+                                 
+                                    
+                                    
+                                       
+                                          Algorithm 3.1: Determine_Merge_Point
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             
+                                                Input
+                                             
+                                             :
+                                             
+                                             References to the roots of Tr and Tnr
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                Output
+                                             
+                                             :
+                                              
+                                             Reference to the merge point Tmerge in Tr
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             1.
+                                             
+                                             C=set of all nodes at level 1 of the tree Tr
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             2.
+                                             
+                                             minDist(0)←minDist(1)←
+                                             −Infinity
+                                          
+                                       
+                                       
+                                          
+                                             3.
+                                             
+                                             level←1, candidate(1)←root(Tr)
+                                          
+                                       
+                                       
+                                          
+                                             4.
+                                             
+                                             while [level≠Max_level and minDist(level)<minDist(level-1)] do {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             4.1 For every i ε child(candidate(level)) do in parallel
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             4.1.1 if distance(i→distribution, root(Tnr)→distribution)<minDist(level) then {
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             
+                                             4.1.1.1 minDist(level)←distance(i→distribution, root(Tnr)→distribution)
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             
+                                             4.1.1.2 candidate(level)←i
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             
+                                             }
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             }
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             }
+                                          
+                                       
+                                       
+                                          
+                                             5.
+                                             
+                                             if(level==Max_level) then
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             5.1 Tmerge
+                                                ←candidate(level)
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             else
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             5.2 Tmerge
+                                                ←candidate(level-1)
+                                          
+                                       
+                                       
+                                          
+                                             6.
+                                             
+                                             Return the merge point Tmerge to the caller.
+                                       
+                                    
+                                 
+                              
+                           The class label of a training example is set as AD if Tn
+                           
+                           1 is an ancestor of the node Tn
+                           
+                           2 or as DA if Tn
+                           
+                           1 is a descendant of Tn
+                           
+                           2 in the training hierarchy. Once the SVM is trained we get a maximum-margin hyperplane separating the support vectors in the space 
+                              Rn
+                              
+                           . To determine which of the two trees T
+                           1 and T
+                           2 is the reference tree, we compute the difference between the bins (root(T
+                           1)
+                           →
+                           
+                           distribution
+                           
+                           –
+                           
+                           root(T
+                           2)
+                           →
+                           
+                           distribution) and use this as a test vector t to project onto the n-dimensional space. If the vector t gets projected onto the AD side of the hyperplane, we conclude that T
+                           1 is the reference tree and vice-versa. This is accomplished using Algorithm 3.2 as depicted below:
+                              
+                                 
+                                    
+                                    
+                                       
+                                          Algorithm 3.2: Determine_Reference_Tree
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             
+                                                Input
+                                             
+                                             :
+                                             
+                                             References to the roots of the trees T1 and T2
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                                Output
+                                             
+                                             :
+                                              
+                                             References to the trees Tr and Tnr
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             1.
+                                             
+                                             t
+                                             
+                                             ←
+                                             (root(T1)
+                                             →
+                                             
+                                             distribution
+                                             –root(T2)
+                                             →
+                                             
+                                             distribution)
+                                       
+                                       
+                                          
+                                             2.
+                                             
+                                             project the test vector t onto the n dimensional vector space
+                                          
+                                       
+                                       
+                                          
+                                             3.
+                                             
+                                             if (t falls on the AD side of the hyperplane) then
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             3.1. set Tr
+                                             
+                                             
+                                             ←
+                                             
+                                             T1 and Tnr
+                                             
+                                             
+                                             ←
+                                             
+                                             T2
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             else
+                                          
+                                       
+                                       
+                                          
+                                             
+                                             
+                                             3.2. set Tr
+                                             
+                                             
+                                             ←
+                                             
+                                             T2 and Tnr
+                                             
+                                             
+                                             ←
+                                             
+                                             T1
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             4.
+                                             
+                                             Return the references Tr and Tnr to the caller.
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+We have implemented the parallel algorithm using Java on top of a high performance computing platform called MPJExpress. MPJExpress is an open source implementation of the Message Passing Interface (MPI) in Java and can be used to form a distributed cluster of processors (MPJExpress). We formed a cluster of 32 workstations using MPJExpress and each workstation in the cluster has the following configuration:
+                        
+                           •
+                           
+                              HP Proliant DL 140 G3-dual core.
+
+
+                              Intel Xenon 3060 Processor, 2 GB DDR2 RAM.
+
+
+                              80 GB SATA Hard Disk.
+
+We have made use of the RabbitMQ messaging server for implementing the work queue while running Phase 2 of the parallel algorithm. LIBSVM package has been used for determining the reference tree using a classification algorithm as explained in Section 4. The SVM is trained by using a topic tree generated by running the HLDA algorithm on a collection of documents from the Wiki (Wikipedia) and the DMOZ (DMOZ directory) directories. The training hierarchy is formed by sampling documents across different categories in the Wiki and DMOZ directories. The total number of documents used to form the training set is about 200K across a set of 2000 categories. From the topic tree generated by HLDA, for each node in the hierarchy, Ti
+                     , and for every ancestor node of Ti
+                      (say Ta
+                     ), add the training example [(Ta
+                     
+                     
+                     →
+                     
+                     distribution
+                     
+                     −
+                     
+                     Ti
+                     
+                     
+                     →
+                     
+                     distribution), AD] to the training set. Similarly, for each descendant node Td in the sub-tree rooted at Ti
+                     , add the training example [(Td
+                     
+                     
+                     →
+                     
+                     distribution
+                     
+                     −
+                     
+                     Ti
+                     
+                     
+                     →
+                     
+                     distribution), DA] to the training set.
+
+We have framed two different kinds of datasets which, differ in their scale. For measuring the precision and recall performance of the algorithm, we framed a dataset consisting of documents of the order of thousands, whereas for measuring the speed-up achieved by the parallel algorithm, we have framed datasets containing about millions of documents. We denote the experiments conducted using the smaller datasets as F-measure experiments and those using the larger datasets as Speed-up experiments. These datasets have been framed from the hierarchical dataset of documents hosted in the DMOZ directory and Wikipedia. Table 1
+                      illustrates some of the top level categories from which we have framed the datasets.
+
+@&#RESULTS AND DISCUSSION@&#
+
+To measure the validity of the topic tree constructed by the parallel algorithm, we manually mapped the topical nodes in the tree to the actual topics in the DMOZ and the Wiki directory. We then computed the precision, recall and F-measure of the topic tree as the mean precision, recall and F-measure computed across all the topical nodes in the tree. Let d(ti
+                     ) be the set of document identifiers assigned to a topical node ti
+                      in the tree and a(mi
+                     ) be the actual set of document identifiers present in the DMOZ category mi
+                      to which the topic ti
+                      was mapped. Precision and recall are computed using Eqs. (3) and (4). F-measure is determined as the harmonic mean of the precision and recall computed (Blei et al., 2010). These metrics for the topic tree constructed by the parallel algorithm, stood between [0.35,0.85] for our 50 distinct F-measure experiments, whereas the same set of metrics for the sequential HLDA algorithm was in the range [0.48,0.82], using 150 iterations of Gibbs sampling, as illustrated in Table 2
+                     . Table 2 hosts the test cases corresponding to the first 10 out of the 50 F-measure experiments we conducted. In Table 2, ‘P’ stands for precision, ‘R’ for recall and ‘F’ stands for F-measure.
+
+The hierarchy of clusters of document identifiers (topics) formed by the parallel algorithm exhibits almost a similar F-measure performance as that of the clusters formed by the sequential algorithm. Our general observation is that the hierarchy produced by the parallel algorithm is shorter and more meaningful than the hierarchy inferred by the HLDA algorithm. This is due to the merge operation which combines similar topical nodes and helps in cleaning up the hierarchy. The HLDA algorithm infers more topics than the number of topics in the underlying dataset, but the parallel algorithm outputs a set of topics which is similar to the categories in the underlying dataset from which the hierarchy is inferred i.e., for 47 out of 50 F-measure experiments, there was a one-to-one correspondence between the topics inferred and the categories in the underlying dataset, with the exception of three experiments for which the parallel algorithm produced extra topics or lesser number of topics than that in the dataset. The quadratic chi-histogram distance consistently yielded a better quality of clusters measured in terms of F-measure than either the earth-mover’s distance or the symmetric JS-divergence based distance metric.
+                        
+                           (4)
+                           
+                              precision
+                              =
+                              
+                                 
+                                    |
+                                    d
+                                    (
+                                    
+                                       
+                                          t
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    )
+                                    ∩
+                                    a
+                                    (
+                                    
+                                       
+                                          m
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    )
+                                    |
+                                 
+                                 
+                                    |
+                                    d
+                                    (
+                                    
+                                       
+                                          t
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    )
+                                    |
+                                 
+                              
+                           
+                        
+                     
+                     
+                        
+                           (5)
+                           
+                              recall
+                              =
+                              
+                                 
+                                    |
+                                    d
+                                    (
+                                    
+                                       
+                                          t
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    )
+                                    ∩
+                                    a
+                                    (
+                                    
+                                       
+                                          m
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    )
+                                    |
+                                 
+                                 
+                                    |
+                                    a
+                                    (
+                                    
+                                       
+                                          m
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    )
+                                    |
+                                 
+                              
+                           
+                        
+                     To measure the predictive accuracy of the topic tree constructed, we measured the distance between the word distribution of each document in a set of test documents and the word distributions in the topical nodes of the tree using the quadratic chi-histogram distance metric and computed the likelihood of the test document to be associated with each of the topical nodes. Each test document is treated as a query document and the set of document identifiers of the training documents in the most probable topics in the tree are returned as the search results of the query. We performed a 10-fold cross validation with a randomly sampled training set of 4.5K documents and a test set of 0.5K documents. Precision, recall and F-measure for this IR experiment are found to be in the range [0.65,0.92] for the topic hierarchy inferred by the parallel algorithm and for that of the sequential HLDA these metrics fell in the range [0.41,0.82] (see Table 3
+                     ). The AD-LDA Algorithm (Newman et al., 2009) exhibited an IR performance in the range [0.41,0.74] with respect to these performance metrics. These results empirically assert that the topic hierarchy constructed by the parallel algorithm is as sound and meaningful as the topic hierarchy constructed by the sequential HLDA algorithm and the AD-LDA algorithm. The quadratic chi-histogram metric yielded better IR performance for the hierarchy constructed by the parallel algorithm when compared to the other two metrics as depicted in the Table 3. For some IR experiments the hierarchy formed by the parallel algorithm yielded better IR performance as compared to that of the HLDA algorithm. On analysing these cases, the reason that we find is the hierarchy generated by the parallel algorithm closely mirrors the underlying topic hierarchy in the dataset, whereas the topic tree produced by HLDA, has too many spurious topics that are non-existent in the dataset.
+
+The plot in the Fig. 4
+                      shows the speed-up achieved by the parallel topic hierarchy construction over its sequential variant. Speed-up is computed as the ratio of the running time of the sequential algorithm to that of the parallel algorithm. Similarly Fig. 5
+                      depicts the scalability of the algorithm as the number of processors is increased. Experimental results show that the speed-up achieved by parallelization is 53.5 on a 32-node cluster formed using MPJExpress, containing 64 processing cores. In Fig. 5 the line y
+                     =
+                     x depicts the ideal speed-up whereas the actual sub-linear speed-up achieved by the parallel algorithm is depicted using the other rugged line in the plot. The speed-up experiments in the Figs. 4 and 5 are conducted using the datasets 1 and 2 in Table 1.
+
+The parallel algorithm seems to exhibit good scaling characteristics both with respect to the number of documents and the number of processors. The speed-up metrics shown in the graph are the average speed-up calculated across the 50 speed-up experiments that we conducted. The experiments whose performance is plotted in Figs. 4 and 5 are conducted using the quadratic chi-histogram distance metric. Fig 5 also compares the performance of the proposed parallel algorithm against the AD-LDA algorithm proposed by Newman et. al. Newman et al. (2009); the speed-up plot shows that as the number of processors increase the speed-up realized by the proposed algorithm exhibits a marginal improvement over AD-LDA because of the absence of a strict synchronization requirement in the proposed parallel algorithm. We have set up another experiment to determine whether increasing the number of processors has an impact on the quality of the clusters generated. Fig. 6
+                      depicts the results of this experiment as the average F-measure of the clusters formed; taken across each of the 50 F-measure experiments we had designed. As can be seen from the Fig. 6, the quality of the clusters generated by the parallel algorithm was not affected much, as the number of processors increased, and this asserts that the merge algorithm is sound and works well.
+
+The speed-up of the parallel algorithm on a multi-million document corpus (Dataset no. 3 in Table 1) is calculated relative to the run-time of the parallel algorithm on a cluster of eight processors. This is because the memory available on a single processor is not sufficient to build topic models from such a large scale corpus. The relative speed-up computed is plotted in Fig. 7
+                     . The plot also compares the speed-up achieved by the proposed parallel algorithm against that realized by the AD-LDA algorithm (Newman et al., 2009). The speed-up achieved by the AD-LDA algorithm marginally lags behind that of the proposed parallel algorithm as the number of processors increases. This is due to the reason that AD-LDA requires frequent synchronization across all the processing elements after a sampling iteration. There is no such strict requirement on the proposed parallel algorithm and enables the algorithm to scale better with the number of processors. The F-measure performance of the AD-LDA algorithm is compared with that of the proposed parallel algorithm in Fig. 8
+                     , for the datasets shown in Table 2. Fig. 8 shows that the proposed algorithm performs on par with the AD-LDA algorithm with respect to the F-measure.
+
+@&#CONCLUSION@&#
+
+We have designed, implemented and tested a parallel algorithm for learning a hierarchy of topics from a document corpus using a probabilistic topic model. The parallel algorithm shows good performance in terms of the quality of the topic hierarchy constructed and also in terms of the speed-up achieved over its sequential counterpart. The parallel algorithm avoids frequent synchronization between processes running in parallel and hence scales well with the number of processors. Future research directions include benchmarking the performance of the algorithm on other parallel programming platforms like CUDA and Hadoop and to analyse the impact on the performance of the algorithm if distributed key-value stores are used for storing the probability distributions across the topic trees.
+
+@&#ACKNOWLEDGEMENT@&#
+
+We would like to thank the anonymous reviewers, B. Ravindran and K. Viswanathan Iyer for their review comments and suggestions on an earlier version of this manuscript. We would also like to thank Nokia for provisioning a compute cluster to carry out our experiments.
+
+@&#REFERENCES@&#
+

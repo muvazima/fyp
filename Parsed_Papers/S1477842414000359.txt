@@ -1,0 +1,3653 @@
+@&#MAIN-TITLE@&#Refinement of worst-case execution time bounds by graph pruning
+
+@&#HIGHLIGHTS@&#
+
+
+               
+                  
+                  
+                     
+                        
+                           
+                           Recent work showed that often only small parts of real-time programs are relevant for their worst-case execution time (WCET).
+
+
+                        
+                        
+                           
+                           Following this observation an iterative graph-pruning algorithm is proposed to refine WCET bounds derived by static analysis.
+
+
+                        
+                        
+                           
+                           The precision of all WCET analysis phases is improved (analyses based on abstract interpretation and longest path search).
+
+
+                        
+                        
+                           
+                           Evaluation using a commercial, state-of-the-art tool (aiT) using well-established real-time benchmarks (Debie, Papabench).
+
+
+                        
+                        
+                           
+                           A proof-of-concept implementation shows considerable improvements (up to 12%) and even gains in analysis time.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Worst-case execution time analysis
+
+Iterative refinement
+
+Graph pruning
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  As real-time systems increase in complexity to provide more and more functionality and perform more demanding computations, the problem of statically analyzing the Worst-Case Execution Time (WCET) bound of real-time programs is becoming more and more time-consuming and imprecise.
+                  The problem stems from the fact that with increasing program size, the number of potentially relevant program and hardware states that need to be considered during WCET analysis increases as well. However, only a relatively small portion of the program actually contributes to the final WCET bound. Large parts of the program are thus irrelevant and are analyzed in vain. In the best case this only leads to increased analysis time. Very often, however, the analysis of irrelevant program parts interferes with the analysis of those program parts that turn out to be relevant.
+                  We explore a novel technique based on graph pruning that promises to reduce the analysis overhead and, at the same time, increase the analysis’ precision. The basic idea is to eliminate those program parts from the analysis problem that are known to be irrelevant for the final WCET bound. This reduces the analysis overhead, since only a subset of the program and hardware states have to be tracked. Consequently, more aggressive analysis techniques may be applied, effectively reducing the overestimation of the WCET. As a side-effect, interference from irrelevant program parts is eliminated, e.g., on addresses of memory accesses, on loop bounds, or on the cache or processor state.
+                  First experiments using a commercial WCET analysis tool show that our approach is feasible in practice and leads to reductions of up to 12% when a standard IPET approach is used for the analysis.
+               
+            
+
+@&#INTRODUCTION@&#
+
+Real-time systems have seen a steady increase in complexity during the last decades [1]. Due to the increased processing power of modern processors, more elaborate algorithms are implemented, new functionality added, and existing functionality migrated to software. As the complexity of real-time software grows, the accurate static analysis of the software becomes more and more demanding. This is particularly problematic for real-time systems, where a provable bound of the program׳s execution time — its Worst-Case Execution Time (WCET) — is needed to guarantee the timely operation of the system.
+
+Foremost size and complexity of software are causing the analysis overhead to grow rapidly, as the number of potential states of the program under analysis increases. This is even amplified for WCET analysis, as the number of potential software states is further increased by potential hardware states, which also have to be considered to safely bound the WCET. Even when only small portions of a complex software program are relevant for the final WCET estimation, the analysis has to account for all of the program׳s code to derive a safe bound. This often reduces the precision of the WCET analysis, as irrelevant code parts interfere with the analysis of relevant code parts and lead to unnecessary overestimation of the statically determined WCET bound compared to the actual worst-case behavior.
+
+To address these two issues, we propose a novel technique based on graph pruning. An iterative algorithm allows us to discard irrelevant program parts and apply a standard WCET analysis to the remaining (relevant) program parts only. The iterative processing ensures safe bounds, while focusing only on relevant program parts reduces the size of the analysis problem and promises to reduce the overall analysis overhead. At the same time, more aggressive analysis techniques can be applied to the smaller remaining program. Together with the reduced interference from irrelevant code parts, this leads to a more precise and tighter WCET bound.
+
+The basic idea of our approach is to find the longest path for every basic block in the Control-Flow Graph (CFG) of a real-time program [2] using a fast (and potentially imprecise) WCET analysis. The basic blocks are grouped into sets according to the length of their respective paths. The sets are then processed iteratively by decreasing path length. During each iteration a subgraph of the original CFG is formed by unifying the subgraph of the previous iteration with the basic blocks from the currently considered set. A potentially more advanced WCET analysis is then applied to the program represented by the new subgraph. The algorithm terminates, with a possibly refined WCET estimate, as soon as a safe bound, valid for the original program, has been reached.
+
+The advantages of this approach are twofold. First of all, the analysis problems defined by the subgraphs at each iteration are much smaller than the original analysis problem. This promises to reduce the analysis overhead, while still providing tight bounds. Secondly, processing the sets of basic blocks according to their decreasing path lengths, eliminates the interference from other basic blocks, whose longest paths are known to be shorter. This improves the precision of the WCET analysis precisely for those code parts of the real-time program that impact the WCET estimate the most.
+
+We evaluate our approach using the well-established benchmark programs Debie1 [3] and PapaBench [4] for two embedded PowerPC processors from Freescale. The WCET analysis is performed by an unmodified version of the commercial tool aiT
+                        1
+                     
+                     
+                        1
+                        
+                           http://www.absint.com/ait/
+                        
+                      using scripting and analysis annotations. Our approach treats the WCET analysis tool as a black box and is thus compatible with other tools. Our experiments show improvements of up to 12%, depending on the processor model, when a standard implicit path enumeration approach [5] is used. Targeting an advanced analysis technique, which accounts for architecturally infeasible execution paths, but does not scale to large analysis problems, the improvement is still as high as 5%. We also notice a general trend that the benefit from our pruning method increases with the size of the analysis problems. This property is promising, since it suggests accelerating returns for future analysis applications. Since we use an unmodified, and for our purposes unoptimized, version of the analysis tool, the iterative processing causes some overhead. We expect that this overhead can be eliminated by adapting the WCET analysis tool to the iterative processing, for example, by using incremental analysis techniques.
+
+The main contributions of this paper are as follows:
+                        
+                           •
+                           We present a novel WCET analysis technique based on graph pruning that focuses the analysis effort on relevant code parts of the real-time program.
+
+Due to reduced analysis overhead, more elaborate analysis techniques can be applied to the smaller sub-programs, leading to improved precision.
+
+We evaluate our approach using a commercial off-the-shelf WCET analysis tool and demonstrate considerable improvements of WCET bounds.
+
+The remainder of this paper is structured as follows. We first give some background and motivation in Section 2. We then describe our novel graph pruning technique in Section 3. Section 4 presents a detailed evaluation of our approach for two well-established real-time benchmarks and a realistic processor architecture. Related work is covered in Section 5 before concluding in Section 6.
+
+This section covers some basic definitions of control-flow graphs, paths, and WCET analysis, followed by a brief discussion of recent findings motivating this work.
+
+We assume that static WCET analysis proceeds in two phases as proposed by Theiling et al. [6]: (1) local worst-case execution times of individual basic blocks and control-flow edges are computed first; this is followed by (2) a longest path search over a weighted CFG, where the weights are given by the local WCETs.
+                           Weighted control-flow graph:
+                           
+                              A weighted Control-Flow Graph (CFG) is a tuple 
+                                    G
+                                    =
+                                    (
+                                    V
+                                    ,
+                                    E
+                                    ,
+                                    r
+                                    ,
+                                    t
+                                    ,
+                                    W
+                                    )
+                                 , where V is a set of nodes representing basic blocks that are connected by control-flow edges in E. We assume that every CFG contains a root node r and sink node t. The function 
+                                    W
+                                    :
+                                    V
+                                    ∪
+                                    E
+                                    →
+                                    R
+                                  associates the basic blocks and edges with a weight.
+
+An ordered sequence of nodes 
+                                    (
+                                    
+                                       
+                                          v
+                                       
+                                       
+                                          1
+                                       
+                                    
+                                    ,
+                                    …
+                                    ,
+                                    
+                                       
+                                          v
+                                       
+                                       
+                                          n
+                                       
+                                    
+                                    )
+                                 , such that for 
+                                    0
+                                    <
+                                    i
+                                    <
+                                    n
+                                  all edges 
+                                    (
+                                    
+                                       
+                                          v
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          v
+                                       
+                                       
+                                          i
+                                          +
+                                          1
+                                       
+                                    
+                                    )
+                                  are in E, is called a path. The length of a path 
+                                    |
+                                    p
+                                    |
+                                  is given by the sum of all its node and edge weights: 
+                                    
+                                       
+                                          ∑
+                                       
+                                       
+                                          0
+                                          <
+                                          i
+                                          ≤
+                                          n
+                                       
+                                    
+                                    W
+                                    (
+                                    
+                                       
+                                          v
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    )
+                                    +
+                                    
+                                       
+                                          ∑
+                                       
+                                       
+                                          0
+                                          <
+                                          i
+                                          <
+                                          n
+                                       
+                                    
+                                    W
+                                    (
+                                    (
+                                    
+                                       
+                                          v
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          v
+                                       
+                                       
+                                          i
+                                          +
+                                          1
+                                       
+                                    
+                                    )
+                                    )
+                                 . A path p is a longest path, when there exists no other path q such that 
+                                    |
+                                    p
+                                    |
+                                    <
+                                    |
+                                    q
+                                    |
+                                 .
+
+The weight of individual CFG nodes and edges is usually computed using abstract interpretation [7] that derives information on potential program and processor states at all relevant program points. This information is then combined to compute an upper bound of the local execution time of each basic block and CFG edge.
+
+From the local execution times a weighted CFG is constructed and longest path search is performed to find a path with maximal cost, thus representing the global WCET bound. We rely on the Implicit Path Enumeration Technique (IPET) for this search [5,8], which we explain in detail in Section 2.3.
+
+A Worst-Case Execution Path (WCEP) is a longest path in the weighted CFG as computed through longest path search. Solving the IPET problem does not immediately yield a WCEP — rather a family of paths, where each one may contain basic blocks several times, according to their IPET execution counts. Note that concrete paths can be derived from the IPET results, since Kirchhoff׳s law is respected by the execution counts.
+
+The WCET of a program can finally be bounded by the length of the WCEP as computed by longest path search. Since it is generally not feasible to compute the actual WCET of a program, we seek a (tight) estimation of this bound. For the purpose of brevity, we will use the term WCET to refer to the WCET bound.
+
+Abstract interpretation, introduced by Patrick and Radhia Cousot [7], allows to formally define abstractions of the concrete semantics of a programming language or any other form of program representation — such as compiler intermediate representations. The abstraction is linked to the concrete values through an abstraction function α and a concretization function γ, such that the information in the abstract domain M is always a safe approximation of the concrete semantics in L. We describe the concepts of abstract interpretation required in our work next, see the textbook by Nielson et al. [9] for a more complete introduction.
+                           State:
+                           
+                              A state is a pair 
+                                    (
+                                    q
+                                    ,
+                                    σ
+                                    )
+                                    ∈
+                                    S
+                                 , where 
+                                    q
+                                    ∈
+                                    Q
+                                  represents a context (e.g., a node in a program׳s CFG), and 
+                                    σ
+                                    ∈
+                                    Σ
+                                  is an environment, e.g., a mapping of program variables to their values. The set of states is denoted by 
+                                    S
+                                    =
+                                    Q
+                                    ×
+                                    Σ
+                                 . For the sake of simplicity, we assume that the contexts are the nodes of the program׳s CFG, i.e., given a CFG 
+                                    G
+                                    =
+                                    (
+                                    V
+                                    ,
+                                    E
+                                    ,
+                                    r
+                                    ,
+                                    t
+                                    )
+                                    :
+                                    Q
+                                    =
+                                    V
+                                 .
+
+The semantics of a program is specified by a semantic function 
+                                    τ
+                                    :
+                                    S
+                                    →
+                                    S
+                                 , which maps an input state to an output state, depending on the input state׳s context and environment, i.e., variable assignments. For the sake of brevity we will only consider forward semantics here, the following definitions equally apply for backward semantics.
+
+The trace semantics represents all possible executions of a program as a (potentially infinite) sequence of state transitions and is defined by the closure function 
+                                    T
+                                    (
+                                    S
+                                    )
+                                    :
+                                    S
+                                    →
+                                    
+                                       
+                                          S
+                                       
+                                       
+                                          +
+                                       
+                                    
+                                 . Here, 
+                                    
+                                       
+                                          S
+                                       
+                                       
+                                          +
+                                       
+                                    
+                                  represents the set of all possible strings 
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          1
+                                       
+                                    
+                                    ,
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          2
+                                       
+                                    
+                                    ,
+                                    …
+                                  over the program states, 
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                    ∈
+                                    S
+                                    ,
+                                    ∀
+                                    i
+                                    >
+                                    2
+                                    :
+                                    τ
+                                    (
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          i
+                                          −
+                                          1
+                                       
+                                    
+                                    )
+                                    =
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          i
+                                       
+                                    
+                                 . Given a set of initial states 
+                                    
+                                       
+                                          S
+                                       
+                                       
+                                          init
+                                       
+                                    
+                                    ⊆
+                                    S
+                                  the reachable states of a program can be defined as 
+                                    R
+                                    =
+                                    {
+                                    s
+                                    |
+                                    ∃
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          init
+                                       
+                                    
+                                    ∈
+                                    
+                                       
+                                          S
+                                       
+                                       
+                                          init
+                                       
+                                    
+                                    :
+                                    s
+                                    ∈
+                                    T
+                                    (
+                                    
+                                       
+                                          s
+                                       
+                                       
+                                          init
+                                       
+                                    
+                                    )
+                                    }
+                                 .
+
+The collecting semantics ignores the ordering in which states are visited and thus can be expressed as the least fixed point of 
+                                    CS
+                                    (
+                                    S
+                                    )
+                                    =
+                                    
+                                       
+                                          S
+                                       
+                                       
+                                          init
+                                       
+                                    
+                                    ∪
+                                    S
+                                    ∪
+                                    {
+                                    τ
+                                    (
+                                    s
+                                    )
+                                    |
+                                    s
+                                    ∈
+                                    S
+                                    }
+                                 . Note that at least the states reachable under the trace semantics (
+                                    R
+                                 ) have to be reachable under the collecting semantics (but not necessarily the inverse).
+
+A Galois connection is a tuple 
+                                    (
+                                    L
+                                    ,
+                                    α
+                                    ,
+                                    γ
+                                    ,
+                                    M
+                                    )
+                                 , where 
+                                    (
+                                    L
+                                    ,
+                                    ⊑
+                                    )
+                                  and 
+                                    (
+                                    M
+                                    ,
+                                    ⊑
+                                    )
+                                  are complete lattices representing the concrete and abstract program states respectively, 
+                                    α
+                                    :
+                                    L
+                                    →
+                                    M
+                                  and 
+                                    γ
+                                    :
+                                    M
+                                    →
+                                    L
+                                  are monotone functions, such that 
+                                    γ
+                                    ○
+                                    α
+                                    
+                                       
+                                          ⊒
+                                       
+                                       
+                                          L
+                                       
+                                    
+                                    λ
+                                    l
+                                    ·
+                                    l
+                                  and 
+                                    α
+                                    ○
+                                    γ
+                                    
+                                       
+                                          ⊑
+                                       
+                                       
+                                          M
+                                       
+                                    
+                                    λ
+                                    m
+                                    ·
+                                    m
+                                 . Galois connections have several properties that simplify the definition of and reasoning about static analyses [9].
+
+The application of a monotone function 
+                                    f
+                                    :
+                                    L
+                                    →
+                                    L
+                                  in the concrete domain can be approximated by the application of a corresponding function 
+                                    
+                                       
+                                          f
+                                       
+                                       
+                                          ^
+                                       
+                                    
+                                    :
+                                    M
+                                    →
+                                    M
+                                 , iff 
+                                    ∀
+                                    m
+                                    ∈
+                                    M
+                                    :
+                                    α
+                                    ○
+                                    f
+                                    ○
+                                    γ
+                                    (
+                                    m
+                                    )
+                                    
+                                       
+                                          ⊑
+                                       
+                                       
+                                          M
+                                       
+                                    
+                                    
+                                       
+                                          f
+                                       
+                                       
+                                          ^
+                                       
+                                    
+                                    (
+                                    m
+                                    )
+                                 . It can furthermore be shown that the least fixed point (lfp) computed over the concrete semantics is then safely approximated by the fixed point computed over the abstraction (and vice versa): 
+                                    lf
+                                    p
+                                    
+                                    f
+                                    
+                                       
+                                          ⊑
+                                       
+                                       
+                                          L
+                                       
+                                    
+                                    γ
+                                    (
+                                    lf
+                                    p
+                                    
+                                    
+                                       
+                                          f
+                                       
+                                       
+                                          ^
+                                       
+                                    
+                                    )
+                                  (and also 
+                                    α
+                                    (
+                                    lf
+                                    p
+                                    
+                                    f
+                                    )
+                                    
+                                       
+                                          ⊑
+                                       
+                                       
+                                          M
+                                       
+                                    
+                                    lf
+                                    p
+                                    
+                                    
+                                       
+                                          f
+                                       
+                                       
+                                          ^
+                                       
+                                    
+                                 ).
+
+In practice, a static analysis relies on the abstract domain only, since operating on the concrete domain often leads to undecidable problems. The goal of a static analysis, based on abstract interpretation, then is to compute a safe approximation of the concrete program states reachable under the collecting semantics of the program. Given the program׳s CFG, the abstract domain, and a set of abstract functions representing program semantics, a transition system is constructed that specifies how to derive abstract states for each program point. The transition system in turn allows us to derive an equation system that is solved iteratively by searching a (least) fixed point. Note that the equation system is traditional initialized with the least element (
+                           ⊥
+                        ) in abstract interpretation.
+
+The properties of Galois connections from above can be used to prove that once a Galois connection can be established between the collecting semantics and the abstraction of a static analysis, the correctness of the analysis follows automatically [7]. For the remainder of this paper, we assume that all static analyses used during WCET analysis are based on abstract interpretation and that these analyses are correct with regard to the underlying collecting semantics (omitting the details of the semantics itself).
+
+Based on the local execution times of a weighted CFG (represented as coefficients), and integer variables, which represent execution flow through basic blocks and control-flow edges, IPET specifies an ILP model (given below) for solving the longest path problem. We use function 
+                           X
+                         to map nodes and edges to their respective ILP variable; together with weighting function 
+                           W
+                         it directly defines the objective function (Eq. (1)) of the ILP that needs to be maximized. Structural (Eqs. (2), (5)) and non-negativity constraints (Eq. (4)) guarantee proper flow in the CFG, while arbitrary constraints (Eq. (3)), either provided by prior analyses or the user (e.g. loop bounds), restrict the ILP solution to legal execution paths in the program.
+                           
+                              (1)
+                              
+                                 WCET
+                                 =
+                                 max
+                                 
+                                 
+                                    
+                                       ∑
+                                    
+                                    
+                                       e
+                                       ∈
+                                       E
+                                    
+                                 
+                                 W
+                                 (
+                                 e
+                                 )
+                                 X
+                                 (
+                                 e
+                                 )
+                                 +
+                                 
+                                    
+                                       ∑
+                                    
+                                    
+                                       v
+                                       ∈
+                                       V
+                                    
+                                 
+                                 W
+                                 (
+                                 v
+                                 )
+                                 X
+                                 (
+                                 v
+                                 )
+                              
+                           
+                        
+                        
+                           
+                              (2)
+                              
+                                 
+                                 
+                                 s
+                                 .
+                                 t
+                                 .
+                                 
+                                 
+                                    
+                                       ∑
+                                    
+                                    
+                                       e
+                                       =
+                                       (
+                                       u
+                                       ,
+                                       v
+                                       )
+                                    
+                                 
+                                 X
+                                 (
+                                 e
+                                 )
+                                 =
+                                 
+                                    
+                                       ∑
+                                    
+                                    
+                                       e
+                                       ′
+                                       =
+                                       (
+                                       v
+                                       ,
+                                       w
+                                       )
+                                    
+                                 
+                                 X
+                                 (
+                                 e
+                                 ′
+                                 )
+                              
+                           
+                        
+                        
+                           
+                              (3)
+                              
+                                 
+                                 
+                                 
+                                    
+                                       ∑
+                                    
+                                    
+                                       e
+                                       ∈
+                                       E
+                                    
+                                 
+                                 
+                                    
+                                       a
+                                    
+                                    
+                                       e
+                                    
+                                 
+                                 X
+                                 (
+                                 e
+                                 )
+                                 ○
+                                 
+                                    
+                                       ∑
+                                    
+                                    
+                                       e
+                                       ′
+                                       ∈
+                                       E
+                                    
+                                 
+                                 a
+                                 
+                                    
+                                       ′
+                                    
+                                    
+                                       e
+                                       ′
+                                    
+                                 
+                                 X
+                                 (
+                                 e
+                                 ′
+                                 )
+                                 +
+                                 k
+                                 ,
+                                 
+                                 ○
+                                 ∈
+                                 {
+                                 ≤
+                                 ,
+                                 ≥
+                                 ,
+                                 =
+                                 }
+                              
+                           
+                        
+                        
+                           
+                              (4)
+                              
+                                 
+                                 
+                                 X
+                                 (
+                                 i
+                                 )
+                                 ≥
+                                 0
+                                 ,
+                                 
+                                 ∀
+                                 i
+                                 ∈
+                                 {
+                                 V
+                                 ∪
+                                 E
+                                 }
+                              
+                           
+                        
+                        
+                           
+                              (5)
+                              
+                                 
+                                 
+                                 X
+                                 (
+                                 r
+                                 )
+                                 =
+                                 1
+                              
+                           
+                        
+                     
+
+
+                        
+                           Algorithm 1
+                           Basic-block-based criticality algorithm.
+                                 
+                                    
+                                       
+                                       
+                                       
+                                          
+                                             
+                                                Require: 
+                                                   G
+                                                   =
+                                                   (
+                                                   V
+                                                   ,
+                                                   E
+                                                   ,
+                                                   r
+                                                   ,
+                                                   t
+                                                   )
+                                                 CFG of the input program.
+                                          
+                                          
+                                             
+                                                Ensure: 
+                                                   Crit
+                                                   [
+                                                   v
+                                                   ]
+                                                 computed for all 
+                                                   v
+                                                   ∈
+                                                   V
+                                                .
+                                          
+                                          
+                                             1:
+                                             
+                                                
+                                                   I
+                                                   ←
+                                                   
+                                                      AnalyzeAI
+                                                   
+                                                   (
+                                                   G
+                                                   )
+                                                
+                                                
+                                                
+                                                   ▹
+                                                 Perform abstract-interpretation-based analysis
+                                          
+                                          
+                                             2:
+                                             
+                                                
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         G
+                                                      
+                                                   
+                                                   ←
+                                                   C
+                                                   
+                                                      alc
+                                                   
+                                                   WCET
+                                                   (
+                                                   G
+                                                   ,
+                                                   I
+                                                   ,
+                                                   ⊥
+                                                   )
+                                                
+                                             
+                                          
+                                          
+                                             3:
+                                             
+                                                for all 
+                                                
+                                                   v
+                                                   ∈
+                                                   V
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             4:
+                                             
+                                                
+                                                
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         v
+                                                      
+                                                   
+                                                   ←
+                                                   C
+                                                   
+                                                      alc
+                                                   
+                                                   WCET
+                                                   (
+                                                   G
+                                                   ,
+                                                   I
+                                                   ,
+                                                   v
+                                                   )
+                                                
+                                             
+                                          
+                                          
+                                             5:
+                                             
+                                                
+                                                
+                                                   Crit
+                                                   [
+                                                   v
+                                                   ]
+                                                   ←
+                                                   
+                                                      
+                                                         
+                                                            
+                                                               WCET
+                                                            
+                                                            
+                                                               v
+                                                            
+                                                         
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               WCET
+                                                            
+                                                            
+                                                               G
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             6:
+                                             
+                                                function CalcWCET 
+                                                   (
+                                                   G
+                                                   ,
+                                                   I
+                                                   ,
+                                                   v
+                                                   )
+                                                
+                                             
+                                          
+                                          
+                                             7:
+                                             
+                                                
+                                                
+                                                   C
+                                                   ←
+                                                   
+                                                      CreateConstraints
+                                                   
+                                                   (
+                                                   I
+                                                   )
+                                                
+                                                
+                                                
+                                                   ▹
+                                                 Flow constraints from analysis info
+                                          
+                                          
+                                             8:
+                                             
+                                                
+                                                
+                                                   C
+                                                   ′
+                                                   ←
+                                                   
+                                                      BlockConstraint
+                                                   
+                                                   (
+                                                   v
+                                                   )
+                                                
+                                                
+                                                
+                                                   ▹
+                                                 Force WCEP over block v
+                                             
+                                          
+                                          
+                                             9:
+                                             
+                                                
+                                                return 
+                                                
+                                                   
+                                                      SolveIPET
+                                                   
+                                                   (
+                                                   G
+                                                   ,
+                                                   C
+                                                   ∪
+                                                   C
+                                                   ′
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+In our recent work [2,10] we have proposed a technique to profile the worst-case behavior of real-time programs using static program analysis. We define the criticality metric for each basic block in the CFG as the length of the longest path passing through a basic block divided by the global WCET. This yields a value between 0 and 1 indicating the relevance of a given basic block in relation to the WCET of the program. Algorithm 1 shows a straight-forward (and suboptimal) approach for computing the criticality metric for each basic block in a program׳s CFG. After an initial static analysis (see Section 2.2) and computation of the WCET bound for the original program (Algorithm 1 l. 2), the longest path through each of the program׳s basic blocks is computed (l. 4). In our concrete case, this is done by adding an additional ILP constraint to the IPET problem. It is generated for block v by BlockConstraint (l. 8) and constrains 
+                           X
+                           (
+                           v
+                           )
+                         to be greater or equal 1. The length of each restricted longest path in relation to the global WCEP exposes the worst-case relevance of all program fragments (l. 5). Table 1
+                         shows the criticality profiles of several WCET analysis problems for the Debie1 and PapaBench real-time programs. From the columns 
+                           
+                              
+                                 I
+                              
+                              
+                                 0
+                              
+                           
+                           ,
+                           …
+                           ,
+                           
+                              
+                                 I
+                              
+                              
+                                 5
+                              
+                           
+                        , the number of basic blocks in six predefined criticality intervals can be seen. The variation of block distributions hints at an underlying difference of program structure with regard to WCET-critical code. The information we extract in this way can, for instance, be used to guide program optimizations in order to improve the actual WCET of the program.
+
+We believe that the criticality metric is not only interesting for program optimization, but can also be used to guide the WCET analysis itself. A large number of basic blocks in Table 1 is relatively unimportant, with a criticality value below 0.8. Only 13% of the basic blocks of the debie-4a benchmark, for instance, are highly critical. The mean percentage of basic blocks, which are highly critical, i.e., have a criticality above 0.8, is 67% (only 54% for Debie1 benchmarks).
+
+Considering this observation, one could ask: is it possible to improve the precision and computation time of a WCET analysis by excluding the uncritical code parts from the analysis? Answering this, is precisely the goal of this work. We exclude uncritical code parts by pruning the control-flow graph and iteratively deriving a refined, but still provably correct, WCET bound. A detailed description of this approach follows in the next section.
+
+We will first present our pruning algorithm (Algorithm 2), which is then illustrated with the help of an elaborate example (Fig. 1
+                     ). Then, the algorithm׳s correctness and complexity, algorithm variations and improvements are described at the end of this section.
+
+
+                        
+                           Algorithm 2
+                           Graph-pruning algorithm.
+                                 
+                                    
+                                       
+                                       
+                                       
+                                          
+                                             
+                                                Require:
+                                             
+                                                
+                                                   G
+                                                   =
+                                                   (
+                                                   V
+                                                   ,
+                                                   E
+                                                   ,
+                                                   r
+                                                   ,
+                                                   t
+                                                   )
+                                                
+                                                CFG of the input program.
+                                          
+                                          
+                                             
+                                             
+                                                
+                                                   
+                                                      
+                                                         S
+                                                      
+                                                      
+                                                         1
+                                                      
+                                                   
+                                                   ,
+                                                   …
+                                                   ,
+                                                   
+                                                      
+                                                         S
+                                                      
+                                                      
+                                                         n
+                                                      
+                                                   
+                                                
+                                                
+                                                Block sets sorted by criticality, from highest to lowest.
+                                          
+                                          
+                                             1:
+                                             
+                                                
+                                                   
+                                                      
+                                                         ub
+                                                      
+                                                      
+                                                         wcet
+                                                      
+                                                   
+                                                   =
+                                                   0
+                                                
+                                             
+                                          
+                                          
+                                             2:
+                                             
+                                                for 
+                                                
+                                                   i
+                                                   =
+                                                   1
+                                                   →
+                                                   n
+                                                 
+                                                do
+                                             
+                                          
+                                          
+                                             3:
+                                             
+                                                
+                                                if 
+                                                
+                                                   
+                                                      
+                                                         ub
+                                                      
+                                                      
+                                                         wcet
+                                                      
+                                                   
+                                                   ≥
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         G
+                                                      
+                                                   
+                                                   (
+                                                   
+                                                      
+                                                         S
+                                                      
+                                                      
+                                                         i
+                                                      
+                                                   
+                                                   )
+                                                 
+                                                then
+                                             
+                                          
+                                          
+                                             4:
+                                             
+                                                
+                                                return 
+                                                ub
+                                                
+                                                   wcet
+                                                
+                                                
+                                                
+                                                
+                                                   ▹
+                                                 Terminate when no longer paths can exist
+                                          
+                                          
+                                             5:
+                                             
+                                                
+                                                Let 
+                                                
+                                                   V
+                                                   ′
+                                                   ←
+                                                   
+                                                      
+                                                         S
+                                                      
+                                                      
+                                                         1
+                                                      
+                                                   
+                                                   ∪
+                                                   ⋯
+                                                   ∪
+                                                   
+                                                      
+                                                         S
+                                                      
+                                                      
+                                                         i
+                                                      
+                                                   
+                                                ,
+                                                
+                                                   E
+                                                   ′
+                                                   ←
+                                                   E
+                                                   ∩
+                                                   V
+                                                   ′
+                                                   ×
+                                                   V
+                                                   ′
+                                                 
+                                                in
+                                             
+                                          
+                                          
+                                             6:
+                                             
+                                                
+                                                
+                                                   G
+                                                   ′
+                                                   ←
+                                                   (
+                                                   V
+                                                   ′
+                                                   ,
+                                                   E
+                                                   ′
+                                                   ,
+                                                   r
+                                                   ,
+                                                   t
+                                                   )
+                                                
+                                                
+                                                
+                                                
+                                                   ▹
+                                                 Construct and analyze a subgraph
+                                          
+                                          
+                                             7:
+                                             
+                                                
+                                                
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               S
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   ←
+                                                   P
+                                                   
+                                                      runed
+                                                   
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         IGP
+                                                      
+                                                   
+                                                   (
+                                                   G
+                                                   ′
+                                                   ,
+                                                   
+                                                      
+                                                         S
+                                                      
+                                                      
+                                                         i
+                                                      
+                                                   
+                                                   ,
+                                                   
+                                                      
+                                                         ub
+                                                      
+                                                      
+                                                         wcet
+                                                      
+                                                   
+                                                   )
+                                                
+                                                
+                                             
+                                          
+                                          
+                                             8:
+                                             
+                                                
+                                                
+                                                   
+                                                      
+                                                         ub
+                                                      
+                                                      
+                                                         wcet
+                                                      
+                                                   
+                                                   ←
+                                                   max
+                                                   (
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               S
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   ,
+                                                   
+                                                      
+                                                         ub
+                                                      
+                                                      
+                                                         wcet
+                                                      
+                                                   
+                                                )
+                                                
+                                                   ▹
+                                                 Increase until a safe WCET
+                                          
+                                          
+                                             9:
+                                             
+                                                return 
+                                                ub
+                                                
+                                                   wcet
+                                                
+                                                
+                                             
+                                          
+                                          
+                                             10:
+                                             
+                                                function 
+                                                
+                                                   
+                                                      
+                                                         PrunedWCET
+                                                      
+                                                      
+                                                         IGP
+                                                      
+                                                   
+                                                 
+                                                
+                                                   (
+                                                   G
+                                                   ′
+                                                   ,
+                                                   
+                                                      
+                                                         S
+                                                      
+                                                      
+                                                         i
+                                                      
+                                                   
+                                                   ,
+                                                   
+                                                      
+                                                         ub
+                                                      
+                                                      
+                                                         wcet
+                                                      
+                                                   
+                                                   )
+                                                
+                                                
+                                             
+                                          
+                                          
+                                             11:
+                                             
+                                                
+                                                
+                                                   I
+                                                   ←
+                                                   AnalyzeAI
+                                                   (
+                                                   G
+                                                   ′
+                                                   )
+                                                
+                                                
+                                             
+                                          
+                                          
+                                             12:
+                                             
+                                                
+                                                
+                                                   C
+                                                   ←
+                                                   CreateConstraints
+                                                   (
+                                                   I
+                                                   )
+                                                
+                                                
+                                                
+                                                
+                                                   ▹
+                                                 Flow constraints from analysis info
+                                          
+                                          
+                                             13:
+                                             
+                                                
+                                                
+                                                   C
+                                                   ′
+                                                   ←
+                                                   BlockConstraint
+                                                   (
+                                                   
+                                                      
+                                                         S
+                                                      
+                                                      
+                                                         i
+                                                      
+                                                   
+                                                   )
+                                                
+                                                
+                                                
+                                                
+                                                   ▹
+                                                 Force WCEP over any block in S
+                                                
+                                                   i
+                                                
+                                             
+                                          
+                                          
+                                             14:
+                                             
+                                                
+                                                return 
+                                                
+                                                   SolveIPET
+                                                   (
+                                                   G
+                                                   ′
+                                                   ,
+                                                   C
+                                                   ∪
+                                                   C
+                                                   ′
+                                                   )
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+In a nutshell, iterative graph pruning (IGP), presented as pseudo code in Algorithm 2, performs WCET analysis on a sorted sequence of basic block sets (
+                           
+                              
+                                 S
+                              
+                              
+                                 1
+                              
+                           
+                           ,
+                           …
+                           ,
+                           
+                              
+                                 S
+                              
+                              
+                                 n
+                              
+                           
+                        ) and terminates when an upper bound (ub
+                        
+                           wcet
+                        ) is found to be a safe bound for the input program represented by the CFG G. Each set S
+                        
+                           i
+                         is made up of basic blocks, which have the same criticality value, based on the computation presented in Section 2.4. The sets 
+                           
+                              
+                                 S
+                              
+                              
+                                 i
+                              
+                           
+                           ,
+                           …
+                           ,
+                           
+                              
+                                 S
+                              
+                              
+                                 n
+                              
+                           
+                         are then sorted based on their criticality from highest to lowest. However, instead of their relative criticality value, Algorithm 2 directly uses the respective WCET bound (
+                           
+                              
+                                 WCET
+                              
+                              
+                                 v
+                              
+                           
+                         in Algorithm 1) of a set via 
+                           
+                              
+                                 WCET
+                              
+                              
+                                 G
+                              
+                           
+                           (
+                           
+                              
+                                 S
+                              
+                              
+                                 i
+                              
+                           
+                           )
+                        . Thus, the following relationship holds between basic block sets: 
+                           
+                              
+                                 ∀
+                                 i
+                                 ∈
+                                 {
+                                 1
+                                 ,
+                                 …
+                                 ,
+                                 n
+                                 −
+                                 1
+                                 }
+                                 :
+                                 
+                                    
+                                       WCET
+                                    
+                                    
+                                       G
+                                    
+                                 
+                                 (
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 )
+                                 >
+                                 
+                                    
+                                       WCET
+                                    
+                                    
+                                       G
+                                    
+                                 
+                                 (
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       i
+                                       +
+                                       1
+                                    
+                                 
+                                 )
+                              
+                           
+                        
+                     
+
+At every iteration i, the vertex-induced subgraph 
+                           G
+                           ′
+                         is created from the union of the i first (and most critical) sets 
+                           
+                              
+                                 S
+                              
+                              
+                                 1
+                              
+                           
+                           ,
+                           …
+                           ,
+                           
+                              
+                                 S
+                              
+                              
+                                 i
+                              
+                           
+                         (l. 5–l. 6). 
+                           G
+                           ′
+                         is then targeted by a full WCET analysis run (performed by PrunedWCET
+                           IGP
+                        , l. 10), which entails abstract interpretation on the program׳s subgraph 
+                           G
+                           ′
+                         to generate the weighting function 
+                           W
+                           ′
+                        . This is followed by a constrained longest path search, which only considers those paths passing through blocks in the current set S
+                        
+                           i
+                         (BlockConstraint, introduced in Algorithm 1, here generates an ILP constraint over a sum of basic blocks: 
+                           
+                              
+                                 ∑
+                              
+                              
+                                 v
+                                 ∈
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       i
+                                    
+                                 
+                              
+                           
+                           X
+                           (
+                           v
+                           )
+                           ≥
+                           1
+                        ). All other paths in 
+                           G
+                           ′
+                         are uninteresting, since these paths have already been bounded in the previous iterations. Note that it is possible that 
+                           G
+                           ′
+                         only contains infeasible paths. PrunedWCET
+                           IGP
+                         then returns 0 and the current upper bound remains unchanged. If, at the end of an iteration, the current upper bound (ub
+                        
+                           wcet
+                        ) is less than the just computed bound (
+                           
+                              
+                                 WCET
+                              
+                              
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       i
+                                    
+                                 
+                              
+                           
+                        ), it needs to be updated (l. 8).
+
+The algorithm terminates at the latest when all sets have been considered (i.e., 
+                           V
+                           ′
+                           =
+                           V
+                         and 
+                           G
+                           ′
+                         is the same as the graph of the original program) or before when the termination condition (l. 3) is met. The latter case occurs when the remaining longest path induced by the remaining S
+                        
+                           i
+                        ׳s is shorter than the current WCET bound ub
+                        
+                           wcet
+                        . We will prove that ub
+                        
+                           wcet
+                         is a valid bound for G in the next subsection.
+                           Example 1
+                           Consider the weighted CFG shown in Fig. 1a, where the block weights are shown in the lower right corner. The program is assumed to be executed by a processor equipped with a fully associative instruction cache with a least-recently used replacement strategy that consists of 2 cache blocks and that has a cache-miss penalty of 5. The memory layout of the CFG׳s basic blocks is shown in Fig. 1b, which indicates the assignment of basic blocks (
+                                 BB
+                                 i
+                              ) to cache lines (
+                                 
+                                    
+                                       
+                                    
+                                 
+                              ). The layout was chosen to minimize an assumed average-case execution along the basic blocks BB0, BB2, BB4, BB6, and BB7. It is assumed that 
+                                 BB
+                                 3
+                               and BB5 are rarely executed in the average case.
+
+A first, unmodified WCET analysis performs an instruction cache analysis and a loop bounds analysis. The former determines that the execution of each basic block, except BB5, induces an instruction-cache miss in the worst-case (as indicated by the blue annotation 
+                                 
+                                    
+                                       
+                                    
+                                 
+                               in the upper left corner). The execution of BB5 even causes two cache misses (
+                                 
+                                    
+                                       
+                                    
+                                 
+                               and 
+                                 
+                                    
+                                       
+                                    
+                                 
+                              ). The respective cache-miss penalty is already included in the CFG weights. The loop bounds analysis then discovers that the number of loop iterations at BB4 depends on a variable x either assigned to 10 in BB1 or 7 in BB2 (highlighted in red). The loop bound thus is assumed to be 10.
+
+Based on these analysis results, static worst-case profiling is performed (see Section 2.4). The longest path (p
+                              1) covers BB0, BB2, BB4, BB6, and BB7 and has length 467 (
+                                 13
+                                 +
+                                 24
+                                 +
+                                 10
+                                 ·
+                                 19
+                                 +
+                                 10
+                                 ·
+                                 23
+                                 +
+                                 10
+                              ). The basic block with the next highest criticality of 0.976 is BB1. Its criticality is derived from path (p
+                              2), which is almost identical to p
+                              1. It merely passes through BB1 instead of BB2 and has a length of 456. The criticality of BB5 is 0.974, which is induced by path p
+                              3 that covers BB5 and all blocks of p
+                              1. 
+                                 BB
+                                 3
+                              ׳s criticality evaluates to 0.122, induced by a path covering BB0, BB1, 
+                                 BB
+                                 3
+                              , and BB7.
+
+This yields four block sets that serve as input for our iterative pruning algorithm: 
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 =
+                                 {
+                                 BB
+                                 0
+                                 ,
+                                 BB
+                                 2
+                                 ,
+                                 BB
+                                 4
+                                 ,
+                                 BB
+                                 6
+                                 ,
+                                 BB
+                                 7
+                                 }
+                              , 
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 =
+                                 {
+                                 BB
+                                 1
+                                 }
+                              , 
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       3
+                                    
+                                 
+                                 =
+                                 {
+                                 BB
+                                 5
+                                 }
+                              , and 
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       4
+                                    
+                                 
+                                 =
+                                 {
+                                 BB
+                                 3
+                                 }
+                              , which are associated with path lengths of 467, 456, 455, and 57 respectively.
+
+In the first iteration the set S
+                              1 is used to construct a subgraph G
+                              1, shown in Fig. 2
+                              a, which is then reanalyzed. In contrast to the initial analysis run, there is only a single assignment to x, limiting the number of loop iterations at BB4 to 7. In addition, the cache analysis is able to prove that BB4׳s cache line (
+                                 
+                                    
+                                       
+                                    
+                                 
+                              ) is always present in the instruction cache and thus may never cause a cache miss (indicated by the blue 
+                                 
+                                    
+                                       
+                                    
+                                 
+                              ). Similarly, the analysis can prove that BB6 causes a single cache miss only, i.e., cache line 
+                                 
+                                    
+                                       
+                                    
+                                 
+                               is persistent with regard to the enclosing loop (indicated by the blue 
+                                 
+                                    
+                                       
+                                    
+                                 
+                              ). The tighter analysis results reduce the CFG weights and consequently improve the WCET bound of p
+                              1 from initially 467 to 276 (
+                                 13
+                                 +
+                                 24
+                                 +
+                                 7
+                                 ·
+                                 14
+                                 +
+                                 7
+                                 ·
+                                 18
+                                 +
+                                 5
+                                 +
+                                 10
+                              ). Note that only the reduced weight of BB6 is shown in Fig. 2a, while the path length accounts for an additional cache miss (+5). The upper bound ub
+                              
+                                 wcet
+                               is now 276.
+
+The algorithm continues, since the path length associated with S
+                              2 is greater than the current upper bound (
+                                 456
+                                 >
+                                 276
+                              ). In the second iteration G
+                              2 is constructed from 
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 ∪
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       2
+                                    
+                                 
+                               and reanalyzed (see Fig. 2b). The loop bounds analysis has to consider both assignments to x again and consequently derives the initial loop bound of 10. The cache analysis similarly loses precision. When BB4 is executed it may cause a cache miss. However, it is (like BB6) persistent with regard to the enclosing loop. The longest path in G
+                              2 has length 377. However, this path covers all the basic blocks of p
+                              1. All executions along paths involving these blocks have been proven to be shorter than 276 in the previous iteration. This bound still holds, since the pessimism introduced by growing G
+                              1 into G
+                              2 can only impact paths actually passing through BB1. The longest path search on G
+                              2 is constrained to only consider these paths. The longest of these paths covers the same basic blocks as p
+                              2 and has a length of 366 (initially 456). The path is longer than the previous upper bound, consequently 366 is assigned to ub
+                              
+                                 wcet
+                              .
+
+The path length associated with S
+                              3 is still longer than this bound (
+                                 455
+                                 >
+                                 366
+                              ), the algorithm thus continues. The next subgraph is constructed from 
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 ∪
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 ∪
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       3
+                                    
+                                 
+                              , which extends the CFG shown in Fig. 2b to also include BB5. This addition has no impact on the loop bounds analysis. The cache analysis, however, can no longer prove persistence of either BB4 or BB6, since any execution of BB5 evicts all blocks present in the cache. The CFG weights are identical to those of the original graph (see Fig. 1a). In particular, paths p
+                              1 and p
+                              2 have the same length as in the original graph (467 and 456 respectively). Tighter bounds for both of these paths have been proven before. The path search is thus again constrained to search for new paths whose lengths have not been bounded by the previous iterations. The analysis yields a path equal to p
+                              3 of length 455. The analysis was not able to improve the precision of this path. Still, since the path length is longer than the previous upper bound, 455 is assigned to ub
+                              
+                                 wcet
+                              .
+
+Only one set, S
+                              4, remains, which has a path length smaller than the current upper bound (
+                                 57
+                                 <
+                                 455
+                              ). Since this path length bounds all remaining paths that were not considered during the iterative processing, no new paths can be discovered that could increase the WCET bound determined so far. The algorithm thus terminates and returns an improved WCET bound of 455 instead of the initial 467 (an improvement of 2.6%).
+
+One might believe that the above information could equally be derived by a static loop bounds analysis [11,12]. Indeed most analysis tools would compute an interval 
+                           [
+                           7
+                           …
+                           10
+                           ]
+                         for this example, covering the minimal and maximal number of loop iterations. However, to the best of our knowledge, none of the existing approaches is able to exploit the information that certain information is only valid when a given path is actually executed. A major challenge here is to encode this information as flow-facts, which so far has never been addressed by any work on static loop bounds analysis.
+
+Also note that our approach does not aim specifically at loop bounds. Apart from potentially tighter loop bounds, our technique may also yield more precise information on the values of registers and memory locations, branch conditions, addresses of memory accesses as well as the abstract states of the processor pipeline, the caches, and other hardware components.
+
+To show the correctness of our approach we have to consider the impact of graph pruning on the typical phases of a WCET analysis run. We assume, without loss of generality, that WCET analysis is performed in two phases [6]. A first phase, based on abstract interpretation [7], delivers local worst-case execution times for each basic block. In the second phase, a longest path search [5,8] is performed on a weighted CFG, computed from these local execution times.
+
+In our approach, abstract interpretation is applied to a subgraph 
+                           G
+                           ′
+                         of the original CFG G of the input program. In order to show correctness we thus have to investigate some properties of the subgraph 
+                           G
+                           ′
+                        . 
+                           Lemma 1
+                           
+                              A subgraph 
+                              
+                                 G
+                                 ′
+                                 =
+                                 (
+                                 V
+                                 ′
+                                 ,
+                                 E
+                                 ′
+                                 ,
+                                 r
+                                 ,
+                                 t
+                                 )
+                               
+                              constructed by Algorithm 
+                              2 
+                              is connected, i.e., for every CFG node 
+                              
+                                 v
+                                 ′
+                                 ∈
+                                 V
+                                 ′
+                               
+                              a path from r to t, passing through 
+                              
+                                 v
+                                 ′
+                              , exists.
+
+This follows immediately from the way subgraphs are constructed. Remember that the blocks in the subgraph 
+                                 G
+                                 ′
+                               of the m-th iteration are computed by unifying all the basic block sets S
+                              
+                                 i
+                              , 
+                                 i
+                                 ∈
+                                 {
+                                 1
+                                 ,
+                                 …
+                                 ,
+                                 m
+                                 }
+                              , whose path lengths are longer than the path length associated with S
+                              
+                                 m
+                              , i.e., 
+                                 V
+                                 ′
+                                 =
+                                 
+                                    
+                                       ⋃
+                                    
+                                    
+                                       i
+                                       ∈
+                                       {
+                                       1
+                                       ,
+                                       …
+                                       ,
+                                       m
+                                       }
+                                    
+                                 
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       i
+                                    
+                                 
+                              .
+
+Assume 
+                                 G
+                                 ′
+                               is not connected, i.e., a CFG node 
+                                 v
+                                 ′
+                               has to exist that is not reachable from the root node r in 
+                                 G
+                                 ′
+                              . Since 
+                                 v
+                                 ′
+                                 ∈
+                                 V
+                                 ′
+                               it follows that a corresponding path 
+                                 p
+                                 =
+                                 (
+                                 r
+                                 ,
+                                 …
+                                 ,
+                                 n
+                                 ′
+                                 ,
+                                 …
+                                 ,
+                                 t
+                                 )
+                               has to exists in the original graph G. The length of this path corresponds to the path length associated with S
+                              
+                                 m
+                              . As 
+                                 G
+                                 ′
+                               is not connected, at least one node of p is not in 
+                                 V
+                                 ′
+                              . However, this is impossible, since the existence of p implies that this node either is in S
+                              
+                                 m
+                               or another set S
+                              
+                                 k
+                              , 
+                                 k
+                                 <
+                                 m
+                              . The subgraph 
+                                 G
+                                 ′
+                               is thus connected.□
+
+
+                              A static analysis, based on abstract interpretation, applied to a subgraph 
+                              
+                                 G
+                                 ′
+                                 =
+                                 (
+                                 V
+                                 ′
+                                 ,
+                                 E
+                                 ′
+                                 ,
+                                 r
+                                 ,
+                                 t
+                                 )
+                               
+                              delivers correct results with respect to the potential execution paths in 
+                              
+                                 G
+                                 ′
+                              .
+
+We first investigate the impact on the trace semantics and then show that the set of states reachable under collecting semantics is a superset of the states reachable under the trace semantics, i.e., represents a safe over-approximation. The correctness of the static analysis, when applied to 
+                                 G
+                                 ′
+                              , then follows from the existence of a Galois connection [7] and the fact that the static analysis has been proven correct with regard to the collecting semantics (see Section 2.2).
+
+Trace semantics: The traces associated with the subgraph 
+                                 G
+                                 ′
+                               can be characterized by the contexts of the traces׳ states (recall that contexts refer to nodes in G). We can thus define the set of reachable states for all traces along paths in 
+                                 G
+                                 ′
+                               as 
+                                 
+                                    
+                                       R
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                                 =
+                                 {
+                                 s
+                                 |
+                                 ∃
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       init
+                                    
+                                 
+                                 ∈
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       init
+                                    
+                                 
+                                 :
+                                 s
+                                 ∈
+                                 T
+                                 (
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       init
+                                    
+                                 
+                                 )
+                                 ∧
+                                 ∀
+                                 (
+                                 q
+                                 ,
+                                 σ
+                                 )
+                                 ∈
+                                 T
+                                 (
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       init
+                                    
+                                 
+                                 )
+                                 :
+                                 q
+                                 ∈
+                                 V
+                                 ′
+                                 }
+                              , which is a subset of 
+                                 R
+                              .
+
+Collecting semantics: Similarly, the collecting semantics of all executions on any path within 
+                                 G
+                                 ′
+                               can be defined as 
+                                 
+                                    
+                                       CS
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                                 (
+                                 S
+                                 )
+                                 =
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       init
+                                    
+                                 
+                                 ∪
+                                 S
+                                 ∪
+                                 {
+                                 τ
+                                 (
+                                 s
+                                 )
+                                 =
+                                 (
+                                 q
+                                 ,
+                                 σ
+                                 )
+                                 |
+                                 s
+                                 ∈
+                                 S
+                                 ∧
+                                 q
+                                 ∈
+                                 V
+                                 ′
+                                 }
+                              . Note that all states in 
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       init
+                                    
+                                 
+                               are guaranteed to be covered by the collecting semantics, since the CFG׳s root r is always in 
+                                 V
+                                 ′
+                              . It is evident that 
+                                 
+                                    
+                                       lfp
+                                       
+                                       CS
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                               is a subset of 
+                                 lfp
+                                 
+                                 CS
+                               and thus is also a subset of 
+                                 R
+                              . The set of states reachable under the collecting semantics on 
+                                 G
+                                 ′
+                               is, however, not identical to 
+                                 
+                                    
+                                       R
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                              . Instead it is an over-approximation, i.e., 
+                                 
+                                    
+                                       R
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                                 ⊆
+                                 
+                                    
+                                       lfp
+                                       
+                                       CS
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                              , as will be shown next. Assume a state 
+                                 s
+                                 ∈
+                                 S
+                               that is in 
+                                 
+                                    
+                                       R
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                               but not in 
+                                 
+                                    
+                                       lfp
+                                       
+                                       CS
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                              . Since 
+                                 s
+                                 ∈
+                                 
+                                    
+                                       R
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                              , a trace 
+                                 T
+                                 (
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       init
+                                    
+                                 
+                                 )
+                                 =
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 ,
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       2
+                                    
+                                 
+                                 ,
+                                 …
+                                 ,
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 ,
+                                 …
+                               has to exist, where all contexts of the states are in 
+                                 V
+                                 ′
+                              , 
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 =
+                                 s
+                              , and 
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       1
+                                    
+                                 
+                                 =
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       init
+                                    
+                                 
+                                 ∈
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       init
+                                    
+                                 
+                              . In particular, the initial state 
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       init
+                                    
+                                 
+                               is guaranteed to be in 
+                                 CS
+                              . The fixed point computation of 
+                                 
+                                    
+                                       lf
+                                       p
+                                       
+                                       CS
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                               would then discover at least one new state of the trace on each iteration and after at most 
+                                 k
+                               iterations would discover 
+                                 
+                                    
+                                       s
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 =
+                                 s
+                              . This contradicts the assumption that s is not in 
+                                 
+                                    
+                                       lfp
+                                       
+                                       CS
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                              . It thus follows that 
+                                 
+                                    
+                                       R
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                                 ⊆
+                                 
+                                    
+                                       lfp
+                                       
+                                       CS
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                              .The collecting semantics on 
+                                 G
+                                 ′
+                               thus is a safe over-approximation with regard to the trace semantics on 
+                                 G
+                                 ′
+                              .
+
+Correctness: The correctness of any static analysis based on abstract interpretation applied to 
+                                 G
+                                 ′
+                              , which has been proven correct with regard to the original collecting semantics, then follows automatically from the existence of a Galois connection [7]. Note, however, the analysis’ results are only sound with regard to the subgraph 
+                                 G
+                                 ′
+                              . Naturally, some reachable states in the original program are not reachable when the execution is constrained to a subgraph 
+                                 G
+                                 ′
+                              , since 
+                                 
+                                    
+                                       lfp
+                                       
+                                       CS
+                                    
+                                    
+                                       G
+                                       ′
+                                    
+                                 
+                                 ⊆
+                                 lfp
+                                 
+                                 CS
+                                 ⊆
+                                 R
+                              .□
+
+Note that the proof above is very similar to the way traces are discriminated by Rival and Mauborgne [13,14]. The subgraph 
+                           G
+                           ′
+                         in our case corresponds to a partitioning of traces into two sets: (1) traces executing only instructions within 
+                           G
+                           ′
+                         and (2) traces executing at least one instruction that does not belong to 
+                           G
+                           ′
+                        . The main difference is that in our case the results of the latter partition are not relevant, and thus can be discarded.
+
+Another way of defining the semantics of the program induced by 
+                           G
+                           ′
+                         is to modify the semantic function τ such that any state transition leaving 
+                           G
+                           ′
+                         leads to a final state. The resulting trace semantics is slightly less precise than the one from above, since the prefixes of traces eventually leaving 
+                           G
+                           ′
+                         are also considered. On the other hand, the reachable states under the collecting semantics and trace semantics then match. This, in addition, resembles the semantics of traditional program slicing [15].
+
+The previous two lemmas ensure that, independent of the concrete analysis performed, the local execution times obtained by abstract interpretation in the WCET analysis tool are sound with respect to a subgraph 
+                           G
+                           ′
+                        . It remains to show that the WCET bounds computed during the iterative processing are safe. This is done in two steps. First, it is shown that the WCET bound computed for all potential executions along paths in a subgraph still holds in a supergraph. We then show that the longest path search by Algorithm 2 computes a safe bound.
+                           Lemma 3
+                           
+                              The worst-case execution time bounds computed on a weighted subgraph 
+                              
+                                 G
+                                 ″
+                                 =
+                                 (
+                                 V
+                                 ″
+                                 ,
+                                 E
+                                 ″
+                                 ,
+                                 r
+                                 ,
+                                 t
+                                 ,
+                                 W
+                                 ″
+                                 )
+                               
+                              still hold for another weighted subgraph 
+                              
+                                 G
+                                 ′
+                                 =
+                                 (
+                                 V
+                                 ′
+                                 ,
+                                 E
+                                 ′
+                                 ,
+                                 r
+                                 ,
+                                 t
+                                 ,
+                                 W
+                                 ′
+                                 )
+                              , 
+                                 V
+                                 ″
+                                 ⊆
+                                 V
+                                 ′
+                              , 
+                                 E
+                                 ″
+                                 ⊆
+                                 E
+                                 ′
+                               
+                              for all executions along paths in 
+                              
+                                 G
+                                 ″
+                              .
+
+Let 
+                                 p
+                                 ′
+                               be a path in 
+                                 G
+                                 ′
+                               such that its CFG nodes are all in 
+                                 V
+                                 ″
+                               and 
+                                 p
+                                 ″
+                               be the longest path in 
+                                 G
+                                 ″
+                               that covers the same basic blocks, i.e., 
+                                 ∀
+                                 v
+                                 ∈
+                                 p
+                                 ′
+                                 ⇒
+                                 v
+                                 ∈
+                                 p
+                                 ″
+                              . Assume that an execution exists whose execution time is smaller or equal to 
+                                 |
+                                 p
+                                 ′
+                                 |
+                              , but is larger than 
+                                 |
+                                 p
+                                 ″
+                                 |
+                              .
+
+The path lengths of 
+                                 p
+                                 ′
+                               and 
+                                 p
+                                 ″
+                               might differ due to two reasons: either (1) the local execution time of some node 
+                                 v
+                                 ∈
+                                 p
+                                 ′
+                               increased, i.e., 
+                                 W
+                                 ″
+                                 (
+                                 v
+                                 )
+                                 <
+                                 W
+                                 ′
+                                 (
+                                 v
+                                 )
+                               or (2) some loop bound of a loop containing some node 
+                                 v
+                                 ∈
+                                 p
+                                 ′
+                               increased, thus allowing v to appear more often in 
+                                 p
+                                 ′
+                               than in 
+                                 p
+                                 ″
+                              . Both cases imply that some state s was found to be reachable during abstract interpretation on 
+                                 G
+                                 ′
+                               that was not reachable on 
+                                 G
+                                 ″
+                              . This new state cannot appear in any actual execution trace along any path induced by the basic blocks of 
+                                 p
+                                 ′
+                              , since the abstraction computed on 
+                                 G
+                                 ″
+                               already over-approximated all states reached by any trace in 
+                                 G
+                                 ″
+                              , including all those along 
+                                 p
+                                 ′
+                               (see Lemma 2). This contradicts the initial assumption.□
+
+
+                              The worst-case execution time bound computed by Algorithm 
+                              2 
+                              for a subgraph 
+                              
+                                 G
+                                 ′
+                               
+                              is safe.
+
+Consider the subgraph 
+                                 G
+                                 ′
+                               and basic block set S
+                              
+                                 m
+                              , both of the m-th iteration (
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       m
+                                    
+                                 
+                                 ⊂
+                                 G
+                                 ′
+                              ) as well as the subgraph 
+                                 G
+                                 ″
+                               of the previous iteration, with its bound 
+                                 WCET
+                                 (
+                                 G
+                                 ″
+                                 )
+                              .
+
+
+                              Lemma 3 showed that all paths in 
+                                 G
+                                 ′
+                               whose CFG nodes are in 
+                                 G
+                                 ″
+                               are uninteresting for our algorithm, since their worst-case execution times have already been bounded by a previous iteration.
+
+It remains to bound those paths in 
+                                 G
+                                 ′
+                               for which no corresponding path can be constructed in 
+                                 G
+                                 ″
+                              , i.e., those paths that contain at least one node in S
+                              
+                                 m
+                              . To bound the WCET of 
+                                 G
+                                 ′
+                              , three cases for the longest path 
+                                 p
+                                 ′
+                               in 
+                                 G
+                                 ′
+                               need to be considered:
+                                 
+                                    1.
+                                    
+                                       
+                                          |
+                                          p
+                                          ′
+                                          |
+                                          >
+                                          WCET
+                                          (
+                                          G
+                                          ″
+                                          )
+                                       : Since 
+                                          |
+                                          p
+                                          ′
+                                          |
+                                        is longer than the previously established WCET bound, it follows that 
+                                          WCET
+                                          (
+                                          G
+                                          ′
+                                          )
+                                          =
+                                          |
+                                          p
+                                          ′
+                                          |
+                                       . Suppose a path q exists in 
+                                          G
+                                          ′
+                                        for which an execution can be constructed whose execution time is longer than 
+                                          |
+                                          p
+                                          ′
+                                          |
+                                       . If q consists of CFG nodes from 
+                                          G
+                                          ″
+                                        only, it follows that the WCET of q is bounded by 
+                                          WCET
+                                          (
+                                          G
+                                          ″
+                                          )
+                                        (see Lemma 3), which contradicts the initial assumption. If q contains at least one node in S
+                                       
+                                          m
+                                       , 
+                                          |
+                                          q
+                                          |
+                                        is a safe bound for the actual execution time of the execution along q. However, 
+                                          p
+                                          ′
+                                        is a longest path in 
+                                          G
+                                          ′
+                                        containing at least one node in S
+                                       
+                                          m
+                                       . It is thus impossible that 
+                                          |
+                                          q
+                                          |
+                                          >
+                                          |
+                                          p
+                                          ′
+                                          |
+                                       . It follows that 
+                                          |
+                                          p
+                                          ′
+                                          |
+                                        is an upper bound on the actual WCET of any execution in 
+                                          G
+                                          ′
+                                       .
+
+
+                                       
+                                          |
+                                          p
+                                          ′
+                                          |
+                                          ≤
+                                          WCET
+                                          (
+                                          G
+                                          ″
+                                          )
+                                       : As the length of 
+                                          p
+                                          ′
+                                        is not longer than the previously established bound, it follows that 
+                                          WCET
+                                          (
+                                          G
+                                          ′
+                                          )
+                                          =
+                                          WCET
+                                          (
+                                          G
+                                          ″
+                                          )
+                                       . The longest path through 
+                                          G
+                                          ″
+                                        also represents the longest path through 
+                                          G
+                                          ′
+                                       , ignoring any additional overestimation caused by blocks in S
+                                       
+                                          m
+                                       . The proof is analogous to the case above.
+
+No feasible path containing a block in S
+                                       
+                                          m
+                                        exists: This case happens when the abstract interpretation finds that no execution in 
+                                          G
+                                          ′
+                                        exists that passes through a block in S
+                                       
+                                          m
+                                       , i.e., none of the conditions of the branches leading to a block in S
+                                       
+                                          m
+                                        can be satisfied. It follows that 
+                                          WCET
+                                          (
+                                          G
+                                          ′
+                                          )
+                                          =
+                                          WCET
+                                          (
+                                          G
+                                          ″
+                                          )
+                                       . Note that paths over these blocks might become feasible in later iterations, e.g., when code making the, yet unsatisfiable, conditions satisfiable is added. The proof is analogous to the case above.
+
+Using induction, we can finally prove that Algorithm 2 delivers safe WCET bounds for all subgraphs considered during the iterative processing.□
+
+The previous lemmas prove that applying abstract interpretation on subgraphs is sound and that the algorithm computes safe bounds with respect to the subgraphs considered during the iterative processing. It remains to show that no other paths exist, which could be longer than the WCET bound returned by the last iteration.
+                           Theorem 1
+                           
+                              The last iteration of Algorithm 
+                              2 
+                              computes a safe WCET bound.
+
+
+                              Lemma 4 shows that the WCET of subgraph 
+                                 G
+                                 ′
+                               of the m-th iteration is a safe bound with respect to all the execution paths in 
+                                 G
+                                 ′
+                              . Assume now that the m-th iteration is indeed the last iteration of the algorithm. Two cases have to be considered: (1) S
+                              
+                                 m
+                               is the last block set or (2) the algorithm terminates early (Algorithm 2, l. 3), since the longest path associated with S
+                              
+                                 m
+                               is shorter than the bound 
+                                 WCET
+                                 (
+                                 G
+                                 ′
+                                 )
+                               returned by the algorithm.
+
+In the first case 
+                                 G
+                                 ′
+                               covers all paths in G and thus also safely bounds the length of all these paths (see Lemma 4).
+
+In the latter case, only the paths in 
+                                 G
+                                 ′
+                               were explicitly bounded during the iterative processing. The remaining paths have to contain at least one node from the remaining block sets. Suppose that q is such a path for which an execution exists whose execution time is larger than 
+                                 WCET
+                                 (
+                                 G
+                                 ′
+                                 )
+                              . This path has to contain at least one node 
+                                 v
+                                 ∈
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 ,
+                                 m
+                                 <
+                                 k
+                                 <
+                                 n
+                              , and consequently 
+                                 |
+                                 q
+                                 |
+                                 ≤
+                                 
+                                    
+                                       WCET
+                                    
+                                    
+                                       G
+                                    
+                                 
+                                 (
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       k
+                                    
+                                 
+                                 )
+                              . As the block sets are ordered in descending order, i.e., 
+                                 ∀
+                                 i
+                                 ∈
+                                 {
+                                 1
+                                 ,
+                                 …
+                                 ,
+                                 n
+                                 −
+                                 1
+                                 }
+                                 :
+                                 
+                                    
+                                       WCET
+                                    
+                                    
+                                       G
+                                    
+                                 
+                                 (
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       i
+                                    
+                                 
+                                 )
+                                 >
+                                 
+                                    
+                                       WCET
+                                    
+                                    
+                                       G
+                                    
+                                 
+                                 (
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       i
+                                       +
+                                       1
+                                    
+                                 
+                                 )
+                              , this contradicts the assumption that 
+                                 
+                                    
+                                       WCET
+                                    
+                                    
+                                       G
+                                    
+                                 
+                                 (
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       m
+                                    
+                                 
+                                 )
+                                 <
+                                 WCET
+                                 (
+                                 G
+                                 ′
+                                 )
+                              . It follows that 
+                                 WCET
+                                 (
+                                 G
+                                 ′
+                                 )
+                               is a safe WCET bound.□
+
+The number n of sets 
+                           
+                              
+                                 S
+                              
+                              
+                                 1
+                              
+                           
+                           ,
+                           …
+                           ,
+                           
+                              
+                                 S
+                              
+                              
+                                 n
+                              
+                           
+                         is an upper bound on the iterations that will be performed by IGP. The former is again bounded by the number of basic blocks in the input program. Since its iterations are linear in the number of blocks, IGP is dominated by the complexity of the WCET analysis, i.e., abstract interpretation and longest path search.
+
+The block sets, which are assumed as input in Algorithm 2, can be efficiently computed using the criticality algorithms. This may be performed either during a preprocessing step [2] or on demand [2,10], while the graph pruning algorithm iterates.
+
+It may be the case that the WCET analysis tool targeted by graph pruning can be configured for different levels of precision. This usually involves a trade-off between tightness (precision) of the WCET bound and longer analysis runtime. IGP can be used to incorporate analyses varying in precision. Running the higher-precision analysis on a previously pruned graph would be a straight-forward way of further improving the WCET bound. But Algorithm 2 can also be modified to make use of multiple levels of precision directly. To do this, we replace function PrunedWCET
+                           IGP
+                         in Algorithm 2 with the variant given in Algorithm 3. This algorithm performs a second, more precise WCET analysis to lower the estimate of 
+                           
+                              
+                                 WCET
+                              
+                              
+                                 
+                                    
+                                       S
+                                    
+                                    
+                                       i
+                                    
+                                 
+                              
+                           
+                         for the current graph 
+                           G
+                           ′
+                        , whenever an imprecise analysis would increase the overall WCET bound. For this purpose we assume that PrunedWCETPrecise calculates a WCET bound similar to the steps performed by PrunedWCET
+                           IGP
+                         in Algorithm 2, but using a higher-precision abstract interpretation and carrying over more information into a larger IPET problem, which thus becomes harder to solve in general. PrunedWCETFast represents our standard less-precise analysis.
+                           Algorithm 3
+                           WCET computation function PrunedWCET
+                                 IGP-TS
+                               using two-stage analysis.
+                                 
+                                    
+                                       
+                                       
+                                       
+                                       
+                                          
+                                             
+                                                Require:
+                                             
+                                                
+                                                   G
+                                                   ′
+                                                   =
+                                                   (
+                                                   V
+                                                   ′
+                                                   ,
+                                                   E
+                                                   ′
+                                                   ,
+                                                   r
+                                                   ,
+                                                   t
+                                                   )
+                                                
+                                             
+                                             A CFG.
+                                          
+                                          
+                                             
+                                             
+                                                S
+                                                
+                                                   i
+                                                
+                                             
+                                             The set of newly added blocks.
+                                          
+                                          
+                                             
+                                             
+                                                ub
+                                                
+                                                   wcet
+                                                
+                                             
+                                             The current upper bound of the WCET.
+                                          
+                                          
+                                             1:
+                                             
+                                                
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               S
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   ←
+                                                   PrunedWCETFast
+                                                   (
+                                                   G
+                                                   ′
+                                                   ,
+                                                   
+                                                      
+                                                         S
+                                                      
+                                                      
+                                                         i
+                                                      
+                                                   
+                                                   )
+                                                
+                                             
+                                             
+                                          
+                                          
+                                             2:
+                                             
+                                                if 
+                                                
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               S
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   >
+                                                   
+                                                      
+                                                         ub
+                                                      
+                                                      
+                                                         wcet
+                                                      
+                                                   
+                                                 
+                                                then
+                                             
+                                             
+                                          
+                                          
+                                             3:
+                                             
+                                                
+                                                
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               S
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                      
+                                                         ′
+                                                      
+                                                   
+                                                   ←
+                                                   
+                                                      PrunedWCETPrecise
+                                                   
+                                                   (
+                                                   G
+                                                   ′
+                                                   ,
+                                                   
+                                                      
+                                                         S
+                                                      
+                                                      
+                                                         i
+                                                      
+                                                   
+                                                   )
+                                                
+                                             
+                                             
+                                          
+                                          
+                                             4:
+                                             
+                                                
+                                                return 
+                                                
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               S
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   ′
+                                                
+                                             
+                                             
+                                          
+                                          
+                                             5:
+                                             
+                                                return 
+                                                
+                                                   
+                                                      
+                                                         WCET
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               S
+                                                            
+                                                            
+                                                               i
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+Another way of incorporating a higher-precision analysis into graph pruning would be to run PrunedWCETPrecise on the pruned subgraph exactly once after the iterative processing. This would reduce the computational overhead and further lower the WCET bound (down to the path length of the next block set). One could even avoid the iterative processing entirely, by heuristically constructing a subgraph and applying the precise analysis to this subgraph. This would foremost reduce the computational overhead and leave the burden of reducing overestimation on the precise WCET analysis.
+
+@&#EXPERIMENTS@&#
+
+We evaluate our approach using the commercial WCET analysis tool aiT (version 12.10i) and two well-established WCET benchmarks: Debie1 [3] (version e) and PapaBench [4] (version 0.4). The analysis problems for both programs are taken from the WCET Tool Challenge 2011.
+                        2
+                     
+                     
+                        2
+                        
+                           http://www.mrtc.mdh.se/projects/WCC/2011/
+                        
+                     
+                  
+
+The aiT WCET analysis tool supports a rich set of architectures, which potentially could profit from our technique. For our experiments we choose the Freescale mpc5554 processor, since it was used in the WCET Tool Challenge, and the related mpc755s, which has a similar instruction set, but employs out-of-order execution, making WCET analysis harder. We use the default settings of the analysis tool regarding the processor configuration, except that we assume a non-unified instruction- and data cache and an active store buffer.
+
+Our implementation treats the WCET analysis tool as a black-box and in this case relies on an unmodified version of aiT. The graph pruning is realized through scripting and AIS annotations (IS NEVER EXECUTED and FLOW). Due to this setup, all information computed by an iteration is discarded instead of being reused by the following iteration. This means that our experiments overrate — and are not suitable to evaluate — the computational overhead of graph pruning (also see Section 4.3).
+
+We want to compare the WCET bound attained by graph pruning in its two variants, with the original result of aiT. The first variant (IGP) performs iterative graph pruning using standard IPET [8,5] (Algorithm 2). The second variant (IGP-TS) uses the two-stage WCET computation (Algorithm 2 with the extension in Algorithm 3), where a standard IPET computation is potentially refined by a second, more precise, but also more expensive, WCET analysis using aiT׳s prediction file technique [16]. We evaluate the two variants of our technique using the 28 analysis problems, assuming the mpc5554 as hardware architecture first. For the more complex mpc755s, the prediction file technique is not feasible (i.e., runs out of memory) for some analysis problems, without relaxing the analysis. We thus omit IGP-TS for the mpc755s.
+
+We additionally examine properties of the analysis problem that have a direct influence on overestimation. These are (1) hardware splits, a measure for the amount of duplicated states in the presence of unpredictable hardware behavior (i.e., caches, branch prediction), and (2) the size of the analysis problems at different stages (i.e., subgraph size).
+
+Both WCET benchmark programs, Debie1 and PapaBench, contain subproblems that benefit from graph pruning and have their WCET bound reduced significantly. When we look in detail at papa-f1a from PapaBench for the Freescale mpc5554, we can see in Fig. 3
+                         that within the first 20 iterations, the upper bound (ub
+                        
+                           wcet
+                        ) leaps to a level close to its final value. At this point, the most critical basic block sets have been added to the subgraph and WCET analysis returned a good candidate for the actual global WCEP. Step sizes subsequently decrease and from iteration 35 on, the upper bound (ub
+                        
+                           wcet
+                        ) roughly holds while more blocks are added to the IGP subgraph (see Fig. 4
+                        ).
+
+Another group of problem instances does not exhibit properties that are exploitable by graph pruning. These can be identified for the two processor variants in Tables 2 and 3
+                        
+                         by their low number of iterations: after one or two iterations, IGP terminates since all (feasible) blocks are either on the global WCEP or there is no interference between WCET-critical and unrelated code.
+
+There is also a third class of benchmark problems, which exhibits a high number of iterations without a significant improvement of the WCET bound. Studying the most severe cases (problems papa-a2a and papa-a2b), we have found that almost all of the WCEPs found in subgraphs are infeasible on their own (i.e., their feasibility depends on blocks in other block sets). This is likely caused by a particular program structure and the WCET analysis failing to exclude infeasible paths from the longest path search (flow facts).
+
+For all non-trivial benchmarks (two IGP iterations or more), we see that the minimal (and average) reduction of hardware splits is high (see Fig. 5
+                        ). Average subgraph sizes (Fig. 6
+                        ) are likewise significantly smaller than their originals. The graphs shown here refer to the Freescale mpc5554 processor only, but the corresponding results for the Freescale mpc755s follow a similar trend and its subgraph size results can be seen in Table 3. This tells us that overestimation is being effectively addressed by IGP. At the same time it can benefit from analysis problems, which are roughly half the original size. For the simpler Freescale mpc5554, IGP improves WCET bounds up to 6% compared to aiT׳s result on the original program (see Table 2). The average improvement among non-trivial benchmark problems is 2%. The highest reduction of the WCET bound for the more complex mpc755s amounts to 12% (see papa-a6 in Table 3); on average the WCET bound is reduced by about 3% there. While the different processor architectures substantially change the underlying analysis problems and do not lend themselves to direct comparison given the same program, we note for the concrete example of papa-a6: overestimation is mainly reduced by pruning blocks in the same function for both architectures. For functions called from there, this in turn limits the number of contexts, which need to be considered during abstract interpretation and tightens the WCET bound of several expensive floating point math functions. We see this effect amplified in the case of the mpc755s architecture.
+
+The two-stage approach of iterative graph pruning (IGP-TS) is evaluated using the prediction file (PF) based IPET solver in aiT as a second stage analysis (Algorithm 3, PrunedWCETPrecise). Enabling it means that timing information during longest path search is not restricted to a single WCET for each basic block, but may encompass multiple architectural states [16]. Tightening WCET bounds in this way comes at the cost of — depending on program size — much larger ILP problems and thus overhead from solving. Note that resource demand, i.e., memory, for the Freescale mpc755s architecture often makes the analysis infeasible. Fast WCET analysis remains unchanged compared to IGP.
+
+The WCET bound improvement of IGP-TS, compared to the PF-enabled analysis as a baseline, is similar to that of IGP. Benchmark problems, for which the WCET bound was improved by IGP, also improve by IGP-TS. We thus conclude that our approach is profitable even when compared to a state-of-the-art WCET analysis tool using its most sophisticated analysis technique.
+
+The reduction of hardware splits measured over all iterations (Fig. 7
+                        ) behaves similar to IGP, although it is slightly less pronounced for some benchmark problems. The latter confirms that splits are a relevant contributor to overestimation. Also expected is that the number of unique WCEPs (column 
+                           |
+                           P
+                           |
+                        ) found by IGP-TS is higher in Table 2 than Table 4
+                        . This is due to the more precise analysis being used. For the same reason, we can see an increase in the number of graph pruning iterations (column ‘Iterations’).
+
+@&#DISCUSSION@&#
+
+We have evaluated graph pruning using a state-of-the-art, commercial WCET tool. aiT uses powerful abstract interpretation and is able to produce good WCET bounds on its own. Even so, graph pruning can eliminate sources of overestimation and significantly tighten the WCET bound. While we can configure aiT to analyze subgraphs and extract all results we need from it, our setup is only suitable as a proof-of-concept. The analysis tool is treated as a block box, which leads to needless overhead that could be avoided. We thus do not present detailed measurements of the analysis time here. However, even with these short-comings we observed a moderate increase in analysis time by a factor of 9 on average (tests were performed on an AMD Opteron 8356 at 2.3GHz, running Linux Kernel version 2.6, with CPLEX version 10 solving the IPET ILP problems).
+
+We expect that most of the analysis overhead can, in fact, be eliminated by designing the WCET analysis to take advantage of the iterative processing. The overhead of performing a complete run of abstract interpretation on every iteration can, for instance, be avoided. Abstract interpretation usually is performed by searching for a fixed-point. Adding basic blocks, as done by our algorithm, can easily be handled by this approach. The fixed-point search can continue from the abstract states computed for the previous iteration to quickly derive a new fixed-point for the current subgraph. Other forms of incremental analysis should equally reduce the overhead of performing a longest path search on structurally similar subgraphs. These techniques, combined with smaller problem sizes (due to smaller subgraphs and reduced hardware splits), promise to even reduce the analysis overhead, compared to a full analysis run using aiT׳s prediction file technique. We even observed this behavior in our tests for IGP-TS and the papa-a2b benchmark on the Freescale mpc5554. Despite an increase in the analysis time by a factor of 14 for the abstract interpretation, a reduction of the ILP solving time leads to an overall reduction of the analysis time of about 15%.
+
+We observed that our technique addresses the problem of overestimation very well, in particular during early iterations. However, we also observed that in many cases the overestimation grew fast, often outweighing large initial gains. The main problem is that the subgraphs steadily grow larger. We could address this problem by restricting the subgraphs to only those nodes reachable from the current basic block set (S
+                        
+                           i
+                        ). However, one could similarly change the strategy for growing subgraphs, e.g., by estimating the impact on the number of hardware splits. In a similar way, neighboring basic block sets may be merged in order to avoid excessive iteration counts.
+
+@&#RELATED WORK@&#
+
+Several pruning techniques, similar in spirit to our technique, have been proposed in the past based on program slicing [15]. The basic idea of program slicing is to improve the precision and the computational overhead of static program analyses by discarding program statements that are irrelevant to the goal of the analysis. Consider, for instance, the case when the goal of a static analysis is to determine the value of a given variable in a program. When forming a slice for that particular variable, only those statements are considered during the analysis that directly and indirectly contribute to the computation of that variable. All other statements are ignored. The goal in our approach is to improve the analysis of the WCET itself, our technique thus can be seen as a form of program slicing on the timing domain.
+
+Sandberg et al. [17], for example, propose to use program slicing to improve the static analysis of flow facts. They construct program slices based on either all conditions of branches in a program, on all loop-exit conditions, or on the loop-exit conditions of a particular loop. Based on the computed slices, flow facts, such as loop bounds, are computed. In contrast to our work, the focus here is on deriving flow facts only, regardless of the relevance or impact to the final WCET. Their technique can, however, be combined with our approach. This would, for instance, allow to derive flow facts that are only valid with respect to the current subgraph under consideration.
+
+A similar approach is proposed by Lokuciejewski et al. [12]. They combine abstract interpretation, polytope models, and program slicing to derive precise loop bounds. The approach again does not consider the relevance of the respective loops under analysis with regard to the final WCET.
+
+Bang and Kim [18], similar to our technique, propose an iterative approach to refine the attainable WCET using standard IPET. The basic idea is to perform a regular WCET analysis run. The resulting WCEP is subsequently checked for feasibility and, in the case of an infeasible WCEP, additional constraints are added to the IPET problem to exclude the path. This process is repeated until a feasible path is encountered. It is important to note that the presented feasibility checks are conservative and only consider individual basic blocks and pairs or blocks, but not the entire path. The major problem of this approach is that the refinement is based on individual paths through the program, whose number is potentially exponential in the number of conditional branches in the program. The additional constraints are, furthermore, only applied during the final IPET run. Contrary to our approach, the technique thus cannot improve the precision of previous analysis phases, such as the cache- or pipeline analysis.
+
+Zwirchmayer et al. [19] propose a related scheme called WCET Squeezing. The authors iteratively check the feasibility of the current WCEP using symbolic execution and exclude paths found to be infeasible from the IPET problem. In contrast to Bang and Kim, this technique considers the entire path and may thus potentially derive more complex constraints. The technique similarly does not allow to improve the precision of other analysis phases than the final IPET.
+
+The approach presented here makes use of the criticality metric we first proposed in [2]. The metric assigns a numeric value in the interval 
+                        [
+                        0
+                        ,
+                        1
+                        ]
+                      to each basic block of a real-time program, where values close to 0 indicate code that is irrelevant and values close to 1 indicate code that is critical to the final WCET. We adopt the idea of discovering the longest path passing through basic blocks to refine the attainable WCET bound. The algorithm for computing criticalities on-demand has been adopted for our graph pruning approach [10]. An estimation approach to criticality profiling [20], which drastically reduces computational overhead at the cost of profiling precision, could in the future serve as an early, disambiguating phase, when applying graph pruning to large analysis problems.
+
+@&#CONCLUSION@&#
+
+Exploiting problem structure has proven to be a key element in many optimization problems. We argue about the structure of a program׳s CFG and its properties specifically with regard to WCET analysis.
+
+WCET analysis tools have to continuously restrict problem size, in order to meet space as well as time constraints and maintain feasibility: (1) During abstract interpretation, the overwhelming combination of program-, pipeline-, and cache states may require merging. (2) Solving the longest path problem, while accounting in detail for all processor states, again is only feasible up to a certain magnitude of states (variables). The downside of these techniques is that the precision of the attainable WCET bound is reduced. While other approaches for tightening an IPET-based WCET bound are designed to refine the worst-case path in a post-processing step, graph pruning can be used in order to decrease problem size and increase precision during WCET analysis. Compared to existing program slicing techniques, our approach extends to the lower-level timing analysis too. With the algorithms given above, we further demonstrated that WCET profiles are a suitable first guide to this search.
+
+@&#ACKNOWLEDGMENTS@&#
+
+This work is partially funded under the European Union׳s 7th Framework Programme under Grant agreement no. 288008: Time-predictable Multi-Core Architecture for Embedded Systems (T-CREST) and was supported by the Austrian Science Fund (FWF) under Contract P21842.
+
+@&#REFERENCES@&#
+

@@ -1,0 +1,2146 @@
+@&#MAIN-TITLE@&#Hierarchical structure-and-motion recovery from uncalibrated images
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           We describe a hierarchical structure-from-motion pipeline.
+
+
+                        
+                        
+                           
+                           No information is needed beside images themselves.
+
+
+                        
+                        
+                           
+                           The pipeline proved successful in real-world tasks.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Structure and motion
+
+Image orientation
+
+Bundle adjustment
+
+Autocalibration
+
+3D
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  This paper addresses the structure-and-motion problem, that requires to find camera motion and 3D structure from point matches. A new pipeline, dubbed Samantha, is presented, that departs from the prevailing sequential paradigm and embraces instead a hierarchical approach. This method has several advantages, like a provably lower computational complexity, which is necessary to achieve true scalability, and better error containment, leading to more stability and less drift. Moreover, a practical autocalibration procedure allows to process images without ancillary information. Experiments with real data assess the accuracy and the computational efficiency of the method.
+               
+            
+
+@&#INTRODUCTION@&#
+
+The progress in three-dimensional (3D) modeling research has been rapid and hectic, fueled by recent breakthroughs in keypoint detection and matching, the advances in computational power of desktop and mobile devices, the advent of digital photography and the subsequent availability of large datasets of public images. Today, the goal of definitively bridging the gap between physical reality and the digital world seems within reach given the magnitude, breadth and scope of current 3D modeling systems.
+
+Three dimensional modeling is the process of recovering the properties of the environment and optionally of the sensing instrument from a series of measures. This generic definition is wide enough to accommodate very diverse methodologies, such as time-of-flight laser scanning, photometric stereo or satellite triangulation. The structure-and-motion (a.k.a. structure-from-motion) field of research is concerned with the recovery of the three dimensional geometry of the scene (the structure) when observed through a moving camera (the motion). Sensor data is either a video or a set of exposures; additional information, such as the calibration parameters, can be used if available. This paper describes our contributions to the problem of structure-and-motion recovery from unordered, uncalibrated images i.e, the problem of building a three dimensional model of a scene given a set of exposures. The sought result (the “model”) is generally a 3D point-cloud consisting of the points whose projection was identified and matched in the images and a set of camera matrices, identifying position and attitude of each image with respect to an arbitrary reference frame.
+
+The main challenges to be solved are computational efficiency (in order to be able to deal with more and more images) and generality, i.e., the amount of ancillary information that is required.
+
+To address the efficiency issue we propose to describe the entire structure-and-motion process as a binary tree (called dendrogram) constructed by agglomerative clustering over the set of images. Each leaf corresponds to a single image, while internal nodes represent partial models obtained by merging the left and right sub-nodes. Computation proceeds from bottom to top, starting from several seed couples and eventually reaching the root node, corresponding to the complete model. This scheme provably cuts the computational complexity by one order of magnitude (provided that the dendrogram is well balanced), and it is less sensitive to typical problems of sequential approaches, namely sensitivity to initialization [1] and drift [2]. It is also scalable and efficient, since it partitions the problem into smaller instances and combines them hierarchically, making it inherently parallelizable.
+
+On the side of generality, our aim is to push the “pure” structure-and-motion technique as far as possible, to investigate what can be achieved without including any auxiliary information. Current structure-and-motion research has partly sidestepped this issue using ancillary data such as EXIF tags embedded in conventional image formats. Their presence or consistency, however, is not guaranteed. We describe our approach to autocalibration, which is the process of automatic estimation from images of the internal parameters of the cameras that captured them, and we therefore demonstrate the first structure-and-motion pipeline capable of using unordered, uncalibrated images.
+
+The main issue to address in structure-and-motion is the computational complexity, which is dominated by the bundle adjustment phase, followed by feature extraction and matching.
+
+A class of solutions that have been proposed are the so-called partitioning methods [3]. They reduce the structure-and-motion problem into smaller and better conditioned subproblems which can be effectively optimized. Within this approach, two main strategies can be distinguished.
+
+The first one is to tackle directly the bundle adjustment algorithm, exploiting its properties and regularities. The idea is to split the optimization problem into smaller, more tractable components. The subproblems can be selected analytically as in [4], where spectral partitioning has been applied to structure-and-motion, or they can emerge from the underlying 3D structure of the problem, as described in [5]. The computational gain of such methods is obtained by limiting the combinatorial explosion of the algorithm complexity as the number of images and points increases.
+
+The second strategy is to select a subset of the input images and points that subsumes the entire solution. Hierarchical sub-sampling was pioneered by [3], using a balanced tree of trifocal tensors over a video sequence. The approach was subsequently refined by [6], adding heuristics for redundant frames suppression and tensor triplet selection. In [7] the sequence is divided into segments, which are resolved locally. They are subsequently merged hierarchically, eventually using a representative subset of the segment frames. A similar approach is followed in [8], focusing on obtaining a well behaved segment subdivision and on the robustness of the following merging step. The advantage of these methods over their sequential counterparts lies in the fact that they improve error distribution on the entire dataset and bridge over degenerate configurations. In any case, they work for video sequences, so they cannot be applied to unordered, sparse images. The approach of [9] works with sparse datasets and is based on selecting a subset of images whose model provably approximates the one obtained using the entire set. This considerably lowers the computational requirements by controllably removing redundancy from the dataset. Even in this case, however, the images selected are processed incrementally. Moreover, this method does not avoid computing the epipolar geometry between all pairs of images.
+
+Within the solutions aimed at reducing the impact of the bundle adjustment phase, hierarchical approaches include [10–12] and this paper. The first can be considered as the first paper where the idea has been set forth: a spanning tree is built to establish in which order the images must be processed. After that, however, the images are processed in a standard incremental way. The approach described in [11] is based on recursive partitioning of the problem into fully-constrained sub-problems, exploiting the bipartite structure of the visibility graph. The partitioning operates on the problem variables, whereas our approach works on the input images.
+
+Orthogonally to the aforementioned approaches, a solution to the computational complexity of structure-and-motion is to throw additional computational power at the problem [13]. Within such a framework, the former algorithmic challenges are substituted by load balancing and subdivision of tasks. Such a direction of research strongly suggest that the current monolithic pipelines should be modified to accommodate ways to parallelize and optimally split the workflow of structure-and-motion tasks. In [14] image selection (via clustering) is combined with a highly parallel implementation that exploits graphic processors and multi-core architectures.
+
+The impact of the bundle adjustment phase can also be reduced by adopting a different paradigm in which first the motion is recovered and then the structure is computed. All these methods start from the relative orientation of a subset of camera pairs (or triplets), computed from point correspondences, then solve for the absolute orientation of all the cameras (globally), reconstruct 3D points by intersection, and finally run a single bundle adjustment to refine the reconstruction. Camera internal parameters are required.
+
+The method described in [15] solves a homogeneous linear system based on a novel decomposition of the essential matrix that involves the absolute parameters only. In [16] nonlinear optimization is performed to recover camera translations given a network of both noisy relative translation directions and 3D point observations. This step is preceded by outlier removal among relative translations by solving simpler low-dimensional subproblems. The authors of [17] propose a discrete Markov random field formulation in combination with Levenberg–Marquardt minimization. This technique requires additional information as input, such as geotag locations and vanishing points. Other approaches (e.g. [18–20]) compute translations together with the structure, involving a significant number of unknowns. The method presented in [21] proposes a fast spectral solution by casting translation recovery in a graph embedding problem. Govindu in [22] derives a homogeneous linear system of equations in which the unknown epipolar scaling factors are eliminated by using cross products, and this solution is refined through iterative reweighted least squares. The authors of [23] propose a linear algorithm based on an approximate geometric error in camera triplets. Moulon et al. [24] extract accurate relative translations by using an a-contrario trifocal tensor estimation method, and then recover simultaneously camera positions and scaling factors by using an ℓ∞-norm approach. Similar to [23], this method requires a graph covered by contiguous camera triplets. The authors of [25] propose a two-stage method in which relative translation directions are extracted from point correspondences by using robust subspace optimization, and then absolute translations are recovered through semidefinite programming.
+
+Another relevant issue in structure-and-motion is the level of generality, i.e., the number of assumption that are made concerning the input images, or, equivalently the amount of extra information that is required in addition to pixel values. Existing pipelines either assume known internal parameters [15,19,24,26–29], or constant internal parameters [30], or rely on EXIF data plus external information (camera CCD dimensions) [31,32]. Methods working in large scale environments usually rely on a lot of additional information, such as camera calibration and GPS/INS navigation systems [2,33] or geotags [17].
+
+Autocalibration (a.k.a. self-calibration) has generated a lot of theoretical interest since its introduction in the seminal paper by Maybank and Faugeras [34]. The attention created by the problem however is inherently practical, since it eliminates the need for off-line calibration and enables the use of content acquired in an uncontrolled setting. Modern computer vision has partly sidestepped the issue by using ancillary information, such as EXIF tags embedded in some image formats. Unfortunately it is not always guaranteed that such data will be present or consistent with its medium, and do not eliminate the need for reliable autocalibration procedures.
+
+A great deal of published methods rely on equations involving the dual image of the absolute quadric (DIAQ), introduced by Triggs in [35]. Earlier approaches for variable focal lengths were based on linear, weighted systems [36,37], solved directly or iteratively [38]. Their reliability has been improved by more recent algorithms, such as [39], solving super-linear systems while directly forcing the positive definiteness of the DIAQ. Such enhancements were necessary because of the structural non-linearity of the task: for this reason the problem has also been approached using branch and bound schemes, based either on the Kruppa equations [40], dual linear autocalibration [41] or the modulus constraint [42].
+                     
+
+The algorithm described in [43] shares, with the branch and bound approaches, the guarantee of convergence; the non-linear part, corresponding to the localization of the plane at infinity, is solved exhaustively after having used the cheiral inequalities to compute explicit bounds on its location.
+
+@&#OVERVIEW@&#
+
+This paper describes a hierarchical and parallelizable scheme for structure-and-motion; please refer to Fig. 1 for a graphical overview. The front end of the pipeline is keypoint extraction and matching (Section 2), where the latter is subdivided into two stages: the first (“broad phase”) is devoted to discovering the tentative topology of the epipolar graph, while the second (“narrow phase”) performs the fine matching and computes the epipolar geometry.
+
+Images are then organized into a dendrogram by clustering them according to their overlap (Section 3). A new clustering strategy, derived from the simple linkage, is introduced (Section 5) that makes the dendrogram more balanced, thereby approaching the best-case complexity of the method.
+
+The structure-and-motion computation proceeds hierarchically along this tree, from the leaves to the root (Section 4). Images are stored in the leaves, whereas partial models correspond to internal nodes. According to the type of node, three operations are possible: stereo modeling (image-image), resection-intersection (image-model) or merging (model-model). Bundle adjustment is run at every node, possibly in its “local” form (Section 6).
+
+We demonstrate that this paradigm has several advantages over the sequential one, both in terms of computational performance (which improves by one order of magnitude on average) and overall error containment.
+
+Autocalibration (Section 7) is performed on partial models during the dendrogram traversal. First, the location of the plane at infinity is derived given two perspective projection matrices and a guess on their internal parameters, and subsequently this procedure is used to iterate through the space of internal parameters looking for the best collineation that makes the remaining cameras Euclidean. This approach has several advantages: it is fast, easy to implement and reliable, since a reasonable solution can always be found in non-degenerate configurations, even in extreme cases such as when autocalibrating just two cameras.
+
+Being conscious that “the devil is in the detail”, Section 8 reports implementation details and heuristics for setting the parameters of the pipeline.
+
+The experimental results reported in Section 9 are exhaustive and analyze the output of the pipeline in terms of accuracy, convergence and speed.
+
+We report here on the latest version of our pipeline, called Samantha. Previous variants have been described in [44] and [12] respectively. The main improvements are in the matching phase and in the autocalibration that now integrates the method described in [45]. The geometric stage has been carefully revised to make it more robust, to the point where – in some cases – bundle adjustment is not needed any more except at the end of the process. Most efforts have been made in the direction of a robust and automatic approach, avoiding unnecessary parameter tuning and user intervention.
+
+In this section, we describe the stage of Samantha that is devoted to the automatic extraction and matching of keypoints among all the n available images. Its output is to be fed into the geometric stage, that will perform the actual structure-and-motion recovery. Good and reliable matches are the key for any geometric computation.
+
+Although most of the building blocks of this stage are fairly standard techniques, we carefully assembled a procedure that is fully automatic, robust (matches are pruned to discard as many outliers as possible) and computationally efficient. The procedure for recovering the epipolar graph is indeed new.
+
+First of all, keypoints are extracted in all n images. We implemented the keypoint detector proposed by [46], where blobs with associated scale levels are detected from scale-space extrema of the scale-normalized Laplacian:
+
+                           
+                              (1)
+                              
+                                 
+                                    
+                                       ∇
+                                       norm
+                                       2
+                                    
+                                    L
+                                    
+                                       (
+                                       x
+                                       ,
+                                       y
+                                       ,
+                                       s
+                                       )
+                                    
+                                    =
+                                    s
+                                    
+                                    
+                                       ∇
+                                       2
+                                    
+                                    
+                                       (
+                                       g
+                                       (
+                                       x
+                                       ,
+                                       y
+                                       ;
+                                       s
+                                       )
+                                       *
+                                       f
+                                       (
+                                       x
+                                       ,
+                                       y
+                                       )
+                                       )
+                                    
+                                    .
+                                 
+                              
+                           
+                        We used a 12-level scale-space and in each level the Laplacian is computed by convolution (in CUDA) with a 3 × 3 kernel.
+
+As for the descriptor, we implemented a 128-dimensional radial descriptor (similar to the log-polar grid of GLOH [47]), based on the accumulated response of steerable derivative filters. This combination of detector/descriptor performs in a comparable way to SIFT and avoids patent issues.
+
+Only a given number of keypoints with the strongest response overall are retained. This number is a multiple of n, so as to fix the average quota of keypoints per image (details in Section 8).
+
+As the images are unordered, the first objective is to recover the epipolar graph, i.e., the graph that tells which images overlap (or can be matched) with each other.
+
+This must be done in a computationally efficient way, without trying to match keypoints between every image pair. As a matter of fact, keypoint matching is one of the most expensive stages, so one would like to reduce the number of images to be matched from O(n
+                        2) to O(n).
+
+In this broad phase we consider only a small constant number of descriptors for each image. In particular, we consider the keypoints with the highest scales, since their descriptors are more representative of the whole image content.
+
+Then, each keypoint descriptor is matched to its approximate nearest neighbors in feature space, using the ANN library [48] (with 
+                           
+                              ϵ
+                              =
+                              0.5
+                           
+                        ). A 2D histogram is then built that registers in each bin the number of matches between the corresponding images.
+
+Consider the complete weighted graph 
+                           
+                              G
+                              =
+                              (
+                              V
+                              ,
+                              E
+                              )
+                           
+                         where V are images and the weighted adjacency matrix is the 2D histogram. This graph is – in general – dense, having 
+                           
+                              |
+                              V
+                              |
+                              =
+                              O
+                              (
+                              
+                                 n
+                                 2
+                              
+                              )
+                           
+                        . The objective is to extract a subgraph G′ with a number of edges that is linear in n.
+
+In the approach of [49], also followed in [44], every image is connected (in the epipolar graph) to the m images that have the greatest number of keypoint matches with it. This creates a graph with O(mn) edges, where the average degree is O(m) (by the handshaking lemma).
+
+When the number of images is large, however, it tends to create cliques of very similar images with weak (or no) inter-clique connections. On the other hand, one would like to get an epipolar graph that is strongly connected, to avoid over-fragmentation in the subsequent clustering phase. This idea is captured by the notion of k-edge-connectedness: In graph theory, a graph is k-edge-connected if it remains connected whenever fewer than k edges are removed. So, the graph produced by the original approach has a low k, while one would like to have k as high as possible (ideally 
+                           
+                              k
+                              =
+                              m
+                           
+                        ), with same edge budget.
+
+We devised a strategy that builds a subgraph G′ of G which is “almost” m-edge-connected by construction.
+
+                           
+                              1.
+                              Build the maximum spanning tree of G: the tree is composed of 
+                                    
+                                       n
+                                       −
+                                       1
+                                    
+                                  edges;
+
+remove them from G and add them to G′;
+
+repeat m times.
+
+If the hypothesis about G is not verified, a spanning forest will be obtained at a certain iteration, and G′ will not be m-edge-connected. However, when m ≪ |E| one could expect that “almost” m spanning trees can be extracted from G without disconnecting it.
+
+Keypoint matching follows a nearest neighbor approach [50], with rejection of those keypoints for which the ratio of the nearest neighbor distance to the second nearest neighbor distance is greater than a threshold (see Section 8). Matches that are not injective are discarded.
+
+In order to speed up the matching phase we employ a keypoint clustering technique similar to [51]. Every keypoint is associated with a different cluster according to its dominant angle, as recorded in the descriptor. Only keypoints belonging to the same cluster are matched together (in our implementation we used eight equidistant angular clusters): this breaks down the quadratic complexity of the matching phase at the expense of losing some matches at the border of the clusters.
+
+Homographies and fundamental matrices between pairs of matching images are then computed using M-estimator SAmple Consensus (MSAC) [52], a variation of RANSAC that gives outliers a fixed penalty but scores inliers on how well they fit the data. This makes the output less sensitive to a higher inlier threshold, thereby rendering less critical the choice of the threshold, at no extra computational cost with respect to RANSAC. The random sampling is done with a bucketing technique [53], which forces keypoints in the sample to be spatially separated. This helps to reduce the number of iterations and provide more stable estimates. Since RANSAC and its variants (like MSAC) have a low statistical efficiency, the model must finally be re-estimated on a refined set of inliers.
+                           4
+                        
+                        
+                           4
+                           It is understood that when we refer to MSAC in the following, this procedure is always carried out.
+                        
+                     
+
+Let ei
+                         be the residuals of all the N keypoints after MSAC, and let S
+                        * be the sample that attained the best score; following [54], a robust estimator of the scale is:
+
+                           
+                              (2)
+                              
+                                 
+                                    
+                                       σ
+                                       *
+                                    
+                                    =
+                                    1.4826
+                                    
+                                       (
+                                       1
+                                       +
+                                       
+                                          5
+                                          
+                                             
+                                                N
+                                                −
+                                                |
+                                             
+                                             
+                                                S
+                                                *
+                                             
+                                             
+                                                |
+                                             
+                                          
+                                       
+                                       )
+                                    
+                                    
+                                       
+                                          
+                                             med
+                                             
+                                                i
+                                                ∉
+                                                
+                                                   S
+                                                   *
+                                                
+                                             
+                                          
+                                          
+                                             e
+                                             i
+                                             2
+                                          
+                                       
+                                    
+                                    .
+                                 
+                              
+                           
+                        The resulting set of inliers are those points such that
+
+                           
+                              (3)
+                              
+                                 
+                                    
+                                       |
+                                    
+                                    
+                                       e
+                                       i
+                                    
+                                    
+                                       |
+                                       <
+                                       θ
+                                    
+                                    
+                                       σ
+                                       *
+                                    
+                                    ,
+                                 
+                              
+                           
+                        where θ is a constant (we used 2.5).
+
+The model parameters are re-estimated on this set of inliers via least-squares minimization of the (first-order approximation of the) geometric error [55,56].
+
+The more likely model (homography or fundamental matrix) is selected according to the Geometric Robust Information Criterion (GRIC) [57]:
+
+                           
+                              (4)
+                              
+                                 
+                                    
+                                       
+                                          
+                                             GRIC
+                                          
+                                       
+                                       
+                                          =
+                                       
+                                       
+                                          
+                                             ∑
+                                             ρ
+                                             
+                                                (
+                                                
+                                                   e
+                                                   i
+                                                   2
+                                                
+                                                )
+                                             
+                                             +
+                                             n
+                                             d
+                                             log
+                                             
+                                                (
+                                                r
+                                                )
+                                             
+                                             +
+                                             k
+                                             log
+                                             
+                                                (
+                                                r
+                                                n
+                                                )
+                                             
+                                          
+                                       
+                                    
+                                    
+                                       
+                                          
+                                             ρ
+                                             (
+                                             x
+                                             )
+                                          
+                                       
+                                       
+                                          =
+                                       
+                                       
+                                          
+                                             min
+                                             (
+                                             x
+                                             /
+                                             
+                                                σ
+                                                2
+                                             
+                                             ,
+                                             2
+                                             
+                                                (
+                                                r
+                                                −
+                                                d
+                                                )
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        where σ is the standard deviation of the measurement error, k is the number of parameters of the model, d is the dimension of the fitted manifold, and r is the dimension of the measurements. In our case, 
+                           
+                              k
+                              =
+                              7
+                              ,
+                              d
+                              =
+                              3
+                              ,
+                              r
+                              =
+                              4
+                           
+                         for fundamental matrices and 
+                           
+                              k
+                              =
+                              8
+                              ,
+                              d
+                              =
+                              2
+                              ,
+                              r
+                              =
+                              4
+                           
+                         for homographies. The model with the lower GRIC is the more likely.
+
+In the end, if the number of remaining matches ni
+                         between two images is less than 20% of the total number of matches before MSAC, then they are discarded. The rationale is that if an excessive fraction of oultliers have been detected, the original matches are altogether unreliable. A similar formula is derived in [49] on the basis of a probabilistic model. As a safeguard, a threshold on the minimum number of matches is also set (details in Section 8).
+
+After that, keypoint matching in multiple images are connected into tracks (see Fig. 2
+                        ): consider the undirected graph 
+                           
+                              G
+                              =
+                              (
+                              V
+                              ,
+                              E
+                              )
+                           
+                         where V are the keypoints and E represents matches; a track is a connected component of G. Vertices are labeled with the image the keypoints belong to: an inconsistency arises when in a track a label occurs more than once. Inconsistent tracks and those shorter than three frames are discarded.
+                           5
+                        
+                        
+                           5
+                           There is nothing in principle that prevents the pipeline from working also with tracks of length two. The choice of cutting these tracks is a heuristics aimed at removing little reliable correspondences.
+                         A track represents the projection of a single 3D point imaged to multiple exposures; such a 3D point is called a tie-point.
+
+The images are organized into a tree with agglomerative clustering, using a measure of overlap as the distance. The structure-and-motion computation then follows this tree from the leaves to the root. As a result, the problem is broken into smaller instances, which are then separately solved and combined.
+
+Algorithms for image clustering have been proposed in the literature in the context of structure-and-motion [10], panoramas [49], image mining [58] and scene summarization [59]. The distance being used and the clustering algorithm are application-specific.
+
+In this paper we deploy an image affinity measure that befits the structure-and-motion task. It is computed by taking into account the number of tie-points visible in both images and how well their projections (the keypoints) spread over the images. In formulae, let Si
+                      and Sj
+                      be the set of visible tie-points in image Ii
+                      and Ij
+                      respectively:
+
+                        
+                           (5)
+                           
+                              
+                                 
+                                    a
+                                    
+                                       i
+                                       ,
+                                       j
+                                    
+                                 
+                                 =
+                                 
+                                    1
+                                    2
+                                 
+                                 
+                                    
+                                       
+                                          |
+                                       
+                                       
+                                          S
+                                          i
+                                       
+                                       ∩
+                                       
+                                          S
+                                          j
+                                       
+                                       
+                                          |
+                                       
+                                    
+                                    
+                                       
+                                          |
+                                       
+                                       
+                                          S
+                                          i
+                                       
+                                       ∪
+                                       
+                                          S
+                                          j
+                                       
+                                       
+                                          |
+                                       
+                                    
+                                 
+                                 +
+                                 
+                                    1
+                                    2
+                                 
+                                 
+                                    
+                                       CH
+                                       
+                                          (
+                                          
+                                             S
+                                             i
+                                          
+                                          )
+                                       
+                                       +
+                                       CH
+                                       
+                                          (
+                                          
+                                             S
+                                             j
+                                          
+                                          )
+                                       
+                                    
+                                    
+                                       
+                                          A
+                                          i
+                                       
+                                       +
+                                       
+                                          A
+                                          j
+                                       
+                                    
+                                 
+                              
+                           
+                        
+                     where CH( · ) is the area of the convex hull of a set of image points and Ai
+                      (Aj
+                     ) is the total area of image Ii
+                      (Ij
+                     ). The first term is an affinity index between sets, also known as the Jaccard index. The distance is 
+                        
+                           (
+                           1
+                           −
+                           
+                              a
+                              
+                                 i
+                                 ,
+                                 j
+                              
+                           
+                           )
+                           ,
+                        
+                      as a
+                     
+                        i, j
+                      ranges in [0, 1].
+
+The general agglomerative clustering algorithm proceeds in a bottom-up manner: starting from all singletons, each sweep of the algorithm merges the two clusters with the smallest distance between them. The way the distance between clusters is computed produces different flavors of the algorithm, namely the simple linkage, complete linkage and average linkage [60]. We selected the simple linkage rule: The distance between two clusters is determined by the distance of the two closest objects (nearest neighbors) in the different clusters.
+
+Simple linkage clustering is appropriate to our case because: (i) the clustering problem per se is fairly easy, (ii) nearest neighbors information is readily available with ANN and (iii) it produces “elongated” or “stringy” clusters which fits very well with the typical spatial arrangement of images sweeping a certain area or building.
+
+Before describing our hierarchical approach, let us set the notation and review the geometry tools that are needed. A model is a set of cameras and 3D points expressed in a local reference frame (stereo-model with two cameras). The procedure of computing 3D point coordinates from corresponding points in multiple images is called intersection (a.k.a. triangulation). Recovering the camera matrix (fully or limited to the external parameters) from known 3D-2D correspondences is called resection. The task of retrieving the relative position and attitude of two cameras from corresponding points in the two images is called relative orientation. The task of computing the rigid (or similarity) transform that brings two models that share some tie-points into a common reference frame is called absolute orientation.
+
+Let us assume pro tempore that the internal parameters are known; this constraint is removed in Section 7.
+
+Images are grouped together by agglomerative clustering, which produces a hierarchical, binary cluster tree, called a dendrogram. Every node in the tree represents a partial, independent model. From the processing point of view, at every node in the dendrogram an action is taken that augments the model, as shown in Fig. 3
+                     .
+
+Three operations are possible: When two images are merged a stereo-model is built (relative orientation + intersection). When an image is added to a cluster a resection-intersection step is taken (as in the standard sequential pipeline). When two non-trivial clusters are merged, the respective models must be conflated by solving an absolute orientation problem (followed by intersection). Each of these steps is detailed in the following.
+
+While it is useful to conceptually separate the clustering from the modeling, the two phases actually occur simultaneously: during the simple linkage iteration, every time a merge is attempted the corresponding modeling action is taken. If it fails, the merge is discarded and the next possible merge is considered.
+
+The parameters of the relative orientation of two given cameras are obtained by factorization of the essential matrix [61]. This is equivalent to knowing the external parameters of the two cameras in a local reference frame, and since the internal parameters are already known, the two camera matrices are readily set up. Then tie-points are obtained by intersection (see Section 4.2 ahead) from the tracks involving the two images, and the model is refined with bundle adjustment [62].
+
+It is worth noting that in order for this stereo-modeling to be successful the two images must satisfy two conflicting requirements: to have both a large number of tie-points in common and a baseline sufficiently large so as to allow a well-conditioned solution. The first requirement is implemented by the affinity defined in (5), but the second is not considered; as a result, the pairing determined by image clustering is not always the best choice as far as the relative orientation problem is concerned. Since in our pipeline the clustering and the structure-and-motion processing occurs simultaneously, these pairs will be discarded by simple sanity-checks before and after attempting to perform the stereo-modeling. The a-priori check requires that the relationship between the two images is described by a fundamental matrix (instead of a homography), according to the GRIC score. The a-posteriori check considers the residual error and the cheirality check of the points before and after the bundle adjustment.
+
+Intersection (a.k.a. triangulation) is performed by the iterated linear LS method [63]. Points are pruned by analyzing the condition number of the linear system and the reprojection error. The first test discards ill-conditioned intersections, using a threshold on the condition number of the linear system (104, in our experiments). The second test applies the so-called X84 rule
+                           6
+                        
+                        
+                           6
+                           This rule is consistently used in the following stages to set data-dependent thresholds whenever required.
+                         
+                        [64], that establishes that, if ei
+                         are the residuals, the inliers are those points such that
+
+                           
+                              (6)
+                              
+                                 
+                                    
+                                       |
+                                    
+                                    
+                                       e
+                                       i
+                                    
+                                    −
+                                    
+                                       med
+                                       j
+                                    
+                                    
+                                       e
+                                       j
+                                    
+                                    
+                                       |
+                                       <
+                                       5.2
+                                    
+                                    
+                                       med
+                                       i
+                                    
+                                    
+                                       |
+                                       
+                                          e
+                                          i
+                                       
+                                       −
+                                       
+                                          med
+                                          j
+                                       
+                                       
+                                          e
+                                          j
+                                       
+                                       |
+                                    
+                                    .
+                                 
+                              
+                           
+                        
+                     
+
+A safeguard threshold on the reprojection error is also set (details in Section 8).
+
+In general, the intersection module obeys the following strategy. As soon as one track reaches length two in a given model (i.e. at least two images of the track belongs to the model), the coordinates of the corresponding tie-point are computed by intersection. If the operation fails (because of one of the sanity checks described above) the 3D point is provisionally discarded but the track is kept. An attempt to compute the tie-point coordinates is undertaken every time the length of the track increases within the model.
+
+The tie-points belonging to the model that are also visible in the image to be added provides a set of 3D-2D correspondences, that are exploited to glue the image to the partial model. This is done by resection, where only the external parameters of the camera are to be computed (a.k.a. external orientation problem). We used the PPnP algorithm described in [65] inside MSAC, followed by non-linear minimization of the reprojection error at the end.
+
+After resection, which adds one image to the model, tie-points are updated by intersection, and bundle adjustment is run on the resulting model.
+
+When two partial independent (i.e., with different reference systems) models are to be conflated into one, the first step is to register one onto the other with a similarity transformation. The common tie-points are used to solve an absolute orientation (with scale) problem with MSAC.
+
+Given the scale ambiguity, the inlier threshold for MSAC is hard to set. In [66] a complex technique for the automatic estimation of the inlier threshold in 3D is proposed. We take a simpler but effective approach: instead of considering the length of the 3D segments that connect corresponding points as the residuals, we look at the average length of their 2D projections in the images; in this way a meaningful inlier threshold in pixels can be set easily. The final transformation, computed with the Orthogonal Procrustean (OP) method [67,68], minimizes the proper geometric residual, i.e. the sum of squared distances of 3D points.
+
+Once the models are registered, tie-points are updated by intersection, and the new model is refined with bundle adjustment.
+
+This hierarchical algorithm can be summarized as follows:
+
+                           
+                              1.
+                              Solve many independent relative orientation problems at the leaves of the tree, producing many independent stereo-models.
+
+Traverse the tree; in each node one of these operations takes place:
+                                    
+                                       (a)
+                                       Update one model by adding one image with resection followed by intersection;
+
+Merge two independent models with absolute orientation.
+
+Steps 1. and 2.(a) are the resection-intersection steps of classical sequential pipelines, as Bundler. Step 2.(b) summons up the photogrammetric Independent Models Block Adjustment (IMBA) [69], where for each pair of overlapping photographs a stereo-model is built and then all these independent models are simultaneously transformed into a common reference frame with absolute orientation.
+
+If the tree reduces to a chain, the algorithm is the sequential one, whereas if the tree is perfectly balanced, only steps 2.(b) are taken, and the resulting procedure resembles the IMBA, besides the fact that our models are disjoint and that models are recursively merged in pairs.
+
+Compared to the standard sequential approach, this framework has a lower computational complexity, is independent of the initial pair of images, and copes better with drift problems, typical of sequential schemes.
+
+The hierarchical approach that has been outlined above allows us to decrease the computational complexity with respect to the sequential structure-and-motion pipeline. Indeed, if the number of images is n and every image adds a constant number of tie-points ℓ to the model, the computational complexity
+                           7
+                        
+                        
+                           7
+                           We are considering here only the cost of bundle adjustment, which clearly dominates the other operations.
+                         in time of sequential structure-and-motion is O(n
+                        5), whereas the complexity of Samantha (in the best case) is O(n
+                        4).
+
+The cost of bundle adjustment with m tie-points and n images is 
+                           
+                              O
+                              (
+                              m
+                              n
+                              
+                                 
+                                    (
+                                    m
+                                    +
+                                    2
+                                    n
+                                    )
+                                 
+                                 2
+                              
+                              )
+                           
+                         
+                        [7], hence it is O(n
+                        4) if 
+                           
+                              m
+                              =
+                              ℓ
+                              n
+                           
+                        .
+
+In sequential structure-and-motion, adding image i requires a constant number of bundle adjustments (typically one or two) with i images, hence the complexity is
+
+                           
+                              (7)
+                              
+                                 
+                                    
+                                       ∑
+                                       
+                                          i
+                                          =
+                                          1
+                                       
+                                       n
+                                    
+                                    O
+                                    
+                                       (
+                                       
+                                          i
+                                          4
+                                       
+                                       )
+                                    
+                                    =
+                                    O
+                                    
+                                       (
+                                       
+                                          n
+                                          5
+                                       
+                                       )
+                                    
+                                    .
+                                 
+                              
+                           
+                        In the case of the hierarchical approach, consider a node of the dendrogram where two models are merged into a model with n images. The cost T(n) of adjusting that model is given by O(n
+                        4) plus the cost of doing the same onto the left and right subtrees. In the hypothesis that the dendrogram is well balanced, i.e., the two models have the same number of images, this cost is given by 2T(n/2). Hence the asymptotic time complexity T in the best case is given by the solution of the following recurrence:
+
+                           
+                              (8)
+                              
+                                 
+                                    T
+                                    
+                                       (
+                                       n
+                                       )
+                                    
+                                    =
+                                    2
+                                    T
+                                    
+                                       (
+                                       n
+                                       /
+                                       2
+                                       )
+                                    
+                                    +
+                                    O
+                                    
+                                       (
+                                       
+                                          n
+                                          4
+                                       
+                                       )
+                                    
+                                 
+                              
+                           
+                        that is 
+                           
+                              T
+                              
+                                 (
+                                 n
+                                 )
+                              
+                              =
+                              O
+                              
+                                 (
+                                 
+                                    n
+                                    4
+                                 
+                                 )
+                              
+                           
+                         by the third branch of the Master’s theorem [70].
+
+The worst case is when a single model is built up by adding one image at a time. In this case, which corresponds to the sequential case, the dendrogram is extremely unbalanced and the complexity drops to O(n
+                        5).
+
+As demonstrated in precedence, the hierarchical framework can provide a provable computational gain, provided that the resulting tree is well-balanced. The worst case complexity, corresponding to a sequence of single image additions, is no better than the standard sequential approach. It is therefore crucial to ensure a good balance during the clustering phase. Our solution is to employ a novel clustering procedure, which promotes the creation of better balanced dendrograms.
+
+The image clustering procedure proposed in the previous section allows us to organize the available images into a hierarchical cluster structure (a tree) that will guide the structure-and-motion process. This approach decreases the computational complexity with respect to sequential structure-and-motion pipelines, from O(n
+                     5) to O(n
+                     4) in the best case, i.e. when the tree is well balanced (n is the number of images). If the tree is unbalanced this computational gains vanishes. It is therefore crucial to enforce the balancing of the tree.
+                  
+
+The preceding solution, which used the simple rule, specified that the distance between two clusters is to be determined by the distance of the two closest objects (nearest neighbors) in the different clusters. In order to produce better balanced trees, we modified the agglomerative clustering strategy as follows: starting from all singletons, each sweep of the algorithm merges the pair with the smallest cardinality among the ℓ closest pair of clusters. The distance is computed according to the simple linkage rule. The cardinality of a pair is the sum of the cardinality of the two clusters. In this way we are softening the closest first agglomerative criterion by introducing a competing smallest first principle that tends to produce better balanced dendrograms.
+
+The amount of balancing is regulated by the parameter ℓ: when 
+                        
+                           ℓ
+                           =
+                           1
+                        
+                      this is the standard agglomerative clustering with no balancing; when ℓ ≥ n/2 (n is the number of images) a perfect balanced tree is obtained, but the clustering is poor, since distance is largely disregarded.
+
+
+                     Fig. 4 shows an example of balancing achieved by our technique. The height of the tree is reduced from 14 to 9 and more initial pairs are present in the dendrogram on the right.
+
+In the pursuit of further complexity reduction, we adopted a strategy that consists in reducing the number of images to be used in the bundle adjustment in place of the whole model. This strategy is an instance of local bundle adjustment [71,72], which is often used for video sequences, where the active images are the most recent ones. Let us concentrate on the model merging step, as the resection is a special case of the latter. Consider two models A and B, where A has fewer images than B. We always transform the smallest onto the largest (if one is projective it is always the smallest).
+
+The bundle adjustment involves all the images of A and the subset of images of B that share some tracks with A (tie-points that are visible in images in both models). Let us call this subset B′. All the tie-points linking B′ and A are considered in the bundle adjustment. Images in B∖B′ are not moved by bundle adjustment but their tie-points are still considered in the minimization in order to anchor B′ through their common tie-points. The tie-points linking only cameras in B∖B′ are not considered. This strategy is sub-optimal because in a proper bundle adjustment all the images in B should be involved, even those that do not share any tie-point with A. However, a bundle adjustment with all the images and all the tie-points can be run at the end to obtain the optimal solution.
+
+A model that differs from the true one by a projectivity is called projective. A model that differs from the true one by a similarity is called Euclidean. The latter can be achieved when calibration parameters are known, the former can be obtained if images are uncalibrated.
+
+In this section we relax the hypothesis that images are calibrated and integrate the autocalibration algorithm in our pipeline, so that the resulting model is still Euclidean.
+
+The main difference from the procedure described in Section 4 is that now leaf nodes do not have proper calibration right from the start of the structure-and-motion process. The models is projective at the beginning, and as soon as one reaches a sufficient number of images, the Euclidean upgrade procedure (described in Section 7.1) is triggered. Moreover, each step of hierarchical structure-and-motion must be modified to accommodate for projective models, as described in Sections 7.2–7.4.
+
+Autocalibration starts from a projective model and seeks the collineation of space H so as to transforms the model into a Euclidean one.
+
+Without loss of generality, the first camera of the Euclidean model can be assumed to be 
+                           
+                              
+                                 P
+                                 1
+                                 E
+                              
+                              =
+                              
+                                 [
+                                 
+                                    K
+                                    1
+                                 
+                                 
+                                    
+                                    |
+                                    
+                                    0
+                                 
+                                 ]
+                              
+                              ,
+                           
+                         so that the Euclidean upgrade H has the following structure, since 
+                           
+                              
+                                 P
+                                 1
+                                 E
+                              
+                              =
+                              
+                                 P
+                                 1
+                              
+                              H
+                           
+                        :
+
+                           
+                              (9)
+                              
+                                 
+                                    H
+                                    =
+                                    
+                                       [
+                                       
+                                          
+                                             
+                                                
+                                                   K
+                                                   1
+                                                
+                                             
+                                             
+                                                0
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   r
+                                                   ⊤
+                                                
+                                             
+                                             
+                                                λ
+                                             
+                                          
+                                       
+                                       ]
+                                    
+                                 
+                              
+                           
+                        where K
+                        1 is the calibration matrix of the first camera, r is a vector which determines the location of the plane at infinity and λ is a scale factor.
+
+Our autocalibration technique is based on two stages:
+
+                           
+                              1.
+                              Given a guess on the internal parameters of two cameras compute a consistent upgrading collineation. This yields an estimate of all cameras but the first.
+
+Score the internal parameters of these 
+                                    
+                                       n
+                                       −
+                                       1
+                                    
+                                  cameras based on the likelihood of skew, aspect ratio and principal point.
+
+This approach has been introduced in [45], where it is compared with several other algorithms obtaining favorable results.
+
+This section describes a closed-form solution for the plane at infinity (i.e., the vector r) given two perspective projection matrices and their internal parameters.
+
+While the first camera is 
+                              
+                                 
+                                    P
+                                    1
+                                 
+                                 =
+                                 
+                                    [
+                                    I
+                                    
+                                    |
+                                    
+                                    0
+                                    ]
+                                 
+                                 ,
+                              
+                            the second projective camera can be written as 
+                              
+                                 
+                                    P
+                                    2
+                                 
+                                 =
+                                 
+                                    [
+                                    
+                                       A
+                                       2
+                                    
+                                    
+                                       
+                                       |
+                                       
+                                    
+                                    
+                                       e
+                                       2
+                                    
+                                    ]
+                                 
+                                 ,
+                              
+                            and its Euclidean upgrade is:
+
+                              
+                                 (10)
+                                 
+                                    
+                                       
+                                          
+                                             
+                                                P
+                                                2
+                                                E
+                                             
+                                          
+                                          
+                                             
+                                                =
+                                                
+                                                   K
+                                                   2
+                                                
+                                                
+                                                   [
+                                                   
+                                                      R
+                                                      2
+                                                   
+                                                   
+                                                      |
+                                                   
+                                                   
+                                                      t
+                                                      2
+                                                   
+                                                   ]
+                                                
+                                                ≃
+                                                
+                                                   P
+                                                   2
+                                                
+                                                H
+                                                =
+                                                
+                                                   [
+                                                   
+                                                      A
+                                                      2
+                                                   
+                                                   
+                                                      K
+                                                      1
+                                                   
+                                                   +
+                                                   
+                                                      e
+                                                      2
+                                                   
+                                                   
+                                                      r
+                                                      ⊤
+                                                   
+                                                   |
+                                                   λ
+                                                   
+                                                      e
+                                                      2
+                                                   
+                                                   ]
+                                                
+                                                .
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           The rotation R
+                           2 can therefore be equated to:
+
+                              
+                                 (11)
+                                 
+                                    
+                                       
+                                          R
+                                          2
+                                       
+                                       ≃
+                                       
+                                          K
+                                          2
+                                          
+                                             −
+                                             1
+                                          
+                                       
+                                       
+                                          (
+                                          
+                                             A
+                                             2
+                                          
+                                          
+                                             K
+                                             1
+                                          
+                                          +
+                                          
+                                             e
+                                             2
+                                          
+                                          
+                                             r
+                                             ⊤
+                                          
+                                          )
+                                       
+                                       =
+                                       
+                                          K
+                                          2
+                                          
+                                             −
+                                             1
+                                          
+                                       
+                                       
+                                          A
+                                          2
+                                       
+                                       
+                                          K
+                                          1
+                                       
+                                       +
+                                       
+                                          K
+                                          2
+                                          
+                                             −
+                                             1
+                                          
+                                       
+                                       
+                                          e
+                                          2
+                                       
+                                       
+                                          r
+                                          ⊤
+                                       
+                                       .
+                                    
+                                 
+                              
+                           
+                        
+
+Using the constraints on orthogonality between rows or columns of a rotation matrix, one can solve for r finding the value that makes the right hand side of (11) equal to a rotation, up to a scale.
+
+The solution can be obtained in closed form by noting that there always exists a rotation matrix R
+                           * such as: 
+                              
+                                 
+                                    R
+                                    *
+                                 
+                                 
+                                    t
+                                    2
+                                 
+                                 =
+                                 
+                                    
+                                       [
+                                       
+                                          ∥
+                                       
+                                       
+                                          t
+                                          2
+                                       
+                                       
+                                          ∥
+                                          
+                                          0
+                                          
+                                          0
+                                       
+                                       ]
+                                    
+                                    ⊤
+                                 
+                                 ,
+                              
+                            where 
+                              
+                                 
+                                    t
+                                    2
+                                 
+                                 =
+                                 
+                                    K
+                                    2
+                                    
+                                       −
+                                       1
+                                    
+                                 
+                                 
+                                    e
+                                    2
+                                 
+                              
+                           . Left multiplying it to (11) yields:
+
+                              
+                                 (12)
+                                 
+                                    
+                                       
+                                          R
+                                          *
+                                       
+                                       
+                                          R
+                                          2
+                                       
+                                       ≃
+                                       
+                                          R
+                                          *
+                                       
+                                       
+                                          K
+                                          2
+                                          
+                                             −
+                                             1
+                                          
+                                       
+                                       
+                                          A
+                                          2
+                                       
+                                       
+                                          K
+                                          1
+                                       
+                                       +
+                                       
+                                          
+                                             [
+                                             
+                                                ∥
+                                             
+                                             
+                                                t
+                                                2
+                                             
+                                             
+                                                ∥
+                                                
+                                                0
+                                                
+                                                0
+                                             
+                                             ]
+                                          
+                                          ⊤
+                                       
+                                       
+                                          r
+                                          ⊤
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+Calling 
+                              
+                                 W
+                                 =
+                                 
+                                    R
+                                    *
+                                 
+                                 
+                                    K
+                                    2
+                                    
+                                       −
+                                       1
+                                    
+                                 
+                                 
+                                    A
+                                    2
+                                 
+                                 
+                                    K
+                                    1
+                                 
+                              
+                            and its rows 
+                              
+                                 
+                                    w
+                                    i
+                                    ⊤
+                                 
+                                 ,
+                              
+                            we arrive at the following:
+
+                              
+                                 (13)
+                                 
+                                    
+                                       
+                                          R
+                                          *
+                                       
+                                       
+                                          R
+                                          2
+                                       
+                                       =
+                                       
+                                          [
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         w
+                                                         2
+                                                         ⊤
+                                                      
+                                                      +
+                                                      
+                                                         ∥
+                                                         
+                                                            t
+                                                            2
+                                                         
+                                                         ∥
+                                                      
+                                                      
+                                                         r
+                                                         ⊤
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            w
+                                                            2
+                                                         
+                                                      
+                                                      ⊤
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            w
+                                                            3
+                                                         
+                                                      
+                                                      ⊤
+                                                   
+                                                
+                                             
+                                          
+                                          ]
+                                       
+                                       /
+                                       
+                                          ∥
+                                          
+                                             w
+                                             3
+                                          
+                                          ∥
+                                       
+                                    
+                                 
+                              
+                           in which the last two rows are independent of the value of r and the correct scale has been recovered normalizing each side of the equation to unit norm.
+
+Since the rows of R
+                           *
+                           R
+                           2 are orthonormal, we can recover the first one taking the cross product of the other two. Vector r is therefore equal to:
+
+                              
+                                 (14)
+                                 
+                                    
+                                       r
+                                       =
+                                       
+                                          (
+                                          
+                                             w
+                                             2
+                                          
+                                          ×
+                                          
+                                             w
+                                             3
+                                          
+                                          /
+                                          
+                                             ∥
+                                             
+                                                w
+                                                3
+                                             
+                                             ∥
+                                          
+                                          −
+                                          
+                                             w
+                                             1
+                                          
+                                          )
+                                       
+                                       /
+                                       
+                                          ∥
+                                          
+                                             t
+                                             2
+                                          
+                                          ∥
+                                       
+                                       .
+                                    
+                                 
+                              
+                           The upgrading collineation H can be computed using (9); the term λ can be arbitrarily chosen, as it will just influence the overall scale.
+
+When the calibration parameters are known only approximately, the right hand side of (13) is no more a rotation matrix. However, (14) will still yield the value of r that will produce an approximate Euclidean model.
+
+In the preceding section we showed how to compute the Euclidean upgrade H given the calibration parameters of two cameras of the projective model.
+
+The autocalibration algorithm loops through all possible internal parameter matrices of two cameras K
+                           1 and K
+                           2, checking whether the entire upgraded model has the desired properties in terms of 
+                              
+                                 
+                                    K
+                                    2
+                                 
+                                 …
+                                 
+                                    K
+                                    n
+                                 
+                              
+                           . The process is well-defined, since the search space is naturally bounded by the finiteness of the acquisition devices.
+
+In order to sample the space of calibration parameters we can safely assume, as customary, null skew and unit aspect ratio: this leaves the focal length and the principal point location as free parameters. However, as expected, the value of the plane at infinity is in general far more sensitive to errors in the estimation of focal length values rather than the image center. Thus, we can iterate just over focal lengths f
+                           1 and f
+                           2 assuming the principal point to be centered on the image; the error introduced with this approximation is normally well within the radius of convergence of the subsequent non-linear optimization. The search space is therefore reduced to a bounded region of 
+                              
+                                 R
+                                 2
+                              
+                           .
+
+To score each sample (f
+                           1, f
+                           2), we consider the aspect ratio, skew and principal point location of the upgraded (i.e., transformed with H) camera matrices and aggregate their respective value into a single cost function:
+
+                              
+                                 (15)
+                                 
+                                    
+                                       
+                                          {
+                                          
+                                             f
+                                             1
+                                          
+                                          ,
+                                          
+                                             f
+                                             2
+                                          
+                                          }
+                                       
+                                       =
+                                       arg
+                                       
+                                          min
+                                          
+                                             
+                                                f
+                                                1
+                                             
+                                             ,
+                                             
+                                                f
+                                                2
+                                             
+                                          
+                                       
+                                       
+                                          ∑
+                                          
+                                             ℓ
+                                             =
+                                             2
+                                          
+                                          n
+                                       
+                                       
+                                          C
+                                          2
+                                       
+                                       
+                                          (
+                                          
+                                             K
+                                             ℓ
+                                          
+                                          )
+                                       
+                                    
+                                 
+                              
+                           where K
+                           ℓ is the internal parameters matrix of the ℓth camera after the Euclidean upgrade determined by (f
+                           1, f
+                           2), and C(K) reflects the degree to which K meets a-priori expectations.
+
+Let us consider the viewport matrices of the cameras, defined as:
+
+                              
+                                 (16)
+                                 
+                                    
+                                       V
+                                       =
+                                       
+                                          1
+                                          2
+                                       
+                                       
+                                          [
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         
+                                                            w
+                                                            2
+                                                         
+                                                         +
+                                                         
+                                                            h
+                                                            2
+                                                         
+                                                      
+                                                   
+                                                
+                                                
+                                                   0
+                                                
+                                                
+                                                   w
+                                                
+                                             
+                                             
+                                                
+                                                   0
+                                                
+                                                
+                                                   
+                                                      
+                                                         
+                                                            w
+                                                            2
+                                                         
+                                                         +
+                                                         
+                                                            h
+                                                            2
+                                                         
+                                                      
+                                                   
+                                                
+                                                
+                                                   h
+                                                
+                                             
+                                             
+                                                
+                                                   0
+                                                
+                                                
+                                                   0
+                                                
+                                                
+                                                   2
+                                                
+                                             
+                                          
+                                          ]
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+where w and h are respectively the width and height of each image. Camera matrices are normalized with 
+                              
+                                 P
+                                 ←
+                                 
+                                    V
+                                    
+                                       −
+                                       1
+                                    
+                                 
+                                 P
+                                 /
+                                 
+                                    ∥
+                                    
+                                       P
+                                       
+                                          3
+                                          ,
+                                          1
+                                          :
+                                          3
+                                       
+                                    
+                                    ∥
+                                 
+                              
+                           . In this way, the principal point expected value is (0, 0) and the focal range is [1/3, 3]. Therefore, the term of the cost function writes:
+
+                              
+                                 (17)
+                                 
+                                    
+                                       C
+                                       
+                                          (
+                                          K
+                                          )
+                                       
+                                       =
+                                       
+                                          
+                                             
+                                                
+                                                   w
+                                                   
+                                                      s
+                                                      k
+                                                   
+                                                
+                                                
+                                                   |
+                                                   
+                                                      k
+                                                      
+                                                         1
+                                                         ,
+                                                         2
+                                                      
+                                                   
+                                                   |
+                                                
+                                             
+                                             ︷
+                                          
+                                          skew
+                                       
+                                       +
+                                       
+                                          
+                                             
+                                                
+                                                   w
+                                                   
+                                                      a
+                                                      r
+                                                   
+                                                
+                                                
+                                                   |
+                                                   
+                                                      k
+                                                      
+                                                         1
+                                                         ,
+                                                         1
+                                                      
+                                                   
+                                                   −
+                                                   
+                                                      k
+                                                      
+                                                         2
+                                                         ,
+                                                         2
+                                                      
+                                                   
+                                                   |
+                                                
+                                             
+                                             ︷
+                                          
+                                          
+                                             aspect
+                                             
+                                             ratio
+                                          
+                                       
+                                       +
+                                       
+                                          
+                                             
+                                                
+                                                   w
+                                                   
+                                                      u
+                                                      o
+                                                   
+                                                
+                                                
+                                                   |
+                                                
+                                                
+                                                   k
+                                                   
+                                                      1
+                                                      ,
+                                                      3
+                                                   
+                                                
+                                                
+                                                   |
+                                                   +
+                                                
+                                                
+                                                   w
+                                                   
+                                                      v
+                                                      o
+                                                   
+                                                
+                                                
+                                                   |
+                                                   
+                                                      k
+                                                      
+                                                         2
+                                                         ,
+                                                         3
+                                                      
+                                                   
+                                                   |
+                                                
+                                             
+                                             ︷
+                                          
+                                          
+                                             principal
+                                             
+                                             point
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+where k
+                           
+                              i, j
+                            denotes the entry (i, j) of K and w are suitable weights, computed as in [37]. The first term takes into account the skew, which is expected to be 0, the second one penalizes cameras with aspect ratio different from 1 and the last two weigh down cameras where the principal point is away from (0, 0).
+
+Finally, the solution selected is refined by non-linear minimization of Eq. (15). Since it is usually very close to a minimum, just a few iterations of a Levenberg–Marquardt solver are necessary for convergence.
+
+The entire procedure is presented as pseudo-code in Algorithm 1. The algorithm shows remarkable convergence properties; it has been observed to fail only when the sampling of the focal space was not sufficiently dense (in practice, less than twenty focal values in each direction), and therefore all the tested infinity planes were not close enough to the correct one. Such problems are easy to detect, since they usually take the final, refined solution outside the legal search space.
+
+In principle, autocalibration requires a minimum number of images to work, according to the autocalibration “counting argument” [73] (e.g. 4 images with known skew and aspect ratio). However, as we strive to maintain an “almost” Euclidean reference frame from the beginning, to better condition subsequent processing, autocalibration is triggered for models starting from two images. The result is an approximate Euclidean upgrade; in fact these models are still regarded as projective, until they reach a sufficient cardinality. After that point autocalibration is not performed anymore and the internal parameters of each camera are refined further only with bundle adjustment, as the computation proceeds. In order not to hamper the process too much, the internal parameters of a camera becomes fixed after they have been bundle-adjusted together with a given number of cameras.
+
+The model that can be obtained from two uncalibrated images is always projective. The following two camera matrices are used:
+
+                           
+                              (18)
+                              
+                                 
+                                    
+                                       P
+                                       1
+                                    
+                                    =
+                                    
+                                       [
+                                       I
+                                       
+                                       |
+                                       
+                                       0
+                                       ]
+                                    
+                                    
+                                    and
+                                    
+                                    
+                                       P
+                                       2
+                                    
+                                    =
+                                    
+                                       [
+                                       
+                                          
+                                             [
+                                             
+                                                e
+                                                2
+                                             
+                                             ]
+                                          
+                                          ×
+                                       
+                                       F
+                                       
+                                       |
+                                       
+                                       
+                                          e
+                                          2
+                                       
+                                       ]
+                                    
+                                    ,
+                                 
+                              
+                           
+                        This canonical pair yields a projective model with the plane at infinity passing through the centre of the second camera, which is very unnatural. Therefore, the method of Section 7.1.1 is applied for guessing a better location for the plane at infinity compatible with rough focal estimates, obtained from the magnitude of the image diagonal. Even when the true focal lengths are far from the estimates, this procedure will provide a useful, well conditioned starting point for the subsequent steps.
+
+Cheirality is then tested and enforced on the model. In practice only a reflection (switches all points from in front to behind the cameras) may be necessary, as the twisted pair case never occurs. In fact, the twisting corresponds to the infinity plane crossing the baseline, which would imply that our guess for the infinity plane is indeed very poor.
+
+The 3D coordinates of the tie-points are then obtained by intersection as before. Finally bundle adjustment is run to improve the model.
+
+The procedure is the same as in the calibrated case, taking care of using the Direct Linear Transform (DLT) algorithm [74] for resection, as the single image is always uncalibrated. While PPnP computes only the external parameters of the camera, the DLT computes the full camera matrix.
+
+Partial models live in two different reference frames, that are related by a similarity if both are Euclidean or by a projectivity if one is projective. In this case the projectivity that brings the projective model onto the Euclidean one is sought, thereby recovering its correct Euclidean reference frame. The procedure is the same as in the calibrated case, with the only difference that when computing the projectivity the DLT algorithm should be used instead of OP.
+
+The new model is refined with bundle adjustment (either Euclidean or projective) and upgraded to a Euclidean frame when the conditions stated beforehand are met.
+
+
+                     Samantha is a complex pipeline with many internal parameters. With respect to this issue our endeavor was: (i) to avoid free parameters at all; (ii) to make them data-dependent; (iii) to make user-specified parameters intelligible and subject to an educated guess. In the last case a default should be provided that works with most scenarios. This guarantees the processing to be completely automatic in the majority of cases.
+
+All the heuristic parameter settings used in the experiments have been reported and summarized in Table 1
+                     .
+
+The keypoints extracted from all images are ordered by their response value and the ones with the highest response are retained, while the others are discarded. The total number of keypoints to be kept is a multiple of the number of images, so as to keep the average quota of keypoints for each image fixed.
+
+During the broad matching phase the goal is to compute the 2D histogram mentioned in Section 2.2. To this end, the keypoints in each image are ordered by scale and the 300 keypoints with the highest scale are considered. The number of neighbors in feature space is set to six, as in [49]. Given the nature of the broad phase, this value is not critical, to the point where only the number of keypoints is exposed as a parameter.
+
+The number m in Section 2.2 (“Degree of edge-connectedness”, in Table 1), has been set to eight following [49]. In our case, the role of the parameter is more “global”, as it does not set the exact number of images to be matched but the degree of edge-connectedness of the graph. However our experiments confirmed that that 
+                                 
+                                    m
+                                    =
+                                    8
+                                 
+                               is a good default.
+
+The number of max iterations of MSAC is set to 1000 during the matching phase. This is only an upper bound, for the actual value is dynamically updated every time a new set of inliers is found.
+
+The “Matching discriminative ratio” refers to the ratio of first to second closest keypoint descriptors, used to prune weak matches at the beginning of this phase.
+
+The “Minimum number of matches” parameter refers to the last stage of the narrow phase, when poor matches between images are discarded based on the number of surviving inliers after MSAC.
+
+The parameter ℓ of Section 5 has been set to 
+                                 
+                                    ℓ
+                                    =
+                                    3
+                                 
+                               based on the graph reported in Fig. 5
+                              , where the number of reconstructed tie-points/images and the computing time are plotted as the value of ℓ is increased. After 
+                                 
+                                    ℓ
+                                    =
+                                    3
+                                    ,
+                                 
+                               the computing time stabilizes at around 30% of the baseline case, without any significant difference in terms of number of reconstructed images and tie-points.
+
+The safeguard threshold on the reprojection error (Sec. 4.2) is set to 2 pixels with reference to a 6 Mpixel image, and scaled according to the actual image diagonal (assuming an aspect ratio of 4:3, the reference diagonal is 3600 pixels).
+                           
+
+The Euclidean upgrade is stopped as soon as a cluster reaches a sufficient cardinality k (“Number of cameras for autocalibration”) that satisfies the following inequality [73], giving the condition under which autocalibration is feasible:
+
+                                 
+                                    (19)
+                                    
+                                       
+                                          5
+                                          k
+                                          −
+                                          8
+                                          ≥
+                                          
+                                             (
+                                             k
+                                             −
+                                             1
+                                             )
+                                          
+                                          
+                                             (
+                                             5
+                                             −
+                                             
+                                                p
+                                                k
+                                             
+                                             −
+                                             
+                                                p
+                                                c
+                                             
+                                             )
+                                          
+                                          +
+                                          5
+                                          −
+                                          
+                                             p
+                                             k
+                                          
+                                       
+                                    
+                                 
+                              where pk
+                               internal parameters are known and pc
+                               internal parameters are constant. With known (or guessed) skew and aspect ratio (
+                                 
+                                    
+                                       p
+                                       k
+                                    
+                                    =
+                                    2
+                                 
+                               and 
+                                 
+                                    
+                                       p
+                                       c
+                                    
+                                    =
+                                    0
+                                 
+                              ) four cameras are sufficient.
+
+The reason for keeping this value to the minimum is because we observed experimentally that projective alignment is fairly unstable and it is beneficial to start using a similarity transformation as soon as possible.
+
+The cluster cardinality after which the internal parameters are kept fixed in the bundle adjustment is set to 25, a fairly high value, that guarantees all the internals parameters, especially the radial distortion ones, are steady.
+
+As discussed previously, the local bundle adjustment is generally to be preferred over the full one. However, since the autocalibration phase is crucial, our strategy is to run the full bundle adjustment until the clusters become Euclidean. It should also be noted that the computational benefits of the local bundle adjustment are more evident with large clusters of cameras.
+
+The last bundle adjustment is always full (not local) and is run with a lower safeguard threshold on the reprojection error (1.5 pixel in the reference 6 Mpixel image). A final intersection step is carried out using also the tracks of length two, in order to increase the density of the model. Please note however that these weak points do not interfere with the bundle adjustment, as they are added only after it.
+
+@&#EXPERIMENTS@&#
+
+We run Samantha on several real, challenging datasets, summarized in Table 2. All of them have some ground truth available, being either a point cloud (from laser scanning), the camera internal parameters or measured “ground” control points (GCP).
+
+The qualitative comparison against VisualSFM focuses on differences in terms of number of reconstructed cameras and manifest errors in the model. The quantitative evaluation examines the accuracy of the model against GCPs and laser scans, and/or the internal orientation accuracy.
+
+We compared Samantha (version 1.3) with VisualSFM (version 0.5.22) [77,78], a recent sequential pipeline that improves on Bundler [32] in terms of robustness and efficiency.
+
+In all the experiments of this section, the internal camera parameters were considered to be unknown for both pipelines. However, while Samantha uses a completely autocalibrated approach, VisualSFM extracts an initial guess of the internal parameters from the image EXIF and a database of known sensor sizes for common cameras (or uses a default guess for the focal length).
+
+We report four experiments. The first one, “Brà”, is composed of 331 photos of Piazza Brà, the main square in Verona where the Arena is located. Photos were taken with a Nikon D50 camera and a fixed focal length of 18 mm. This dataset is also publicly available for download.
+                           8
+                        
+                        
+                           8
+                           
+                              http://www.diegm.uniud.it/fusiello/demo/samantha/
+.
+                         Results are shown in Fig. 6
+                        . Both VisualSFM and Samantha produced a correct result in this case. It can also be noticed that Bundler failed with the same dataset [12].
+                        
+                        
+                     
+
+The second test, “Duomo di Pisa”, is composed of 309 photos of the Duomo of Pisa in the famous Piazza dei Miracoli square. The dataset is composed of three sets of photos taken with a Nikon D40X camera at different focal lengths (13 mm, 20 mm and 58 mm). Results are shown in Fig. 7. Also in this case both the pipelines produced a good solution. This dataset is a relatively easy one as far as the structure-and-motion is concerned, for there are many photos covering a relatively small and limited scene, but there are three different cameras, which makes it challenging for the autocalibration.
+                     
+
+The third tested dataset, “S. Giacomo”, is composed of 270 photos of one of the main squares in Udine (IT). It consists of two set of exposures. The first one was shot with a Sony DSC-H10 camera with a fixed focal length of 6 mm while the second one – one year after the first – with a Pentax OptioE20 camera with a fixed focal length of 6 mm. Results are shown in Fig. 8. While Samantha produced a visually correct result, some cameras of VisualSFM are located out of the square and some walls are manifestly wrong.
+
+The last set, “Navona”, contains 92 photos of the famous square in Rome, taken with a Samsung ST45 Camera at a fixed focal length of 35 mm. The dataset is publicly available for download.
+                           9
+                        
+                        
+                           9
+                           
+                              http://www.icet-rilevamento.lecco.polimi.it/
+.
+                         Results are shown in Fig. 9. In this case, Samantha produced a complete and correct model of the square while VisualSFM produced a partial and incorrect model, as reported also in [75].
+
+For this dataset the internal parameters of the camera were also available (from off-line standard calibration), thus allowing us to compare the focal length obtained by autocalibration, which achieved an error of 2.3% (Table 4
+                        ).
+                     
+
+In this set of experiments we tested the models obtained by Samantha in a context where the position of some “ground” control points (GCP) was measured independently (by GPS or other techniques). These control points was identified manually in the images and their position in space was estimated by intersection. Correspondences between true and estimated 3D coordinates have been used to transform the model with a similarity that aligns the control points in the least-squares sense. The root mean square (RMS) residual of this registration was taken as an indicator of the accuracy of the model (Table 3).
+
+“Ventimiglia” (477 photos) is composed of aerial photos – nadiral and oblique – taken with a RPA
+                           10
+                        
+                        
+                           10
+                           Remotely Piloted Aircraft.
+                         equipped with a 24 Mpixel Nikon D3X (full frame sensor) mounting a Nikkon 50 mm lens. 23 targeted points have been measured through topographic surveying using a Topcon GPT-7001i total station. The (average) ground sampling distance (GSD) is less than 4 mm. After modeling with Samantha and least-squares alignment, the RMS error with respect to the control points is 22 mm. Fig. 11 reports the individual errors.
+
+“Termica” (27 images) was captured with a RPA equipped with a 12 Mpixel Canon Power Shot S100 camera (1/1.7 CMOS sensor) with nadiral attitude. 13 non-signalized natural target points was measured by geodetic-grade GPS receivers. The (average) GSD is 27 mm. After modeling with Samantha and least-squares alignment, the RMS error with respect to the control points is 86 mm, which is well within the uncertainty affecting the measured camera positions (reported in [76]). Individual errors are shown in Fig. 12
+                        
+                        .
+
+“Herz-Jesu-P25” is part of a publicly available dataset [76], it consist of 25 cameras, for which the ground truth position and attitude had been computed via alignment with a laser model; in this case, as GCPs we considered the camera centres. After modeling with Samantha and least-squares alignment, the RMS error with respect to the control points is 3.4 mm. Fig. 13
+                         reports the individual errors.
+
+For this dataset the internal parameters of the camera were also available, thus allowing us to validate the parameters obtained by autocalibration, with a remarkably low error of 0.2% on the focal length value (Table 4).
+
+
+                        Fig. 10 shows the models obtained for these three datasets. As a further qualitative comparison, Fig. 14
+                         shows the models obtained by VisualSFM for the same datasets. Both pipelines produced qualitatively correct results, but VisualSFM discarded a group of 24 photos in the “Ventimiglia” dataset.
+
+Thanks to the availability of a laser survey for two datasets (“Brà” and “Duomo di Pisa”) we have been able to further assess the accuracy of our results, by aligning the 3D point produced by Samantha with the laser point cloud using iterative closest point (ICP) and looking at the residuals (using “CloudCompare” software [79]).
+
+Results are reported in Table 5
+                         and Fig. 15
+                         (for “Duomo di Pisa” and “Brà” only).
+
+The laser data relative to the “Duomo di Pisa” is a triangular mesh with an average resolution of 30 mm representing a subset of the area surveyed by the photograph (the abside). After registering the point cloud produced by Samantha onto this mesh, the residual average point-mesh distance is 73 mm.
+
+The laser data for “S. Giacomo” is a point cloud resampled on a 20 mm grid. After registering the point cloud produced by Samantha onto this mesh, the residual average point-point distance is 140 mm.
+
+The laser data for “Brà” covers a larger part of the Piazza Brà site, including the interior of the Arena, and comes as a point cloud with an average resolution of 20 mm. Unfortunately the laser survey contains Christmas decoration (including a huge comet star rising from inside the Arena) and market stalls that were not present during the photographic surveys. A detailed comparison would entail the manual trimming of all the inconsistencies, which would be too cumbersome. This fact, together with a larger GSD might be the cause of the higher residual distance obtained in this case (360 mm).
+
+The overall running times for both pipelines are reported in Table 6
+                        . All the experiments were carried out on a workstation equipped with a Intel Xeon W3565 cpu @ 3.20 Ghz, 36 Gb of RAM and a Nvidia Geforce 640 GT video card.
+
+It should be noted that, in general, the running times are comparable. VisualSFM is faster when the dataset is composed of a small amount of images, while Samantha seems to scale better when the number of image increases. This is mostly due to the matching phase, where by default VisualSFM consider all the possible pairwise matches. Please note also that the running time does not depend only on the number of images and the image resolution, but also on unpredictable factors such as the amount of overlap among the images or their content. For example, “Ventimiglia” is composed of many overlapping and high resolution images and the higher running time of Samantha can be probably lead back to this.
+
+@&#CONCLUSIONS@&#
+
+In this paper we have described several improvements to the current state of the art in the context of uncalibrated structure-and-motion from images. Our proposal was a hierarchical framework for structure-and-motion (Samantha), which was demonstrated to be an improvement over the sequential approach both in computational complexity and with respect to the overall error containment. Samantha constitutes the first truly scalable approach to the problem of modeling from images, showing an almost linear complexity in the number of tie-points and images.
+
+Moreover, we described a novel self-calibration approach, which coupled with our hierarchical pipeline (Samantha) constitutes the first published example of uncalibrated structure-and-motion for generic datasets not using external, ancillary information. The robustness of our approach has been demonstrated on 3D model datasets both qualitatively and quantitatively.
+
+This technology has now been transferred to a company (3Dflow srl) which produced an industry grade implementation of Samantha that can be freely downloaded.
+                        11
+                     
+                     
+                        11
+                        
+                           http://samantha.3dflow.net
+.
+                     
+                  
+
+@&#ACKNOWLEDGMENTS@&#
+
+This research project has been partially supported by a grant from the Veneto Region (call POR CRO 2007–2013 Regional competitiveness and employment Action 5.1.1 Interregional Cooperation).
+
+The “Ventimiglia” images (courtesy of Fabio Remondino) were acquired by FBK Trento (3dom.fbk.eu) within a project funded by ARCUS SPA and supported by Direzione Regionale per i Beni Culurali e Paesaggistici della Ligura (MiBAC) and Soprintendenza per i Beni Archeologici della Liguria. The laser scanning of “ Brà” was conducted by Gexcel s.r.l. with the EU JRC – Ispra and the permission of the municipality of Verona. The laser data of the “Duomo di Pisa” comes from the “Cattedrale Digitale” project, while the photo set is courtesy of the Visual Computing Lab (ISTI-CNR, Pisa). Domenico Visintini (Università di Udine) took the laser survey of “ S. Giacomo”. The images of the “Termica” dataset have been captured by Airmap (curtesy of Davide Zorzetto). Alberto Beinat and Marco Fassetta (Università di Udine) surveyed the GCPs. The Navona dataset was acquired by L. Barazzetti (Politecnico di Milano, Italy) and used for the evaluation of automated image orientation methods during the ISPRS 3D-ARCH workshop in 2011. The “Herz-Jesu-P25” images come from EPFL dense multi-view stereo evaluation dataset. Thanks to Michael Tooke who did a language revision.
+
+Thesis: the subgraph G′ produced by the method reported in Section 2.2 is m-edge-connected, provided that m independent spanning tree can be extracted from G.
+
+To prove the thesis we rely upon the following observation. Consider an undirected graph G with the capacity of all edges set to one; G is k-edge-connected if and only if the maximum flow from u to v is at least k for any node pair (u, v).
+
+Since our G′ is the union of m independent (disjoint) 1-edge-connected graphs, each of them adds an independent path with unit capacity from every node pair (u, v), so the maximum flow from every pair (u, v) in G′ is m.
+
+@&#REFERENCES@&#
+

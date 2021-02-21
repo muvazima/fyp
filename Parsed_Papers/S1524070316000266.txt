@@ -1,0 +1,2920 @@
+@&#MAIN-TITLE@&#Fast exact shortest distance queries for massive point clouds
+
+@&#HIGHLIGHTS@&#
+
+
+               
+               
+                  
+                     
+                        
+                           
+                           Fast exact shortest distance computation for massive point clouds.
+
+
+                        
+                        
+                           
+                           Theoretical proofs of correctness.
+
+
+                        
+                        
+                           
+                           Practical tests to investigate performance.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+Massive point cloud
+
+Shortest distance computation
+
+Out-of-core
+
+Path-planning
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  This paper describes a new efficient algorithm for the rapid computation of exact shortest distances between a point cloud and another object (e.g. triangulated, point-based, etc.) in three dimensions. It extends the work presented in Eriksson and Shellshear (2014) where only approximate distances were computed on a simplification of a massive point cloud. Here, the fast computation of the exact shortest distance is achieved by pruning large subsets of the point cloud known not to be closest to the other object. The approach works for massive point clouds even with a small amount of RAM and is able to provide real time performance. Given a standard PC with only 8GB of RAM, this resulted in real-time shortest distance computations of 15 frames per second for a point cloud having 1 billion points in three dimensions.
+               
+            
+
+@&#INTRODUCTION@&#
+
+High-resolution point clouds have become very important in the last decades as researchers have started to exploit their advantages over triangle-based models in computer graphics applications [19,21]. Improvements and significant price decreases in laser scanning technologies have made it possible to easily and cheaply scan very large objects, thereby creating massive quantities of point cloud data. At the same time, point clouds now offer significant advantages over traditional CAD geometries for real life applications and simulations, Eriksson and Shellshear [6]. In particular, one area which has received more attention is path planning in large point clouds and the ability to quickly compute proximity queries (collision, distance, etc.).
+
+Path-planning through environments consisting of triangle meshes has been studied intensively and there exists a significant amount research on the subject [3,7,9,10,16,17]. Although the area of path-planning with point clouds is newer, there are methods designed specifically for it, such as [11].
+
+Our focus in this paper is on the distance computation aspects of path planning. In this area, there are no known papers to the authors for computing the distances between dynamic massive triangle meshes and point clouds which do not fit in main memory. The Octomap data structures were used in [15] to compute distances between point clouds, but their focus was not on massive data sets so the methods used there were not directly applicable here. Distance computations between massive static point clouds and other objects can be carried out with out-of-core exact nearest neighbor queries, [2]. For a more thorough review of the literature we refer to [6].
+
+In this paper we extend the important work begun in [6] where preprocessing algorithms were developed to divide a point cloud into smaller subclouds and also simplify the point cloud to allow approximate shortest distance computations to be carried out in main memory. These methods demonstrated how fast and approximate closest distance computations could be carried out for massive point clouds which do not fit into main memory.
+
+However, a drawback of the work presented in [6] is the trade-off between the size of the point cloud and the level of simplification necessary. Already on a point cloud with one billion points it was shown to be necessary to accept an error of up to 2 cm to fit the point cloud and other necessary data structures into main memory. As the point clouds become larger, this error only increases. Here, we show a better way to compute distances between massive point clouds and other objects (point clouds, CAD geometries, etc.), which is scalable to point clouds of any size and also has no error in the distance computation, i.e., all distance computations are exact.
+
+This article demonstrates how it is possible to perform fast, exact distance queries for path-planning applications in massive point clouds independent of the amount of RAM available. Because our final usage is in real-time applications, like in [6], our goal is to achieve shortest distance computations with a frame rate of around 15 fps.
+
+In order to do this we start by dividing the point cloud into disjoint subsets using the methods presented in [6]. Given these subsets, we construct the convex hull of each subset and build two Proximity Query Package (PQP) models [12] for each subset, where one contains the extreme points and the other the non-extreme points. We then introduce Theorems 2 and 4 in order to decide which subsets can contain the point closest to the object and only these PQP models will have to reside in RAM. Our focus here is on three dimensions but, in theory, we expect the results to be applicable also in higher dimensions. In practice the generalization to higher dimensions will be challenging due to the computational and geometric complexity of the convex hull in higher dimensions. Our proposed strategy is shown to achieve our goal of a fast frame rate with massive point clouds. One limitation of the algorithm is that it does not allow the object moving through the point cloud to be initially contained in the convex hull of one of the subsets.
+
+
+                     Section 2 describes how to pre-process a point cloud for fast exact distance queries. Section 3 introduces a simple way of using information from the previous distance computation to exclude subsets that cannot contain the point closest to the object. The main algorithms are presented in Section 4 and in Section 5 we test the theoretical results from the first two sections on a real-life scenario.
+
+This section will describe how the convex hull of a subset of points can be used to derive a lower bound on how close any points contained in the convex hull can be to the object. If we know that there is a point that is closer to the object than a given lower bound for the distance to a given convex hull, then this subset of points can be excluded and therefore computing the shortest distance from this subset to the object can be avoided. This lower bound is based on the extreme points of the convex hulls and allows for a fast way to approximate the distance to the object from a set of points.
+
+Let Q be a finite point cloud, i.e., 
+                           
+                              Q
+                              =
+                              {
+                              
+                                 q
+                                 1
+                              
+                              ,
+                              …
+                              ,
+                              
+                                 q
+                                 m
+                              
+                              
+                              |
+                              
+                              
+                                 q
+                                 i
+                              
+                              ∈
+                              
+                                 R
+                                 n
+                              
+                              ,
+                              i
+                              =
+                              1
+                              ,
+                              …
+                              ,
+                              m
+                              }
+                           
+                         and recall the definition of the convex hull containing the interior:
+
+                           Definition 1
+                           The convex hull of a set of points Q is the set
+
+                                 
+                                    (1)
+                                    
+                                       
+                                          C
+                                          H
+                                          
+                                             (
+                                             Q
+                                             )
+                                          
+                                          =
+                                          
+                                             {
+                                             
+                                                ∑
+                                                
+                                                   i
+                                                   =
+                                                   1
+                                                
+                                                
+                                                   |
+                                                   Q
+                                                   |
+                                                
+                                             
+                                             
+                                                λ
+                                                i
+                                             
+                                             
+                                                q
+                                                i
+                                             
+                                             
+                                                
+                                                |
+                                                
+                                             
+                                             
+                                                λ
+                                                i
+                                             
+                                             ≥
+                                             0
+                                             ,
+                                             
+                                             
+                                                ∑
+                                                
+                                                   i
+                                                   =
+                                                   1
+                                                
+                                                
+                                                   |
+                                                   Q
+                                                   |
+                                                
+                                             
+                                             
+                                                λ
+                                                i
+                                             
+                                             =
+                                             1
+                                             }
+                                          
+                                          .
+                                       
+                                    
+                                 
+                              
+                           
+
+We denote the boundary of 
+                           
+                              C
+                              H
+                              (
+                              Q
+                              )
+                           
+                         by 
+                           
+                              ∂
+                              C
+                              H
+                              (
+                              Q
+                              )
+                           
+                         and assume throughout the article that 
+                           
+                              C
+                              H
+                              (
+                              Q
+                              )
+                           
+                         is full-dimensional, i.e., 
+                           
+                              dim
+                              (
+                              C
+                              H
+                              (
+                              Q
+                              )
+                              )
+                              =
+                              dim
+                              (
+                              Q
+                              )
+                              =
+                              n
+                              ,
+                           
+                         although the arguments presented here can be adapted to the case that 
+                           
+                              C
+                              H
+                              (
+                              Q
+                              )
+                           
+                         is not full-dimensional. Denote by 
+                           
+                              S
+                              ⊂
+                              
+                                 R
+                                 n
+                              
+                           
+                         the object which is moved through the point cloud and assume that this object is a compact set (e.g. it could be a polygon mesh or a point cloud). Other than this, we assume nothing else of the set S. We now introduce the following convenient notation for the distance between two points, from a point to a set, and from a set to a set:
+
+                           Definition 2
+                           Let 
+                                 
+                                    Q
+                                    ,
+                                    
+                                    R
+                                    ⊂
+                                    
+                                       R
+                                       n
+                                    
+                                 
+                               and 
+                                 
+                                    q
+                                    ,
+                                    
+                                    r
+                                    ∈
+                                    
+                                       R
+                                       n
+                                    
+                                 
+                              . Define:
+
+                                 
+                                    (2)
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   d
+                                                   (
+                                                   q
+                                                   ,
+                                                   r
+                                                   )
+                                                
+                                             
+                                             
+                                                
+                                                   =
+                                                   
+                                                      
+                                                         ∥
+                                                         q
+                                                         −
+                                                         r
+                                                         ∥
+                                                      
+                                                      2
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   d
+                                                   (
+                                                   q
+                                                   ,
+                                                   R
+                                                   )
+                                                
+                                             
+                                             
+                                                
+                                                   =
+                                                   
+                                                      inf
+                                                      
+                                                         r
+                                                         ∈
+                                                         R
+                                                      
+                                                   
+                                                   d
+                                                   
+                                                      (
+                                                      q
+                                                      ,
+                                                      r
+                                                      )
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                                
+                                                   d
+                                                   (
+                                                   Q
+                                                   ,
+                                                   R
+                                                   )
+                                                
+                                             
+                                             
+                                                
+                                                   =
+                                                   
+                                                      inf
+                                                      
+                                                         
+                                                            
+                                                               
+                                                                  q
+                                                                  ∈
+                                                                  Q
+                                                               
+                                                            
+                                                         
+                                                         
+                                                            
+                                                               
+                                                                  r
+                                                                  ∈
+                                                                  R
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                   d
+                                                   
+                                                      (
+                                                      q
+                                                      ,
+                                                      r
+                                                      )
+                                                   
+                                                   .
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+It is worth mentioning that the triangle inequality does not hold for general Q and R, e.g. when both are arbitrary sets, but it remains valid here as long as points are introduced as intermediates. As a preparation for the main results, an intuitively obvious theorem stating that the point belonging to 
+                           
+                              C
+                              H
+                              (
+                              Q
+                              )
+                           
+                         that is closest to S must lie in 
+                           
+                              ∂
+                              C
+                              H
+                              (
+                              Q
+                              )
+                           
+                         is proved next. Although this result seems to be a consequence of other well-known results we present a proof here for completeness.
+
+                           Theorem 1
+                           
+                              Let Q be a finite point cloud and
+                              
+                                 
+                                    S
+                                    ⊂
+                                    
+                                       R
+                                       n
+                                    
+                                 
+                               
+                              be closed and bounded and assume that
+                              
+                                 
+                                    C
+                                    H
+                                    (
+                                    Q
+                                    )
+                                 
+                               
+                              is full-dimensional. If
+                              
+                                 
+                                    C
+                                    H
+                                    (
+                                    Q
+                                    )
+                                    ∩
+                                    S
+                                    =
+                                    ∅
+                                    ,
+                                 
+                               
+                              the point in
+                              
+                                 
+                                    C
+                                    H
+                                    (
+                                    Q
+                                    )
+                                 
+                               
+                              closest to S must lie on the boundary.
+                           
+
+Let 
+                                 
+                                    V
+                                    =
+                                    
+                                       (
+                                       S
+                                       
+                                       ,
+                                       
+                                       C
+                                       H
+                                       
+                                          (
+                                          Q
+                                          )
+                                       
+                                       )
+                                    
+                                    ⊆
+                                    
+                                       R
+                                       n
+                                    
+                                    ×
+                                    
+                                       R
+                                       n
+                                    
+                                    ≅
+                                    
+                                       R
+                                       
+                                          2
+                                          n
+                                       
+                                    
+                                 
+                               and define the function
+
+                                 
+                                    (3)
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                      
+                                                         
+                                                            f
+                                                            :
+                                                            
+                                                               R
+                                                               
+                                                                  2
+                                                                  n
+                                                               
+                                                            
+                                                            →
+                                                            R
+                                                         
+                                                      
+                                                   
+                                                   
+                                                      
+                                                      
+                                                         
+                                                            f
+                                                            
+                                                               (
+                                                               x
+                                                               )
+                                                            
+                                                            =
+                                                            
+                                                               
+                                                                  ∥
+                                                                  
+                                                                     x
+                                                                     S
+                                                                  
+                                                                  −
+                                                                  
+                                                                     x
+                                                                     
+                                                                        C
+                                                                        H
+                                                                        (
+                                                                        Q
+                                                                        )
+                                                                     
+                                                                  
+                                                                  ∥
+                                                               
+                                                               2
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              where xS
+                               ∈ S and 
+                                 
+                                    
+                                       x
+                                       
+                                          C
+                                          H
+                                          (
+                                          Q
+                                          )
+                                       
+                                    
+                                    ∈
+                                    C
+                                    H
+                                    
+                                       (
+                                       Q
+                                       )
+                                    
+                                 
+                              . From Weierstrass’ theorem, [14],
+
+                                 
+                                    (4)
+                                    
+                                       
+                                          ∃
+                                          y
+                                          =
+                                          
+                                             (
+                                             
+                                                y
+                                                S
+                                             
+                                             
+                                             ,
+                                             
+                                             
+                                                y
+                                                
+                                                   C
+                                                   H
+                                                   (
+                                                   Q
+                                                   )
+                                                
+                                             
+                                             )
+                                          
+                                          ⊆
+                                          
+                                             R
+                                             n
+                                          
+                                          ×
+                                          
+                                             R
+                                             n
+                                          
+                                          ≅
+                                          
+                                             R
+                                             
+                                                2
+                                                n
+                                             
+                                          
+                                          ,
+                                          
+                                          
+                                          such
+                                          
+                                          that
+                                          
+                                          y
+                                          =
+                                          
+                                             arg min
+                                             
+                                                x
+                                                ∈
+                                                V
+                                             
+                                          
+                                          f
+                                          
+                                             (
+                                             x
+                                             )
+                                          
+                                          .
+                                       
+                                    
+                                 
+                              since V is closed and bounded. If 
+                                 
+                                    y
+                                    
+                                       C
+                                       H
+                                       (
+                                       Q
+                                       )
+                                    
+                                 
+                               lies on the boundary of 
+                                 
+                                    C
+                                    H
+                                    (
+                                    Q
+                                    )
+                                    ,
+                                 
+                               the proof is completed. If 
+                                 
+                                    y
+                                    
+                                       C
+                                       H
+                                       (
+                                       Q
+                                       )
+                                    
+                                 
+                               is an interior point of 
+                                 
+                                    C
+                                    H
+                                    (
+                                    Q
+                                    )
+                                    ,
+                                 
+                               construct the line
+
+                                 
+                                    (5)
+                                    
+                                       
+                                          L
+                                          =
+                                          
+                                             {
+                                             
+                                                y
+                                                
+                                                   C
+                                                   H
+                                                   (
+                                                   Q
+                                                   )
+                                                
+                                             
+                                             +
+                                             
+                                                (
+                                                
+                                                   y
+                                                   S
+                                                
+                                                −
+                                                
+                                                   y
+                                                   
+                                                      C
+                                                      H
+                                                      (
+                                                      Q
+                                                      )
+                                                   
+                                                
+                                                )
+                                             
+                                             
+                                                t
+                                                
+                                                |
+                                                
+                                                0
+                                                ≤
+                                                t
+                                                ≤
+                                                1
+                                                ,
+                                                
+                                                t
+                                                ∈
+                                                R
+                                             
+                                             }
+                                          
+                                          ⊆
+                                          
+                                             R
+                                             n
+                                          
+                                       
+                                    
+                                 
+                              between the two points. Since 
+                                 
+                                    y
+                                    
+                                       C
+                                       H
+                                       (
+                                       Q
+                                       )
+                                    
+                                 
+                               is an interior point of a closed set, take 
+                                 
+                                    δ
+                                    ∈
+                                    
+                                       R
+                                       
+                                          >
+                                          0
+                                       
+                                    
+                                 
+                               small enough so that 
+                                 
+                                    
+                                       y
+                                       ^
+                                    
+                                    =
+                                    
+                                       y
+                                       
+                                          C
+                                          H
+                                          (
+                                          Q
+                                          )
+                                       
+                                    
+                                    +
+                                    
+                                       (
+                                       
+                                          y
+                                          S
+                                       
+                                       −
+                                       
+                                          y
+                                          
+                                             C
+                                             H
+                                             (
+                                             Q
+                                             )
+                                          
+                                       
+                                       )
+                                    
+                                    δ
+                                    ∈
+                                    C
+                                    H
+                                    
+                                       (
+                                       Q
+                                       )
+                                    
+                                 
+                              . This implies that
+
+                                 
+                                    (6)
+                                    
+                                       
+                                          f
+                                          
+                                             (
+                                             
+                                                (
+                                                
+                                                   y
+                                                   S
+                                                
+                                                ,
+                                                
+                                                   y
+                                                   ^
+                                                
+                                                )
+                                             
+                                             )
+                                          
+                                          =
+                                          
+                                             (
+                                             1
+                                             −
+                                             δ
+                                             )
+                                          
+                                          f
+                                          
+                                             (
+                                             y
+                                             )
+                                          
+                                          <
+                                          f
+                                          
+                                             (
+                                             y
+                                             )
+                                          
+                                          .
+                                       
+                                    
+                                 
+                              Note that 
+                                 
+                                    (
+                                    
+                                       y
+                                       S
+                                    
+                                    ,
+                                    
+                                       y
+                                       ^
+                                    
+                                    )
+                                    ∈
+                                    V
+                                 
+                               hence this contradicts the fact that 
+                                 
+                                    y
+                                    =
+                                    
+                                       arg min
+                                       
+                                          x
+                                          ∈
+                                          V
+                                       
+                                    
+                                    f
+                                    
+                                       (
+                                       x
+                                       )
+                                    
+                                 
+                              . Hence the optimal point 
+                                 
+                                    y
+                                    
+                                       C
+                                       H
+                                       (
+                                       Q
+                                       )
+                                    
+                                 
+                               must lie on the boundary of 
+                                 
+                                    C
+                                    H
+                                    (
+                                    Q
+                                    )
+                                 
+                              .□
+
+Denote by E(Q) the set of extreme points of 
+                           
+                              C
+                              H
+                              (
+                              Q
+                              )
+                              ,
+                           
+                         where E(Q)⊆Q. A simple inequality (Thereom 2), based only on the extreme points of Q, will now be derived, to quickly determine whether a point in Q can be the point closest to S. Such a criterion will allow us to neglect subsets Q that are far away from S without computing the distance from these points to S. In order to derive a lower bound on how close 
+                           
+                              x
+                              ∈
+                              C
+                              H
+                              (
+                              Q
+                              )
+                           
+                         can be to S a few definitions are necessary. In spite of the following quantities being dependent on Q and S, where there is no risk of confusion, we suppress this in their definitions because Q and S are fixed throughout the article.
+
+                           Definition 3
+                           Define u ∈ Q to be the point that is closest to S,
+
+                                 
+                                    (7)
+                                    
+                                       
+                                          
+                                             u
+                                             =
+                                             
+                                                arg min
+                                                
+                                                   x
+                                                   ∈
+                                                   Q
+                                                
+                                             
+                                             d
+                                             
+                                                (
+                                                x
+                                                ,
+                                                
+                                                S
+                                                )
+                                             
+                                             .
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+Let v ∈ E(Q) be the extreme point closest to S,
+
+                                 
+                                    (8)
+                                    
+                                       
+                                          
+                                             v
+                                             =
+                                             
+                                                arg min
+                                                
+                                                   x
+                                                   ∈
+                                                   E
+                                                   (
+                                                   Q
+                                                   )
+                                                
+                                             
+                                             d
+                                             
+                                                (
+                                                x
+                                                ,
+                                                
+                                                S
+                                                )
+                                             
+                                             .
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+Let w ∈ E(Q) be the extreme point that is closest to u in Definition 3,
+
+                                 
+                                    (9)
+                                    
+                                       
+                                          
+                                             w
+                                             =
+                                             
+                                                arg min
+                                                
+                                                   x
+                                                   ∈
+                                                   E
+                                                   (
+                                                   Q
+                                                   )
+                                                
+                                             
+                                             d
+                                             
+                                                (
+                                                x
+                                                ,
+                                                
+                                                u
+                                                )
+                                             
+                                             .
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+
+Note that u ≠ v can hold since u may not be an extreme point. It is also possible that 
+                           
+                              u
+                              =
+                              v
+                              =
+                              w
+                           
+                         in which the closest point is an extreme point. A situation where all points are distinct is illustrated to the left in Fig. 1
+                        .
+
+The following definitions are necessary to state the coming theorem.
+
+                           Definition 6
+                           Let Fi
+                               be a face of 
+                                 
+                                    C
+                                    H
+                                    (
+                                    Q
+                                    )
+                                 
+                               with vertices 
+                                 
+                                    
+                                       v
+                                       1
+                                    
+                                    ,
+                                    …
+                                    ,
+                                    
+                                       v
+                                       k
+                                    
+                                 
+                              . Define:
+
+                                 
+                                    (10)
+                                    
+                                       
+                                          
+                                             r
+                                             i
+                                          
+                                          =
+                                          
+                                             max
+                                             
+                                                x
+                                                ∈
+                                                
+                                                   F
+                                                   i
+                                                
+                                             
+                                          
+                                          
+                                             min
+                                             
+                                                j
+                                                ∈
+                                                {
+                                                1
+                                                ,
+                                                …
+                                                ,
+                                                k
+                                                }
+                                             
+                                          
+                                          d
+                                          
+                                             (
+                                             x
+                                             ,
+                                             
+                                                v
+                                                j
+                                             
+                                             )
+                                          
+                                          .
+                                       
+                                    
+                                 
+                              and
+
+                                 
+                                    (11)
+                                    
+                                       
+                                          
+                                             
+                                                x
+                                                ^
+                                             
+                                             i
+                                          
+                                          =
+                                          
+                                             arg max
+                                             
+                                                x
+                                                ∈
+                                                
+                                                   F
+                                                   i
+                                                
+                                             
+                                          
+                                          
+                                             min
+                                             
+                                                j
+                                                ∈
+                                                {
+                                                1
+                                                ,
+                                                …
+                                                ,
+                                                k
+                                                }
+                                             
+                                          
+                                          d
+                                          
+                                             (
+                                             x
+                                             ,
+                                             
+                                                v
+                                                j
+                                             
+                                             )
+                                          
+                                          .
+                                       
+                                    
+                                 
+                              
+                           
+
+This defines ri
+                         as the maximum possible distance from a point in Fi
+                         to its closest vertex in Fi
+                         and 
+                           
+                              
+                                 x
+                                 ^
+                              
+                              i
+                           
+                         as the point for which this maximum is attained. An illustration of the location of 
+                           
+                              
+                                 x
+                                 ^
+                              
+                              i
+                           
+                         for a face with five vertices can be seen to the right in Fig. 1.
+
+                           Definition 7
+                           Let r
+                              max  be the largest ri
+                               for a convex hull with m faces, i.e.
+
+                                 
+                                    (12)
+                                    
+                                       
+                                          
+                                             r
+                                             max
+                                          
+                                          =
+                                          
+                                             max
+                                             
+                                                i
+                                                ∈
+                                                {
+                                                1
+                                                ,
+                                                …
+                                                ,
+                                                m
+                                                }
+                                             
+                                          
+                                          
+                                             r
+                                             i
+                                          
+                                          .
+                                       
+                                    
+                                 
+                              
+                           
+
+The next theorem will show that r
+                        max  can be used to derive a lower bound from the object to the points in the subset.
+
+                           Theorem 2
+                           
+                              Given Q and S as in Theorem 
+                              
+                                 1
+                               
+                              and v as defined in Definition 
+                              
+                                 4
+                               
+                              so that
+                              
+                                 
+                                    C
+                                    H
+                                    (
+                                    Q
+                                    )
+                                    ∩
+                                    S
+                                    =
+                                    ∅
+                                 
+                              
+                              . Then,
+                              
+                                 
+                                    (13)
+                                    
+                                       
+                                          d
+                                          
+                                             (
+                                             Q
+                                             ,
+                                             S
+                                             )
+                                          
+                                          ≥
+                                          d
+                                          
+                                             (
+                                             v
+                                             ,
+                                             S
+                                             )
+                                          
+                                          −
+                                          
+                                             r
+                                             max
+                                          
+                                          .
+                                       
+                                    
+                                 
+                              
+                           
+
+Let 
+                                 
+                                    
+                                       z
+                                       =
+                                       
+                                          arg min
+                                          
+                                             x
+                                             ∈
+                                             C
+                                             H
+                                             (
+                                             Q
+                                             )
+                                          
+                                       
+                                       d
+                                       
+                                          (
+                                          x
+                                          ,
+                                          
+                                          S
+                                          )
+                                       
+                                    
+                                 
+                              . By Theorem 1 this point is located in a face Fi
+                              . By the definition of ri
+                              , all extreme points on this face must be no further away from z than ri
+                              . Recalling the definition of w from Definition 5, the triangle inequality implies that
+
+                                 
+                                    (14)
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   d
+                                                   (
+                                                   v
+                                                   ,
+                                                   S
+                                                   )
+                                                
+                                             
+                                             
+                                                
+                                                   ≤
+                                                   d
+                                                   
+                                                      (
+                                                      w
+                                                      ,
+                                                      S
+                                                      )
+                                                   
+                                                   ≤
+                                                   d
+                                                   
+                                                      (
+                                                      z
+                                                      ,
+                                                      S
+                                                      )
+                                                   
+                                                   +
+                                                   d
+                                                   
+                                                      (
+                                                      z
+                                                      ,
+                                                      w
+                                                      )
+                                                   
+                                                   ≤
+                                                   d
+                                                   
+                                                      (
+                                                      z
+                                                      ,
+                                                      S
+                                                      )
+                                                   
+                                                   +
+                                                   
+                                                      r
+                                                      i
+                                                   
+                                                
+                                             
+                                          
+                                          
+                                             
+                                             
+                                                
+                                                   ≤
+                                                   d
+                                                   
+                                                      (
+                                                      z
+                                                      ,
+                                                      S
+                                                      )
+                                                   
+                                                   +
+                                                   
+                                                      r
+                                                      max
+                                                   
+                                                   =
+                                                   d
+                                                   
+                                                      (
+                                                      C
+                                                      H
+                                                      
+                                                         (
+                                                         Q
+                                                         )
+                                                      
+                                                      ,
+                                                      S
+                                                      )
+                                                   
+                                                   +
+                                                   
+                                                      r
+                                                      max
+                                                   
+                                                   ≤
+                                                   d
+                                                   
+                                                      (
+                                                      Q
+                                                      ,
+                                                      S
+                                                      )
+                                                   
+                                                   +
+                                                   
+                                                      r
+                                                      max
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              which completes the proof.□
+
+
+                        Theorem 2 provides a fast way to check how close any point of a convex hull can potentially be from S. Note that condition that 
+                           
+                              C
+                              H
+                              (
+                              Q
+                              )
+                              ∩
+                              S
+                              =
+                              ∅
+                           
+                         is not restrictive because it is clear that if 
+                           
+                              C
+                              H
+                              (
+                              Q
+                              )
+                              ∩
+                              S
+                              ≠
+                              ∅
+                           
+                         the right hand side of Eq. (13) is 0, meaning that the objects may be colliding and more exact tests need to be carried out. Note that the right hand side can be zero even if 
+                           
+                              C
+                              H
+                              (
+                              Q
+                              )
+                              ∩
+                              S
+                              =
+                              ∅
+                           
+                        . How we deal with the case when the right hand approximation is 0 is explained in Section 4.
+
+It should be clarified that it is unknown what face u lies in, which is why the inequality is based on r
+                        max . It would be possible to compute u for each iteration and therefore obtain a sharper inequality, but this would make the inequality more expensive to evaluate.
+
+This presents a simple algorithm to approximate the minimum distance from S to a point cloud Q:
+
+                           
+                              1.
+                              Compute the value of r
+                                 max  for 
+                                    
+                                       C
+                                       H
+                                       (
+                                       Q
+                                       )
+                                    
+                                 .
+
+Find the closest extreme point v ∈ E(Q) to S.
+
+The approximation 
+                                    
+                                       d
+                                       
+                                          (
+                                          Q
+                                          ,
+                                          S
+                                          )
+                                       
+                                       ≥
+                                       d
+                                       
+                                          (
+                                          v
+                                          ,
+                                          S
+                                          )
+                                       
+                                       −
+                                       
+                                          r
+                                          max
+                                       
+                                    
+                                  can be used to quickly find a lower bound for how close any point in Q is to S.
+
+Because our applications are in 3D we will now consider the special case of a 2D triangular face for which it is possible to derive an exact expression for ri
+                        . Although the general case is well-known [20], we derive an explicit equation for ri
+                         to be used in our algorithms. The index i will be dropped for now in order to simplify the next lemmas and proofs. The naming convention for the extreme points, edges is such that the angle at extreme points v
+                        1, v
+                        2, v
+                        3 are A, B, C respectively and also that a, b, c are the opposite edges of angles A, B, C. Consider first an acute triangular face with vertices v
+                        1, v
+                        2, v
+                        3; there are two cases to consider in order to compute 
+                           
+                              x
+                              ^
+                           
+                         and the value of r for that face.
+
+For the first case, the center of the circumscribed circle will lie on the triangular face. This center will thus be the point 
+                           
+                              x
+                              ^
+                           
+                         and the radius of the circle will be the distance to any of the vertices. By using the following equation for the area of a triangle,
+
+                           
+                              (15)
+                              
+                                 
+                                    
+                                       
+                                          b
+                                          c
+                                          sin
+                                          (
+                                          A
+                                          )
+                                       
+                                       2
+                                    
+                                    =
+                                    
+                                       1
+                                       2
+                                    
+                                    
+                                       ∥
+                                       
+                                          (
+                                          
+                                             v
+                                             2
+                                          
+                                          −
+                                          
+                                             v
+                                             1
+                                          
+                                          )
+                                       
+                                       ×
+                                       
+                                          (
+                                          
+                                             v
+                                             3
+                                          
+                                          −
+                                          
+                                             v
+                                             1
+                                          
+                                          )
+                                       
+                                       ∥
+                                    
+                                    ,
+                                 
+                              
+                           
+                        an application of the Law of Sines gives
+
+                           
+                              (16)
+                              
+                                 
+                                    r
+                                    =
+                                    
+                                       a
+                                       
+                                          2
+                                          sin
+                                          (
+                                          A
+                                          )
+                                       
+                                    
+                                    =
+                                    
+                                       
+                                          a
+                                          b
+                                          c
+                                       
+                                       
+                                          2
+                                          b
+                                          c
+                                          sin
+                                          (
+                                          A
+                                          )
+                                       
+                                    
+                                    =
+                                    
+                                       
+                                          
+                                             ∥
+                                          
+                                          
+                                             v
+                                             1
+                                          
+                                          −
+                                          
+                                             v
+                                             2
+                                          
+                                          
+                                             ∥
+                                             ∥
+                                          
+                                          
+                                             v
+                                             2
+                                          
+                                          −
+                                          
+                                             v
+                                             3
+                                          
+                                          
+                                             ∥
+                                             ∥
+                                          
+                                          
+                                             v
+                                             3
+                                          
+                                          −
+                                          
+                                             v
+                                             1
+                                          
+                                          
+                                             ∥
+                                          
+                                       
+                                       
+                                          
+                                             2
+                                             ∥
+                                          
+                                          
+                                             (
+                                             
+                                                v
+                                                2
+                                             
+                                             −
+                                             
+                                                v
+                                                1
+                                             
+                                             )
+                                          
+                                          ×
+                                          
+                                             (
+                                             
+                                                v
+                                                3
+                                             
+                                             −
+                                             
+                                                v
+                                                1
+                                             
+                                             )
+                                          
+                                          
+                                             ∥
+                                          
+                                       
+                                    
+                                    .
+                                 
+                              
+                           
+                        In the second case of an obtuse triangle, the center of the circumscribed circle will lie outside the face and will therefore not be the desired point 
+                           
+                              x
+                              ^
+                           
+                        . It can be shown, in this case, that 
+                           
+                              x
+                              ^
+                           
+                         can never be an interior point of the face and must therefore lie on the boundary. The next lemma shows that 
+                           
+                              x
+                              ^
+                           
+                         is not an interior point. In the following lemma we assume that the triangle’s vertices are not collinear otherwise there is nothing to prove.
+
+                           Lemma 1
+                           
+                              Let F be an obtuse angled triangle, then
+                              
+                                 
+                                    x
+                                    ^
+                                 
+                               
+                              cannot be an interior point. In addition,
+                              
+                                 
+                                    x
+                                    ^
+                                 
+                               
+                              has the same distance to exactly two vertices.
+                           
+
+Proof by contradiction: first assume that 
+                                 
+                                    x
+                                    ^
+                                 
+                               is an interior point. Since the center of the circumscribed circle lies outside the triangle, the distance from 
+                                 
+                                    x
+                                    ^
+                                 
+                               to all vertices cannot be the same. Hence, we can move 
+                                 
+                                    x
+                                    ^
+                                 
+                               away from the closest vertex/vertices. This contradicts that 
+                                 
+                                    x
+                                    ^
+                                 
+                               is an interior point and hence 
+                                 
+                                    x
+                                    ^
+                                 
+                               lies on the boundary. Now assume that 
+                                 
+                                    x
+                                    ^
+                                 
+                               has exactly one point as its closest vertex. Then 
+                                 
+                                    x
+                                    ^
+                                 
+                               can be moved away from this vertex along the edge and the distance from the closest vertex will keep increasing until the distance is the same to two or more vertices. This contradicts the definition of 
+                                 
+                                    
+                                       x
+                                       ^
+                                    
+                                    ,
+                                 
+                               therefore 
+                                 
+                                    x
+                                    ^
+                                 
+                               cannot be closest to only one vertex.□
+
+It has now been shown that 
+                           
+                              x
+                              ^
+                           
+                         is closest to exactly two vertices and that it also lies on one of the edges of F. The next step is to identify the edge where 
+                           
+                              x
+                              ^
+                           
+                         is located. The following lemma shows that 
+                           
+                              x
+                              ^
+                           
+                         must lie on the longest edge:
+
+                           Lemma 2
+                           
+                              Given an obtuse angled triangle
+                              
+                                 
+                                    x
+                                    ^
+                                 
+                               
+                              lies on the longest edge of the triangle.
+                           
+
+Assume, without loss of generality, that the edges of the triangle are such that c ≤ b ≤ a as in the right triangle in Fig. 2
+                              . Let α be a point that lies on the longest side of the triangle such that 
+                                 
+                                    s
+                                    :
+                                    =
+                                    d
+                                    
+                                       (
+                                       
+                                          v
+                                          1
+                                       
+                                       ,
+                                       α
+                                       )
+                                    
+                                    =
+                                    d
+                                    
+                                       (
+                                       
+                                          v
+                                          3
+                                       
+                                       ,
+                                       α
+                                       )
+                                    
+                                 
+                               (the case 
+                                 
+                                    d
+                                    
+                                       (
+                                       
+                                          v
+                                          1
+                                       
+                                       ,
+                                       α
+                                       )
+                                    
+                                    =
+                                    d
+                                    
+                                       (
+                                       
+                                          v
+                                          2
+                                       
+                                       ,
+                                       α
+                                       )
+                                    
+                                 
+                               is handled identically), in which case 
+                                 
+                                    s
+                                    =
+                                    
+                                       b
+                                       
+                                          2
+                                          cos
+                                          (
+                                          C
+                                          )
+                                       
+                                    
+                                 
+                              . In addition,
+
+                                 
+                                    (17)
+                                    
+                                       
+                                          d
+                                          
+                                             (
+                                             
+                                                v
+                                                2
+                                             
+                                             ,
+                                             α
+                                             )
+                                          
+                                          −
+                                          d
+                                          
+                                             (
+                                             
+                                                v
+                                                3
+                                             
+                                             ,
+                                             α
+                                             )
+                                          
+                                          =
+                                          
+                                             (
+                                             a
+                                             −
+                                             s
+                                             )
+                                          
+                                          −
+                                          s
+                                          =
+                                          a
+                                          −
+                                          
+                                             b
+                                             
+                                                cos
+                                                C
+                                             
+                                          
+                                          >
+                                          0
+                                          ,
+                                       
+                                    
+                                 
+                              which shows that the vertex v
+                              2 is further away from α than v
+                              1 or v
+                              3. An application of the triangle inequality yields
+
+                                 
+                                    (18)
+                                    
+                                       
+                                          b
+                                          =
+                                          d
+                                          
+                                             (
+                                             
+                                                v
+                                                1
+                                             
+                                             ,
+                                             
+                                                v
+                                                3
+                                             
+                                             )
+                                          
+                                          <
+                                          d
+                                          
+                                             (
+                                             
+                                                v
+                                                1
+                                             
+                                             ,
+                                             α
+                                             )
+                                          
+                                          +
+                                          d
+                                          
+                                             (
+                                             α
+                                             ,
+                                             
+                                                v
+                                                3
+                                             
+                                             )
+                                          
+                                          =
+                                          2
+                                          s
+                                       
+                                    
+                                 
+                              which implies that b/2 < s. This shows that no point on any other edge can be further away from its closest vertex since c ≤ b and no point on the edge of length b can be further away than b/2 from its two closest vertices. Hence, such a point must maximize the minimum distance to the vertices hence 
+                                 
+                                    x
+                                    ^
+                                 
+                               lies on the longest edge of the triangle.□
+
+Now that it is known which edge 
+                           
+                              x
+                              ^
+                           
+                         must lie on, only two possible points remain: 
+                           
+                              d
+                              
+                                 (
+                                 
+                                    v
+                                    1
+                                 
+                                 ,
+                                 
+                                    x
+                                    ^
+                                 
+                                 )
+                              
+                              =
+                              d
+                              
+                                 (
+                                 
+                                    v
+                                    3
+                                 
+                                 ,
+                                 
+                                    x
+                                    ^
+                                 
+                                 )
+                              
+                           
+                         or 
+                           
+                              d
+                              
+                                 (
+                                 
+                                    v
+                                    1
+                                 
+                                 ,
+                                 
+                                    x
+                                    ^
+                                 
+                                 )
+                              
+                              =
+                              d
+                              
+                                 (
+                                 
+                                    v
+                                    2
+                                 
+                                 ,
+                                 
+                                    x
+                                    ^
+                                 
+                                 )
+                              
+                           
+                        . The next theorem makes it possible to explicitly compute r without having to find the exact location of 
+                           
+                              x
+                              ^
+                           
+                        .
+
+                           Theorem 3
+                           
+                              Given a obtuse angled triangle (notation as in Fig. 
+                              
+                                 2
+                              
+                              ) with side lengths fulfilling c ≤ b ≤ a and A > 90°. Then the point that is furthest away from the closest vertex has distance
+                              
+                                 
+                                    (19)
+                                    
+                                       
+                                          b
+                                          
+                                             2
+                                             cos
+                                             C
+                                          
+                                       
+                                    
+                                 
+                              
+                              from its closest vertex.
+                           
+
+
+                              Lemmas 1 and 2 guarantee the existence of such a point and only two possibilities remain. It follows directly that the two possibilities are 
+                                 
+                                    b
+                                    
+                                       2
+                                       cos
+                                       C
+                                    
+                                 
+                               and 
+                                 
+                                    
+                                       c
+                                       
+                                          2
+                                          cos
+                                          B
+                                       
+                                    
+                                    ,
+                                 
+                               for which the aim is to show that 
+                                 
+                                    
+                                       b
+                                       
+                                          2
+                                          cos
+                                          C
+                                       
+                                    
+                                    ≥
+                                    
+                                       c
+                                       
+                                          2
+                                          cos
+                                          B
+                                       
+                                    
+                                 
+                              . It was shown in Lemma 2 that in the case of 
+                                 
+                                    d
+                                    
+                                       (
+                                       
+                                          v
+                                          1
+                                       
+                                       ,
+                                       
+                                          x
+                                          ^
+                                       
+                                       )
+                                    
+                                    =
+                                    d
+                                    
+                                       (
+                                       
+                                          v
+                                          3
+                                       
+                                       ,
+                                       
+                                          x
+                                          ^
+                                       
+                                       )
+                                    
+                                    ,
+                                 
+                               the third vertex lies further away so showing that 
+                                 
+                                    
+                                       b
+                                       
+                                          2
+                                          cos
+                                          C
+                                       
+                                    
+                                    ≥
+                                    
+                                       c
+                                       
+                                          2
+                                          cos
+                                          B
+                                       
+                                    
+                                 
+                               will complete the proof. From the law of cosines it holds that 
+                                 
+                                    
+                                       a
+                                       2
+                                    
+                                    >
+                                    
+                                       b
+                                       2
+                                    
+                                    +
+                                    
+                                       c
+                                       2
+                                    
+                                 
+                               and hence
+
+                                 
+                                    (20)
+                                    
+                                       
+                                          
+                                             (
+                                             
+                                                a
+                                                2
+                                             
+                                             −
+                                             
+                                                b
+                                                2
+                                             
+                                             −
+                                             
+                                                c
+                                                2
+                                             
+                                             )
+                                          
+                                          
+                                             (
+                                             
+                                                b
+                                                2
+                                             
+                                             −
+                                             
+                                                c
+                                                2
+                                             
+                                             )
+                                          
+                                          ≥
+                                          0
+                                          .
+                                       
+                                    
+                                 
+                              After dividing both sides by abc this inequality can be rearranged to obtain
+
+                                 
+                                    (21)
+                                    
+                                       
+                                          
+                                             
+                                                b
+                                                (
+                                                
+                                                   a
+                                                   2
+                                                
+                                                +
+                                                
+                                                   c
+                                                   2
+                                                
+                                                −
+                                                
+                                                   b
+                                                   2
+                                                
+                                                )
+                                             
+                                             
+                                                a
+                                                c
+                                             
+                                          
+                                          ≥
+                                          
+                                             
+                                                c
+                                                (
+                                                
+                                                   a
+                                                   2
+                                                
+                                                +
+                                                
+                                                   b
+                                                   2
+                                                
+                                                −
+                                                
+                                                   c
+                                                   2
+                                                
+                                                )
+                                             
+                                             
+                                                a
+                                                b
+                                             
+                                          
+                                       
+                                    
+                                 
+                              and using the Law of Cosines it follows directly that
+
+                                 
+                                    (22)
+                                    
+                                       
+                                          b
+                                          cos
+                                          B
+                                          ≥
+                                          c
+                                          cos
+                                          C
+                                          ,
+                                       
+                                    
+                                 
+                              which is exactly the same as 
+                                 
+                                    
+                                       b
+                                       
+                                          2
+                                          cos
+                                          C
+                                       
+                                    
+                                    ≥
+                                    
+                                       c
+                                       
+                                          2
+                                          cos
+                                          B
+                                       
+                                    
+                                 
+                              .□
+
+In summary, Eq. (16) can be used to find ri
+                         for an acute triangular face and Eq. (19) for an obtuse triangular face. After the convex hull has been built the values of ri
+                         are computed for each face and only the largest such value is saved as the corresponding value of r
+                        max  for this convex hull. The reason for this is that r
+                        max  never changes since the point cloud is static and therefore only has to be computed once in a preprocessing step.
+
+In this section a very simple criterion is given to make it possible to exclude a majority of the point subsets without computing any distances when it is clear that they are too far away from the object S to contain the closest point. In order to do this we need to explain how the point cloud can be divided into disjoint subsets in such a way that the convex hulls of the subsets do not intersect. It is described in [5,6] how such subsets can be created by recursively dividing the bounding box of the point cloud or with the use of a bisecting k-means method. These recursive schemes terminate when all subsets have no more than T points, where T is a parameter that has to be chosen carefully in order to achieve fast exact distance computations. Alternatively the point cloud could have been divided into approximately convex components, [1,8], but this is outside the scope of this paper.
+
+To present the theorems from [5,6] we need a few definitions. We assume that the point cloud Q has been partitioned into m disjoint subsets so that 
+                        
+                           Q
+                           =
+                           
+                              ⋃
+                              
+                                 i
+                                 =
+                                 1
+                              
+                              m
+                           
+                           
+                              Q
+                              i
+                           
+                        
+                      (using any of the methods presented in [6]). The object S will be moved via rigid body motions M(t), based on translations and rotations. A position and orientation of S is denoted by S(t) ≔ M(t)S with 
+                        
+                           M
+                           (
+                           0
+                           )
+                           =
+                           I
+                        
+                     . Assume that the shortest distance is computed at discrete times ti
+                      where 
+                        
+                           
+                              t
+                              0
+                           
+                           =
+                           0
+                        
+                     . If q ∈ S(0), then we denote this point at time t after rotations and translations by q(t) ≔ M(t)q. Note that q never moves with respect to S. Some definitions are necessary before stating the fast exclusion theorem.
+
+                        Definition 8
+                        Define by αi
+                            an upper bound on the largest displacement of S between time steps 
+                              
+                                 t
+                                 
+                                    i
+                                    −
+                                    1
+                                 
+                              
+                            and ti
+                           , that is
+
+                              
+                                 (23)
+                                 
+                                    
+                                       
+                                          α
+                                          i
+                                       
+                                       =
+                                       
+                                          max
+                                          
+                                             q
+                                             ∈
+                                             S
+                                          
+                                       
+                                       
+                                          ∥
+                                          q
+                                       
+                                       
+                                          (
+                                          
+                                             t
+                                             i
+                                          
+                                          )
+                                       
+                                       −
+                                       q
+                                       
+                                          (
+                                          
+                                             t
+                                             
+                                                i
+                                                −
+                                                1
+                                             
+                                          
+                                          )
+                                       
+                                       
+                                          )
+                                          ∥
+                                       
+                                       .
+                                    
+                                 
+                              
+                           
+                        
+
+Define d
+                           min (t) to be the shortest distance from the object S(t) to the point cloud Q at time t.
+
+The idea is that αi
+                      can be used to bound how much closer a subset can be to the object based on what is known from the last distance computation. The following theorem was proved in [6].
+
+                        Theorem 4
+                        
+                           Let Q be a point cloud and divide Q into m disjoint subsets such that
+                           
+                              
+                                 Q
+                                 =
+                                 
+                                    ⋃
+                                    
+                                       i
+                                       =
+                                       1
+                                    
+                                    m
+                                 
+                                 
+                                    Q
+                                    i
+                                 
+                              
+                           
+                           . Let i ≥ 1, 
+                              
+                                 j
+                                 ∈
+                                 {
+                                 1
+                                 ,
+                                 ⋯
+                                 ,
+                                 m
+                                 }
+                              
+                            
+                           and
+                           
+                              
+                                 
+                                    d
+                                    j
+                                 
+                                 
+                                    (
+                                    
+                                       t
+                                       
+                                          i
+                                          −
+                                          1
+                                       
+                                    
+                                    )
+                                 
+                              
+                            
+                           be a lower bound on the distance from subset j to
+                           
+                              
+                                 S
+                                 (
+                                 
+                                    t
+                                    
+                                       i
+                                       −
+                                       1
+                                    
+                                 
+                                 )
+                              
+                           
+                           . Then no point in subset j can be closer to S(ti
+                           ) than
+                           
+                              
+                                 (24)
+                                 
+                                    
+                                       max
+                                       (
+                                       0
+                                       ,
+                                       
+                                       
+                                          d
+                                          j
+                                       
+                                       
+                                          (
+                                          
+                                             t
+                                             
+                                                i
+                                                −
+                                                1
+                                             
+                                          
+                                          )
+                                       
+                                       −
+                                       
+                                          α
+                                          i
+                                       
+                                       )
+                                    
+                                 
+                              
+                           
+                           and also
+                           
+                              
+                                 (25)
+                                 
+                                    
+                                       
+                                          d
+                                          min
+                                       
+                                       
+                                          (
+                                          
+                                             t
+                                             i
+                                          
+                                          )
+                                       
+                                       ≤
+                                       
+                                          d
+                                          min
+                                       
+                                       
+                                          (
+                                          
+                                             t
+                                             
+                                                i
+                                                −
+                                                1
+                                             
+                                          
+                                          )
+                                       
+                                       +
+                                       
+                                          α
+                                          i
+                                       
+                                       .
+                                    
+                                 
+                              
+                           
+                        
+
+The theorem makes it possible to neglect a large number of the subsets that are known to be too far away to contain the point closest to the objects. The idea is to compute the initial values dj
+                     (0) before the object starts moving. An upper bound on d
+                     min (0) can then be computed as max 
+                        j
+                     
+                     dj
+                     (0) and exclude point subsets. The exact procedure will be described in the next section.
+
+This inequality based on αi
+                      is designed for quick evaluation, however it should be mentioned that it can be very weak in the sense that it does not take the direction of movement into account. If the object is moved away from a subset so that the distance from the points in subset j to the object increases, the lower bound will be pessimistic since αi
+                      will be subtracted from 
+                        
+                           
+                              d
+                              j
+                           
+                           
+                              (
+                              
+                                 t
+                                 
+                                    i
+                                    −
+                                    1
+                                 
+                              
+                              )
+                           
+                        
+                      .
+
+To avoid computing the distance to all points in the point cloud, Theorems 2 and 4 have been introduced. The values of r
+                     max  are computed when the convex hulls are built and are never re-computed since the point cloud is static. The implication of this is that this pre-processing only has to be carried out once for a given point cloud. One important assumption that our algorithm relies on is the assumption 
+                        
+                           C
+                           H
+                           (
+                           
+                              Q
+                              i
+                           
+                           )
+                           ∩
+                           S
+                           =
+                           ∅
+                        
+                      necessary to prove Theorem 2. In practice, the case 
+                        
+                           S
+                           ⊆
+                           C
+                           H
+                           (
+                           
+                              Q
+                              i
+                           
+                           )
+                        
+                      can be avoided by making sure that the convex hulls are too small to fully contain S. However, if a guarantee is required then it is a simple task to use Eq. (1) from [18] to make sure the object S does not collide with any convex hulls. Because this is neither new nor central to our algorithm we omit these details.
+
+The complete procedure of the pre-processing and distance computation to a given object S can be seen in Algorithm 1
+                     . Lines 3–7 are the pre-processing steps of the point cloud and lines 9–31 show how the distance computations are carried out. The shortest distance to the closest extreme point for each convex hull is computed at lines 9–11 and is used to initialize the minimum distance to the object. We are not interested in the exact shortest distance to the object before the object starts moving so d
+                     min , 0 is only initialized to an upper bound of the exact shortest distance. After S moves the value of αi
+                      is used to compute an upper bound of d
+                     min , i
+                      at line 18. Line 20 uses Theorem 4 to quickly compute a lower bound for dj
+                      and line 21 uses Theorem 2 to check if any point in this convex hull can be closest to S. If Theorem 2 fails to rule out the convex hull we compute the exact value of dj
+                      at line 22 and apply Theorem 2 again at line 24. If it is still not possible to rule out the convex hull the distance to the closest non-extreme point is computed at line 25. Correctness is achieved by always having dj
+                      be a lower bound of the true distance from the closest extreme point to S. By initializing d
+                     min , i
+                      as an upper bound of the true value we are guaranteed to find a point that is closer than this value. As mentioned in the introduction, the algorithm may fail if the object S is fully contained in the convex hull of one of the subsets of points in the beginning of the algorithm.
+
+In the case that the right hand side of Eq. (13) in Theorem 2 is 0, then the condition in line 21 and 24 will be true. In this case we will be required to do a complete PQP distance computation against the entire point subset Qj
+                      and hence read in the points stored on disk and not just the convex hull points. Note that this condition will occur before a subset Qj
+                      collides with S, guaranteeing the correctness of the result.
+
+The inner for-loop in Algorithm 1 can be rewritten in order to allow computing the exact shortest distance in parallel in order to speedup the calculations. Algorithm 2
+                      demonstrates how lines 19–29 in Algorithm 1 can be computed in parallel. To compute the minimum distances we choose to use the Proximity Query Package (PQP) which we describe below.
+
+As stated in Algorithm 2, we use PQP to carry out the distance computations. Note, however, that the algorithm itself does not depend on a specific distance computation algorithm. PQP provides a fast way to find the shortest distance between a point cloud and a triangulated or point-based object and is needed in order to be able to compute distances to the subsets that may contain the closest point. We chose to use PQP because it was designed for fast distance computations between pairs of geometric models [12]. It has been shown to be the best choice of bounding volume hierarchy for distance queries when fast distance queries are the goal [12,13]. PQP uses swept sphere volumes to create a bounding volume hierarchy that can be used to efficiently compute the shortest distance by traversing a tree of bounding volumes.
+
+The memory requirement to build a single PQP model is significant since a PQP model built with 1 billion points uses about 36GB of RAM (approximately 3 times the size of the point cloud). This memory limitation is not a problem for the proposed approach due to our memory-based management of the PQP models, which stores numerous small PQP models out-of-core. Hence each subset of points has two PQP models, so if T is the maximum number of points in each subset, and is chosen small enough, each individual PQP model can be built without using much memory and can easily be stored out-of-core and read into main memory quickly.
+
+We now describe how the memory-based management of PQP models works. Due to the fact that the extreme points are used before the non-extreme points in Algorithm 1, it is advantageous to keep all the PQP models for the extreme points in RAM. This is possible since these PQP models are expected to contain only a small fraction of the points in each subset. When it comes to the PQP models for the non-extreme points, the closest models will be stored in RAM initially until space has run out. When a PQP model has to be read from the hard drive, PQP models for the non-extreme points that are far away are evicted in order to make room for the new PQP model. When the object moves, some PQP models may have to be loaded while others will have to be removed from RAM.
+
+To achieve this, PQP was modified to allow writing of the entire bounding volume hierarchy data structure in a binary format to the hard disk. Note that it is difficult to apply such a method to a single large PQP model and use it to only read in parts of the hierarchy on an as-needed basis. This is because when querying a bounding volume hierarchy it is unknown which parts of the hierarchy will be required and accesses can be largely random. In the current case, with smaller individual models and Theorem 4, this problem can be avoided. Because of this, it was decided to write each PQP model to the hard drive by using a binary format and then reload them when needed. This proved to be an order of magnitude faster than building new PQP models on-the-fly.
+
+In this section we carried out a number of experiments to test the quality of our proposed algorithms. Before we discuss the experiments it is important to note that the entire analysis carried out in the previous sections could have been done for other convex bounding volumes such as bounding boxes or minimum bounding spheres. We have not presented analysis and do not present results for these other bounding volumes because in our experiments (not shown here) they consistently produced up to an order of magnitude worse results and would have simply added significant amounts of additional data with no extra insight. The poor performance is due to the suboptimal approximations afforded by such bounding volumes which caused numerous subsets of points to be read from disk leading to the stated poor performance. The multiple PQP models approach presented below gives one a feeling for the performance of merely using bounding boxes instead of convex hulls.
+
+The algorithms described in this paper were implemented in C++ in VS2012 and the parallelism was achieved with OpenMP. In order to illustrate the effectiveness of Theorems 2 and 4 a triangulated object consisting of 78,403 triangles and about two meters long was moved through a point cloud about 250 m long originally having 3 billion points. To test the effect of the number of points on the algorithms, this point cloud was down-sampled to contain fewer points in a number of the tests. The original point cloud can be seen in Fig. 3
+                      and the convex hulls of the subsets can be seen in Fig. 4
+                     .
+
+The object that is moved through the point cloud is a holding mechanism for a car chassis and can be seen to the right in Fig. 3. The position and orientation of the object along the path was given at 707 discrete points in time and the displacements of the object varied in size.
+
+In order to test the results from Sections 2 and 3, we investigated how the algorithm compares to some similar ideas on how to rule out subsets of Q that are far away from the object. Because there appear to be no other appropriate algorithms for such cases as the ones we are interested in, we created and tested five different approaches and refer to them as:
+
+                           
+                              1.
+                              Convex hulls
+
+Triangulated convex hulls
+
+The hybrid method
+
+Multiple PQP models
+
+A single PQP model
+
+The first convex hulls approach was as described in Algorithm 1. Each subset has one PQP model for its extreme point and one for the points that are not extreme points, with all PQP models for the extreme points residing in RAM at all times if possible. We decided to triangulate the faces since this allowed us to easily calculate ri
+                        , but it is possible that smaller values of r
+                        max  could have been obtained by not triangulating the faces.
+
+The second approach, Triangulated convex hulls, triangulated the convex hulls to compute the exact distance from each convex hull to the object (instead of approximating this distance). This is more computationally expensive to evaluate since computing the distance between two triangulations is more time-consuming compared to computing the distance from a set of points to a triangulation. Based on our experiments, it is, on average, four times faster to compute the distance between a point and a triangle compared to computing the distance between two triangles. If a convex hull contains h extreme points and all faces are triangles, then there are 
+                           
+                              2
+                              h
+                              −
+                              4
+                           
+                         triangular faces, [4]. Hence there are about twice as many faces as there are extreme points, making it in total about eight times slower to compute the exact distance to a convex hull, compared to using the extreme points to bound the distance. On the other hand, the triangulated convex hulls have the advantage of not having to do as many reads of PQP models since the exact distance is computed from the convex hull to S. This is due to Eq. (13) only providing a lower bound and in cases when this lower bound is weak, a PQP model that is in fact far away from the object might have to be read from disk. In this approach each subset has one PQP model for the triangulation of the convex hull and one for all the points in the subset.
+
+
+                        The hybrid method aims to use the strengths of both the previously mentioned approaches. Each subset has a PQP model for the extreme points, its triangulation and the points that are not extreme points, and is used identically to the convex hulls approach unless Theorem 2 fails to rule out a set of points that are not extreme points and also not residing in RAM. To avoid reading this PQP model from disk, the exact distance is computed from the triangulation of the convex hull to the object in an attempt to avoid reading the PQP model of the non-extreme points. In this approach we store three models as mentioned.
+
+By multiple PQP models it is meant that instead of building convex hulls for the subsets generated during the pre-processing, PQP models are directly built for each subset. Only Theorem 4 is used to avoid considering certain subsets when it is known that they must be further away than the subset with the closest point. As soon as a set comes too close, the distance is computed from its PQP model to the object. This approach will have to perform many unnecessary reads of PQP models that turn out not to be close; it is mainly a naive way of just splitting one large PQP model into multiple subsets.
+
+Using a single PQP model requires no additional description than what was given in Section 4.1. It will be seen that PQP is much faster than the other approaches for small point clouds but beyond that, a single PQP model cannot be used anymore due to the extensive memory requirement to build the model.
+
+This section presents the setup used in the simulations to compare the five approaches from the previous section. Five different values of |Q| were considered, starting with a down-sampled version of the original point cloud with 40 million points. This case was possible to run in-core for all five approaches and was evaluated for four different values of T. The point cloud was then down-sampled to a point cloud with 200 million points. After this, all test cases were evaluated on a point cloud with 600 million points, which was possible to run in-core with 32GB of RAM for all five approaches. The hybrid method was not used for any of these three tests that run in-core since, in this case, it is equivalent to using the convex hulls.
+
+After the first three tests were carried out in-core, two point clouds with 1 billion and the original 3 billion points were tested. For the point cloud with 1 billion points, the memory for PQP was restricted to 8GB so that only about 25% of the PQP models for the points that are not extreme points could be in RAM at once. In the case of 3 billion points, the memory was restricted to 16 GB in which case only about 15% of the PQP models for the points that are not extreme points could be in RAM simultaneously. A single PQP model was only used for the test cases that ran in-core. The values of T were chosen to capture the variation in time for all of the scenarios and were chosen adaptively from a larger set of simulations. The loop over the convex hulls at each iteration was always carried out in parallel as described in Algorithm 2. The results from the simulations can be seen in Table 1
+                        .
+
+In order to illustrate how smaller values of T will average out the time for the reads/removals of PQP models over the iterations, the time to compute the shortest distance was plotted against the number of reads from hard disk for the best performing hybrid method. The results from this test can be seen in Fig. 5
+                        . Table 2
+                         shows how many reads and tests of different PQP models had to be carried out for the first four approaches in the case of the point cloud with 3 billion points and 16GB of RAM.
+
+In this section we analyze the results from the previous section. Starting with Table 1, it can be seen for the two smaller point clouds that a single PQP model is clearly the fastest. This result was to be expected. Hence the conclusion is: for smaller point clouds, it is of no interest to replace PQP unless the amount of RAM available is limited; the two small point clouds were only considered to illustrate how fast PQP is. It is clear that the triangulated convex hulls are better when the subsets are larger since this will decrease the number of comparisons between triangles. Both the triangulated convex hulls and multiple PQP models will be faster when the subsets are larger since they converge towards a single PQP model, which is the fastest approach for small point clouds. For the convex hulls, it works better to have about 400–500 convex hulls (see Table 2), and for 200 million points the convex hulls compare well in run-time to a single PQP model.
+
+When the point cloud has 600 million points and it is still possible to run the distance computations in-core, it is clear that the convex hulls method is the fastest. Just as for the two smallest point clouds, the triangulated hulls and the multiple PQP models gets better when the subsets are increased. This changes when the algorithms start running out-of-core in which case the reading of PQP models becomes a bottleneck.
+
+For the two largest point clouds, when only a fraction of PQP models can fit in RAM, it is clear that the hybrid method and the convex hulls both perform well. The convex hulls work better when T is small since the values of r
+                        max  are expected to be smaller in this case. On the other hand, when the convex hulls become too small, the fraction of extreme points increases, making it problematic to fit the PQP models for the extreme points in memory. This also makes it computationally expensive to compute the distance from the triangulations to the object, which is why the triangulated convex hulls perform worse for small values of T.
+
+It can be seen in Fig. 5 that using large values of T incurs sporadic long waits of several seconds when loading PQP models into RAM. Especially in the case 
+                           
+                              T
+                              =
+                              50
+                           
+                         million it is clear that the algorithm stops for up to 8 seconds in order to read points. What follows are some very fast iterations until a new large model has to be loaded again. Such behavior is exactly what we wish to avoid and therefore smaller values of T should be used.
+
+It is clear from Table 2 that the multiple PQP models have to perform many unnecessary reads, which is mainly why this approach is so much slower. The triangulated convex hulls and the hybrid method compute the exact distance to the convex hull before reading PQP models, which is why they do the smallest number of reads from hard disk. On the other hand, the triangulated convex hulls have to compute almost as many distances from the triangulated convex hulls to the object as the convex hulls have to compute the distances from the extreme points. This is where the hybrid method offers a good balance between the two since it only computes the exact distance in order to avoid reading a PQP model.
+
+It is natural to ask why the number of reads from hard disk is not always the same for the triangulated convex hulls and for the hybrid method? The main reason is that the distances are computed in parallel, so how d
+                        min , i
+                         changes depends on the order in which the threads finish processing the convex hulls. Depending on how d
+                        min , i
+                         changes, it can be possible to rule out a few extra subsets if a small value of d
+                        min , i
+                         is found early.
+
+@&#CONCLUSION@&#
+
+The work of this article has now made it possible to conveniently work with point models with an order or magnitude of more points, making it possible to work with billions of points rather than the hundreds of millions of points that was the restriction for a single PQP model in-core.
+
+It has been verified that using convex hulls as a basis to derive sharp criteria for neglecting points works well both in-core and out-of-core. Theorem 2 is not only appealing in theory but turns out to work well in the simulations carried out in Section 5. When used in combination with Theorem 4 which uses αi
+                      to quickly find a lower bound of the distance to the subset, a large number of subsets can immediately be ruled out. In the case of a point cloud with 3 billion points and 
+                        
+                           T
+                           =
+                           100
+                           ,
+                           000
+                           ,
+                        
+                      only 4% of the subsets had to be considered at each iteration after the use of Theorem 4. This is a huge performance increase since so many subsets can be excluded immediately without computing any distances.
+
+It can be questioned whether it is worth using the hybrid method or if the model of the convex hulls is the most appropriate? It would seem to be preferable to use the hybrid method, because it helps minimize reads of PQP models in cases where some of the convex hulls have large values of r
+                     max , which could be a possibility in the presence of outliers. In the case of using an HDD for reading PQP models, the price for I/O will increase making it even more critical to avoid reading PQP models.
+
+The run-time is expected to increase when the size of the point cloud increases, especially when the memory is constrained. In the case of the point cloud with 1 billion points and 8GB of memory, the size of all PQP models is about 36GB, with only 8GB being in the memory during the first iteration. Reading all other PQP models once with the SSD used, (which has a theoretical read speed of 450MB/s), would take 62 s, which is more than the fastest total run-time. This is because all PQP models were not used and indicates that reading models is expected to take up much more time than actually computing distances. This is why the hybrid method works well since it minimizes the reading without having to consider as many triangulations as for the triangulated convex hulls.
+
+It was seen for both the hybrid method and the convex hulls that a small value of T is necessary since this will both minimize the run-time and even out the reading of PQP models, so that the distance computation does not have to stop for several seconds in order to read a large set of points from hard disk. However more investigation is needed on the topic of choosing an optimal value of T. From Table 1 it seems as though the optimal value of T increases when |Q| increases.
+
+@&#ACKNOWLEDGMENTS@&#
+
+This work was carried out at the Wingquist Laboratory VINN Excellence Centre, and is part of the Sustainable Production Initiative and the Production Area of Advance at Chalmers University of Technology. It was supported by the Swedish Governmental Agency for Innovation Systems. The authors are grately indebted to the insightful and helpful comments of the reviewers, who helped improve both the presentation and content of this article.
+
+@&#REFERENCES@&#
+

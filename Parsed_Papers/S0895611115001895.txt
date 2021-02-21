@@ -1,0 +1,1290 @@
+@&#MAIN-TITLE@&#Development and validation of real-time simulation of X-ray imaging with respiratory motion
+
+@&#HIGHLIGHTS@&#
+
+
+               
+                  
+                  
+                     
+                        
+                           
+                           Growing need for the virtual physiological human (VPH): we focus on respiration/X-ray.
+
+
+                        
+                        
+                           
+                           Trade-off between realism and speed: respiration computed on CPU; X-ray on GPU.
+
+
+                        
+                        
+                           
+                           We validate that our framework provides real-time performance and accurate results.
+
+
+                        
+                        
+                           
+                           Easy to re-use our models and demos available to give system performance evidence.
+
+
+                        
+                        
+                           
+                           X-ray simulation code and validation under open-source license on SourceForge.net.
+
+
+                        
+                     
+                  
+               
+            
+
+@&#KEYPHRASES@&#
+
+X-ray simulation
+
+Deterministic simulation (ray-tracing)
+
+Digitally reconstructed radiograph
+
+Respiration simulation
+
+Medical virtual environment
+
+Imaging guidance
+
+Interventional radiology training
+
+@&#ABSTRACT@&#
+
+
+               
+               
+                  We present a framework that combines evolutionary optimisation, soft tissue modelling and ray tracing on GPU to simultaneously compute the respiratory motion and X-ray imaging in real-time. Our aim is to provide validated building blocks with high fidelity to closely match both the human physiology and the physics of X-rays. A CPU-based set of algorithms is presented to model organ behaviours during respiration. Soft tissue deformation is computed with an extension of the Chain Mail method. Rigid elements move according to kinematic laws. A GPU-based surface rendering method is proposed to compute the X-ray image using the Beer–Lambert law. It is provided as an open-source library. A quantitative validation study is provided to objectively assess the accuracy of both components: (i) the respiration against anatomical data, and (ii) the X-ray against the Beer–Lambert law and the results of Monte Carlo simulations. Our implementation can be used in various applications, such as interactive medical virtual environment to train percutaneous transhepatic cholangiography in interventional radiology, 2D/3D registration, computation of digitally reconstructed radiograph, simulation of 4D sinograms to test tomography reconstruction tools.
+               
+            
+
+@&#INTRODUCTION@&#
+
+There is a growing need for fast, accurate and validated tools for the virtual physiological human (VPH) in physics, imaging, and simulation in medicine. The aim of VPH is to provide a digital model of the human physiology as a single complex system. This research's contribution is twofold: provide respiration modelling with real-time performance, generate accurate X-ray images from the virtual patient. The output can be exploited in many different contexts.
+
+Researchers in bio-medical engineering have been working on these topics for some time. However, the implementation of such models are usually not publicly available. It makes it difficult to re-use them in medical applications, or compare new models with them. In this paper, we describe a C++ implementation of the respiration model and an OpenGL implementation of our X-ray simulation code. This component is now mature and it is written as a stand-alone library: gVirtualXRay. We have opened its source code to the public under the BSD open-source license (permitting free reuse by academia and industry) and it is available at http://gvirtualxray.sourceforge.net. We extensively compare it with a state-of-the-art Monte Carlo simulation tool used in nuclear physics.
+
+Our code can be used in virtual environments (VEs) designed for training invasive medical procedures such as interventional radiology (IR) [1] where real-time interactivity and numerical accuracy are both essential and cannot be compromised. VE-based simulators are more and more accepted for surgical training [2]. A few commercial and academic solutions have been produced in recent years. They include most of the time (i) haptic component, (ii) performance metrics and (iii) graphic rendering. Current virtual simulator areas include endoscopic surgery [3], laparoscopic simulator [4], arthroscopic knee simulator [5] and liver biopsy interventional radiology [6]. They often overlook respiratory motion of the virtual patient's anatomy. This paper addresses the need to provide support for respiratory motion in simulated percutaneous transhepatic cholangiography (PTC). This IR procedure uses fluoroscopy (real-time X-ray imaging) to track a needle as it is inserted, during breath-hold, deeply into the liver. Once the needle has attained a sufficient depth (10–12cm), the patient is asked to breathe shallowly. X-ray-opaque (contrast) medium is gently injected through the needle as it is slowly withdrawn, observing for characteristic visual appearances of contrast entering a bile duct, whereupon, needle withdrawal is stopped. At this point, further access techniques can introduce a catheter, or therapeutic interventional instruments, into the bile duct system.
+
+The intrinsic motion of internal anatomical structures presents significant challenges to accurate, image guided, needle placement. In interpreting abdominal respiratory organ motion (external), the operator obtains few cues from the skin surface; yet simulating visceral respiratory motion (internal) is highly complex and the computing time constraint has to be taken into account in order to be incorporated into a VE. The motion of internal structures can also be monitored using fluoroscopy. Note that fluoroscopy is not used continuously to reduce the radiation dose received by both the patient and clinician.
+
+Simulation of X-ray imaging is important in physics, with applications in medicine, crystallography, astronomy and nondestructive testing, yet has been largely overlooked by the computer graphics community. X-ray simulation in our context is essential to a range of medical simulations that require an interactive response to match the acquisition time of a real fluoroscopy system (25–30Hz). We take advantage of recent developments in computer graphics hardware to achieve an accelerated simulation of X-ray attenuation calculated using the Beer–Lambert law [7].
+
+Our framework can also be used as a building block to solve the inverse problem of non-rigid registration. Digitally reconstructed radiographs (DRRs) around a 3D volume dataset are generated (a DRR is a 2D X-ray image computed from a 3D computed tomography (CT) dataset). A “model” is deformed so that the error between its own X-ray projections and the DRRs is as small as possible. It is often solved iteratively, which means that many intermediate images are computed.
+
+Another application is in medical physics, particularly CT reconstruction. Patient motion (including internal motions such as respiration) can cause blurring, ghost images and long range streaks [8]. The simulation framework can be used to create simulated sinograms (a sinogram is the raw data produced by CT scanners prior to tomography reconstruction) of realistic controlled test-cases [9]. The respiration can be added to provide 4D data (i.e. 3D+time) to illustrate its effect on tomography reconstruction, including the assessment of respiration motion compensation techniques in low dose cone-beam computed tomography (CBCT).
+
+Part of this research has been previously published. [10,11] focused on clinical value of the respiration model rather than the scientific aspect of the work. No technical detail and no quantitative validation were included. Here, we address all these deficiencies. Particularly, we completely describe the Chain Mail implementation including a study of the induced soft-tissue behaviour, an analysis of the parameters influence and a complete description of how the organs are tethered all together. The way to parameterize the respiration model as an optimisation problem using evolutionary computing was published in [12]. The focus of the validation was to demonstrate the superiority of our ad-hoc optimisation framework over more traditional black-box optimisation tools. X-ray simulation was initially published in [7]. It was limited to the monochormatic case, one infinitely small point source, and the X-ray beam had to be perpendicular to the detector. The initial code was validated against a private library therefore results were not reproducible. Polychromatism and geometrical unsharpness were introduced in [13]. However, no technical detail and no validation were included. Here, we add parallel X-ray beams, the possibility to place and orientate the X-ray detector regardless of the direction of the X-ray beam (they do not have to be perpendicular to each other), the properties of human tissues with respect to X-rays are model accurately, taking into account their density and atomic elements. For transparency purposes, the validation tests and data are reproducible and publicly available on the project website.
+
+The paper provides a detailed overview of the implementation and quantitative validation of the two main software components of our simulation framework. It can help to improve the realism of VR simulations. The following sections describe related work, our techniques to compute respiratory motion and X-ray simulation, validation of these components, results demonstrating the PTC task simulation and, finally, conclusions.
+
+@&#RELATED WORK@&#
+
+A range of techniques exist to improve image acquisition during respiration, including gating, real-time tracking, and magnetic tracking, for example when planning lung radiotherapy. The breathing cycle variations could even be predicted with spirometer, laser displacement sensors, markers on the body, etc. In IR though, compensating for organ motion when using real time imaging to direct a needle into a moving visceral target requires specific operator skills. Simulation using mathematical formulations is the focus of our approach to modelling the PTC task to train these skills.
+
+Von Siebenthal et al. use previously acquired images to predict respiratory motion [14]. However, the breathing cycle is not reproducible and makes this approach unsatisfactory. This problem is overcome in [15] by using on-line ultrasound to register magnetic resonance imaging (MRI). It is not a parameterizable mathematical model and therefore it cannot be applied to a simulator.
+
+Other solutions make use of physically-based models that can be tuned to match different breathing cycles. Two main approaches have emerged.
+
+The first approach uses accurate mechanical models employed to target lung tumours in radiotherapy. Finite element methods are used to solve the continuous mechanics equations. Kyriakou et al. model the lung as a cylinder with various internal layers and the diaphragm acting as a piston [16]. In contrast, Didier et al. model the ribs with a helicoidal-based motion and the motion of the lungs is computed with contact detection and sliding [17]. The effect of contact surfaces and hyperelastic material properties on the mechanical behaviour of human lungs has also been investigated [18]. Pato et al. studied the diaphragm with shell elements and the boundary condition is a uniform pressure applied in a radially on the muscle part of the diaphragm [19]. These models give reliable results, but they are far from interactive, mainly because of their non-linear nature.
+
+Alternatively, the second approach makes use of heuristic models to achieve real-time performance. One of these models makes use of simple geometrical transformations only. For example, the use of a geometrical model based on a parametric surface has been proposed to build a trunk model [20]. The use of particle systems has also been investigated. A particle system in this context is a set of punctual masses moving under external as well as internal actions. The particle behaviour in response to these forces is computed using physical laws. Implicit surfaces are often fitted to the shape of the object defined by the particles [21]. In [22] the author presents a method to compute lungs deformation with a particle method. The boundary conditions are given by diaphragm and ribcage actions. The diaphragm vector field is given by template matching method and the ribcage motion is given by a kinematic method. They are both monitored by a breathing curve given by an analytical model. However, the integration of realistic tissue properties into particle models is not trivial. Mass-spring modelling is the more frequently used heuristic method. The nodes are punctual masses and a cohesion force, commonly based on linear elasticity, is applied to each node edge. This method has been used in [23,24] to model respiration.
+
+Different methods of simulating X-ray imaging techniques, based on particle physics, are now available. There are two main classes of X-ray simulation algorithms. The first approach is probabilistic and based on Monte Carlo trials [25], while the second is determinist or analytic, based on ray-tracing [26] (these include solving the Boltzmann transport equation [27]).
+
+The Monte Carlo method consists of individually tracking each photon during its different interactions with matter at each step of the simulation. This method can produce very accurate images, but they are computationally expensive. Recent effort has been made to use the graphics processing unit (GPU) to tackle some bottlenecks of the Monte Carlo software available from European Organization for Nuclear Research (CERN) (GEometry ANd Tracking 4 (GEANT4) [28]) [29].
+
+The ray-tracing principle has been adapted to the simulation of X-ray imaging to provide a fast alternative restricted to the computation of directly transmitted photons. Radiation attenuation is computed by considering the amount of penetration of a ray into the object. Freud et al. proposed a modified version of the Z-buffer, known as the L-buffer (for length buffer), to store the length of a ray crossing a given 3D object [26]. Existing GPU-accelerated simulations of X-ray images are mostly based on volume data [30]. More or less accuracy, depending on the end-user's application, can be implemented. For example, when only real-time visual feedback is acceptable, the length of a ray passing through a voxel can be an approximation [31]. In DRR computations, real-time performance does not need to be achieved as long as the results are numerically accurate and the rendering time remains clinically acceptable.
+
+Little research has been reported on GPU-accelerated simulations of X-ray images from polygon data. This approach has been used in an interventional cardiology trainer [32], but no details about the implementation or the level of accuracy of the physics models used have been published.
+
+Realistic implementations on central processing unit (CPU) that make use of triangle meshes do not achieve interactive frame rates. In [7], we demonstrated that this can be achieved using a GPU-implementation based on the L-buffer technique. In [26] and in [33], two algorithms were proposed to handle artefacts due to robustness issues in the L-buffer, but these methods are not efficiently applicable on the GPU. We proposed an alternative method using an adaptive filtering to solve this problem. However, the simulation was restricted to directly transmitted photons in the monochromatic case and only single point sources were taken into account. These approximations produce visually convincing images, but the method is not realistic enough for most physics-based applications. For example, the focal spot diameter of medical X-ray tubes ranges from 0.3 to 2.0mm [34]. In [13], we demonstrated that it is possible to take into account the shape of the focal spot of the X-ray tube, as well as polychromatic X-ray beam spectra.
+
+@&#METHODS@&#
+
+The two core components of our enhanced simulator are: (i) the breathing motion, and (ii) the X-ray imaging. To take full advantage of the computational resource of the computer, the motion due to respiration is calculated on the CPU and the X-ray imaging is simulated on the GPU only. These respiration and fluoroscopy simulations have been integrated within a VE that includes a virtual patient containing the necessary anatomical models, which correspond to polygon meshes obtained after the segmentation of patient specific CT data. Meshes are only composed of surface triangles. They have been decimated and smoothed to offer a good compromise between computing time and visualisation on the fluoroscopy screen.
+
+The main objective is realism with interactive speed. We must cater for the target(s) of the needle puncture procedure, anatomy visible in the X-rays (e.g. lungs, pleural reflection), and the organs producing the respiratory motion (e.g. the diaphragm, ribs). Our simulation must dynamically update the vertex positions of the meshes defining these organs based on physiological studies.
+
+Breathing is a complex process resulting from the action of several muscles. The primary muscles of respiration include the intercostal muscles and the diaphragm. A physiological study based on [35] was used to set the boundary conditions of our model. During inhalation, the contraction of both the intercostal muscles and the diaphragm lowers the air pressure in the lungs and causes air to move in. During exhalation, the intercostal muscles and the diaphragm relax. The two different actions from the intercostal muscles and diaphragm are considered separately and will be controlled by two independent parameters, which will then govern the natural deformation of the other organs (lungs, liver, etc.).
+
+It is important to note that there are different kinds of breathing, for example calm breathing and the casual involuntary breath of healthy individuals that involves a considerable amount of diaphragm motion.
+
+In the literature various models have been studied to reproduce the real human respiration time-function pattern [20,36]. In our simulator, we use the simplest model (Eq. (1)) as our main concern is the computing time. Similarly, in our validation section, we evaluate the best model parameters without time interpolation and therefore independently of the breathing curve analytic model. Eq. (1) gives a muscle action intensity f(t) at a time t given its maximum Amplitude and at a certain frequency.
+                              
+                                 (1)
+                                 
+                                    f
+                                    (
+                                    t
+                                    )
+                                    =
+                                    Amplitude
+                                    sin
+                                    (
+                                    frequency
+                                    ×
+                                    t
+                                    )
+                                 
+                              
+                           
+                        
+
+The method presented below can handle such variability, including hyperventilation or sudden breath holding.
+
+Motion and soft tissue deformation must occur as fast as possible. We divided the organs into three categories with an increasing level of complexity: static organs, rigid organs that follow a kinematic motion and deformable organs. If we focus on the human trunk, only the spine can be assumed as static. The ribs and the sternum are rigid, but move following a kinematic law. All the other organs will be deformed. We have deployed the Chain Mail algorithm to model soft tissue as it is efficient and suitable for real time interaction [37]. When only using a few points, the Chain Mail algorithm performs better than any other methods based on time integration, which require the computation of forces, acceleration, velocity and position for each node, and for a time step small enough to allow convergence.
+
+Our implementation is based on the 3D Chain Mail algorithm extension proposed by Li and Brodlie [38]. In this model, the object is defined as a set of point elements. The elements are interconnected as links in a chain, allowing each point to move freely without influencing its neighbours, within certain pre-specified limits. When an element of the object is moved and reaches this limit, the neighbours are forced to move in a chain reaction that is governed by the stiffness of the links in the mesh. Let α
+                           
+                              min
+                           , α
+                           
+                              max
+                            and β be the controlling parameters for compression, stretching and shearing respectively.
+
+The rib movement produced by the intercostal muscle can be assumed to follow a kinematic motion [39] that is a combination of two movements: an increase of the lateral excursion of the ribs and an increase of the anteroposterior diameter of the thorax. These two rotations are respectively defined by γ and λ (see Fig. 1
+                           ). They were measured for five subjects at functional residual capacity (FRC) and total lung capacity (TLC). In our model, the rotation angles are given by the following equations:
+                              
+                                 (2)
+                                 
+                                    γ
+                                    =
+                                    
+                                       
+                                          
+                                             (
+                                             
+                                                γ
+                                                TLC
+                                             
+                                             −
+                                             
+                                                γ
+                                                FRC
+                                             
+                                             )
+                                             ×
+                                             
+                                                1
+                                                2
+                                             
+                                             ×
+                                             (
+                                             1
+                                             +
+                                             sin
+                                             (
+                                             2
+                                             π
+                                             frequency
+                                             ×
+                                             t
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                           
+                              
+                                 (3)
+                                 
+                                    λ
+                                    =
+                                    
+                                       
+                                          
+                                             (
+                                             
+                                                λ
+                                                TLC
+                                             
+                                             −
+                                             
+                                                λ
+                                                FRC
+                                             
+                                             )
+                                             ×
+                                             
+                                                1
+                                                2
+                                             
+                                             ×
+                                             (
+                                             1
+                                             +
+                                             sin
+                                             (
+                                             2
+                                             π
+                                             frequency
+                                             ×
+                                             t
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                           
+                        
+
+During inspiration, the diaphragm muscles contract, the dome descending while maintaining a nearly parallel orientation to its original location. During expiration, the diaphragm relaxes, returning passively to its equilibrium state. However, it is not just the contraction of the muscles that governs the movement of the diaphragm (see Fig. 2
+                           ) as it is attached to the spine and the lower ribs, and therefore follows the ribcage. In our simulation, the diaphragm mesh is composed of about 2000 elements, with almost half of them belonging to the central tendon, and the other half to the muscle part.
+
+The algorithm also simulates “hysteresis” effects, i.e. the motion paths simulated in inspiration and expiration are not the same. It is achieved by the Chain Mail algorithm: pulling mesh elements is different than pushing them. Two parameters are involved respectively stretching α
+                           
+                              max
+                            and compression α
+                           
+                              min
+                           . The displacement path of the diaphragm vertices varies when the diaphragm tendon is going upward or downward.
+
+We model the tendon by setting α
+                           
+                              min
+                            and α
+                           
+                              max
+                            to 1 and β to 0. It corresponds to the values needed to have a uniform displacement. It means that, if a displacement of ΔA is applied on A (the vertex that is being moved), the displacement on its neighbour vertex B will always be of ΔA because the bounding box around B defining if displacement occurs will be of null size. We can then have the uniform translation expected for the rigid tendon. The nearly-vertical movement is performed by forcing one central point to have a sinusoidal movement along the vertical axis. As the links for the central tendon are rigid, the points corresponding to this tendon will follow this movement. The other points, considered to be muscle tissue, will have the expected “chain reaction” according to the Chain Mail rules. In a preliminary step we manually tune the parameters based on qualitative criteria. The chosen values are α
+                           
+                              min
+                           
+                           =0.7, α
+                           
+                              max
+                           
+                           =1.1 and β
+                           =0.1 for the shear parameter. The set up was guided by trying to achieve the highest possible level of realism. Given the course of the diaphragm being between 0 and 2cm and its height being around 10cm, the compression could be up to 20%. The model should then be able to contract smoothly and rapidly. This is achieved by setting the compression threshold α
+                           
+                              min
+                            to only 70% of the distance between two nodes. However, the stretching parameter must be much higher to allow the muscle to quickly return to the relaxed position of the diaphragm (110% of the distance). The shear parameter has actually almost no effect in this case on the diaphragm behaviour. The muscle fibres are mainly arranged in the craniocaudal direction and the translation is only in this direction. There is then no shearing. To summarize, the behaviour obtained for the diaphragm is satisfactory in our simulator context. However in order to have more accuracy the parameters have been optimised in a second step (see Section 4.2 for the parameter optimisation).
+
+As mentioned previously, the diaphragm must follow the ribs movement. This leads to the notion of ‘linked organs’ as discussed below.
+
+A valid approach to linking the organs would be to move the targeted organs by means of collision detection and collision response [40]. However, because of the high number of polygons present in the scene graph, this method is not feasible at interactive frame rates. Alternatively, areas common to two adjacent organs can be linked together. The vertices at the linked regions are then moved simultaneously. We choose to apply coupling forces instead of displacement constraints to have a continuous smooth deformation. This approach requires a pre-processing step to identify candidate linked regions whose distance must be below a given threshold. The threshold varies depending on the organs, e.g. very small for the diaphragm and liver, around the same value as the fat tissue thickness for the ribs and skin. A minimum distance to set rigid links (α
+                           
+                              min
+                           
+                           =
+                           α
+                           
+                              max
+                           
+                           =1 and β
+                           =0) is added to reduce the computing time. The organs linked together are:
+                              
+                                 •
+                                 Diaphragm to the lower ribs,
+
+Lungs to the upper ribs,
+
+Lungs to the diaphragm,
+
+Liver to the diaphragm.
+
+All calculations are performed using the CPU only. The GPU capability is then available to be used in parallel by the fluoroscopy simulation task.
+
+The aim of this fluoroscopy simulation is to produce a realistic X-ray image (restricted to directly transmitted photons) in realtime from the dynamic models described above. This can be calculated using the Beer–Lambert law and implemented on the GPU. Two implementations are available and they are compatible with a wide range of hardware/software plateforms. One supports OpenGL 2.x for older generations of graphics cards and renderers; one supports modern OpenGL 3.x/4.x implementations. No depreciated functions and no fixed-rendering pipeline functions are used. The library relies on OpenGL Shading Language (GLSL) and is portable: Intel, AMD, and Nvidia cards have been seamlessly used under Linux, Mac OS and Windows operating systems (OSs).
+
+The attenuation law, also called the Beer–Lambert law, relates the absorption of light to the properties of the material through which the light is travelling. The integrated form for a polychromatic incident X-ray beam (i.e. incident photons do not have the same energy) is:
+                              
+                                 (4)
+                                 
+                                    ∫
+                                    E
+                                    ×
+                                    
+                                       N
+                                       out
+                                    
+                                    (
+                                    E
+                                    )
+                                    d
+                                    E
+                                    =
+                                    ∫
+                                    E
+                                    ×
+                                    
+                                       N
+                                       in
+                                    
+                                    (
+                                    E
+                                    )
+                                    ×
+                                    exp
+                                    
+                                       
+                                          
+                                             −
+                                             ∫
+                                             μ
+                                             (
+                                             ρ
+                                             (
+                                             x
+                                             )
+                                             ,
+                                             Z
+                                             (
+                                             x
+                                             )
+                                             ,
+                                             E
+                                             )
+                                             d
+                                             x
+                                          
+                                       
+                                    
+                                    d
+                                    E
+                                 
+                              
+                           with N
+                           
+                              in
+                           (E) is the number of incident photons at energy E, N
+                           
+                              out
+                           (E) is the number of directly transmitted photons and μ is the linear attenuation coefficient (in cm−1). μ depends on: (i) E – the energy of incident photons, (ii) ρ – the material density of the object, and (iii) Z – the atomic number (or, in case of a mixture, the chemical composition) of the object material.
+
+Consider the geometry setup described in Fig. 3
+                           . This is a 2D representation of a scene made up of a circle in which a hole has been made (assuming no interaction in the medium outside the circle). Let E
+                           
+                              in
+                            be the incident energy of a monochromatic X-ray beam (i.e. all the incident photons have the same energy). μ
+                           
+                              c
+                            is the attenuation coefficient of the circle at this energy. The energy fluence (i.e. the amount of energy received by pixels of the detector) is computed as follows using Eq. (4):
+                              
+                                 (5)
+                                 
+                                    
+                                       E
+                                       in
+                                    
+                                    ×
+                                    
+                                       N
+                                       out
+                                    
+                                    =
+                                    
+                                       E
+                                       in
+                                    
+                                    ×
+                                    
+                                       N
+                                       in
+                                    
+                                    ×
+                                    
+                                       e
+                                       
+                                          −
+                                          
+                                             μ
+                                             c
+                                          
+                                          (
+                                          [
+                                          
+                                             d
+                                             2
+                                          
+                                          −
+                                          
+                                             d
+                                             1
+                                          
+                                          ]
+                                          +
+                                          [
+                                          
+                                             d
+                                             4
+                                          
+                                          −
+                                          
+                                             d
+                                             3
+                                          
+                                          ]
+                                          )
+                                       
+                                    
+                                 
+                              
+                           with d
+                           
+                              i
+                            the distance in centimetres from the X-ray source to the respective intersection of the ray with an object. The parameters that need specifying are therefore: tissue geometry; attenuation properties of the tissue; the photon energy; and the position of the X-ray source.
+
+Only an organ surface needs modelling and standard triangle meshes can be used. Assuming normal vectors are outward, for each triangle mesh, the attenuation coefficient at a given energy level needs to be known.
+
+The Hounsfield scale is used to specify the attenuation property of tissues in CT data sets. A value H in Hounsfield unit (HU) is given by:
+                              
+                                 (6)
+                                 
+                                    H
+                                    =
+                                    1000
+                                    ×
+                                    
+                                       
+                                          
+                                             
+                                                μ
+                                                
+                                                   
+                                                      μ
+                                                      w
+                                                   
+                                                
+                                             
+                                             −
+                                             1
+                                          
+                                       
+                                    
+                                 
+                              
+                           with 
+                              
+                                 μ
+                                 w
+                              
+                            the linear attenuation coefficient of water at a given energy. Unlike attenuation coefficients, Hounsfield values do not depend on the energy of incident photons. Therefore, we use this standard scale to set the attenuation property of tissues within our simulator. Given Eq. (6) and a database of attenuation coefficients for water at any energy from 1keV to 100GeV [41] it is theoretically possible to retrieve the attenuation coefficient from any Hounsfield unit at energies within that range. We demonstrate in Section 4.3.1 that this assumption is not correct and produces incorrect μ values.
+
+To address this problem, we adopt the method proposed by Schneider et al to model tissue properties from HU values [42]. It supplies mathematical models to compute densities and atomic composition of human tissues from HU values. Atomic compositions are used in conjunction with a database of photon cross sections to compute mass attenuation coefficients. Mass attenuation coefficients can then be used with the densities to compute the linear attenuation coefficients requited to solve the Beer–Lambert law. In our implementation, we use the XCOM 3.1 database provided by National Institute of Standards and Technology (NIST) [41].
+
+Note that the density of the lungs will change depending on the respiration step. The average HU value of the lungs was extracted for each volume of the 4D CT dataset. The HU value assigned to the lungs is iteratively modulated to take into account this change of density. For this purpose, a sine wave is used in a similar manner as Eq. (1).
+
+The photon spectral distribution of the incident beam has to be taken into account to produce physically realistic images. The photon spectrum can be divided into a set of discrete energies. To each energy value corresponds a photon number that is a fraction of the whole spectrum. So far, we have used the Birch and Marshall catalogue [43]. Fig. 4
+                            shows the beam spectrum of an X-ray tube at 90kV peak voltage whose output is filtered to remove low energy photons as it is the case in medical X-ray tubes. The mean energy is 80keV, the energy typically used for the acquisition of fluoroscopic images of the abdomen.
+
+When the size of the X-ray source is small enough, the blur due to the finite size of the source (usually called ‘geometrical unsharpness’) can be neglected. In this case, the X-ray emitter is modelled using a single 3D point source only. However, the geometrical unsharpness can significantly degrade the image spatial resolution and contrast and so is taken into account to perform a more realistic simulation. Depending on its finite size and shape, the source is then sampled into a set of elementary source points. A fraction of the number of incident photons is then equally distributed to all the source points.
+
+To efficiently compute the path length (L
+                           
+                              p
+                           ) of a ray through an object, we use Freud et al.'s L-buffer algorithm [26]. For each scanned object an image (or L-buffer) is produced. The intensity of each pixel corresponds to the distance covered by the ray within the object, from the source to the pixel centre. Fig. 5
+                            shows an example of L-buffer for the cube used in Fig. 13.
+
+
+                           Fig. 3 shows that the ray penetrates into the object when the dot product between direction vector of the ray and the object surface normal is negative. This dot product is positive if the ray leaves an object. Thus the path length of the ray into an object can be written as follows:
+                              
+                                 (7)
+                                 
+                                    
+                                       L
+                                       p
+                                    
+                                    =
+                                    
+                                       ∑
+                                       i
+                                    
+                                    (
+                                    sgn
+                                    (
+                                    
+                                       
+                                          viewVec
+                                       
+                                    
+                                    ·
+                                    
+                                       
+                                          
+                                             N
+                                          
+                                       
+                                       
+                                          
+                                             i
+                                          
+                                       
+                                    
+                                    )
+                                    ×
+                                    
+                                       d
+                                       i
+                                    
+                                    )
+                                 
+                              
+                           where viewVec is the viewing vector (or the direction vector of the ray) (i.e. the unit vector from the emission point to the detector's pixel); i refers to the ith intersection between the ray and the object surface; d
+                           
+                              i
+                            is the distance (in cm) from the X-ray source to the ith intersection point; N
+                           
+                              i
+                            is the vector normal to the object surface at the ith intersection; sgn(viewVec
+                           ·
+                           N
+                           
+                              i
+                           ) is the sign of the dot product between viewVec and N
+                           
+                              i
+                           .
+
+Note that intersections are found in an arbitrary order. One advantage of this approach is to avoid sorting through the intersections. It makes our implementation of L-buffer very effective.
+
+The hardware-accelerated implementation presented in [7] was restricted to directly transmitted photons in the monochromatic case and it did not take into account geometrical unsharpness. It was implemented in C++ using the OpenGL API and GLSL. Here we extend the simulation pipeline using additional passes to take into account both the energy beam spectrum and the finite size of the X-ray source.
+
+The principle of computing direct images is to cast rays from the X-ray source to every pixel of the detector. For each ray, the total path length through each object is computed using geometrical computations. The attenuation of X-rays for a given pixel is then computed using the recorded path lengths. Finally, the energy deposited by photons is integrated for every pixel of the detector. The algorithm is divided into successive building blocks. Each block corresponds to a ‘rendering pass’. Only the final rendering pass is displayed on the screen. Intermediate rendering passes use frame buffer objects (FBOs) and are stored into textures, these components are required for fast off-line rendering.
+
+In the simple case when the beam spectrum is monochromatic, applying Eq. (4), the energy received by the detector can be written as follows:
+                              
+                                 (8)
+                                 
+                                    
+                                       I
+                                       out
+                                    
+                                    =
+                                    
+                                       I
+                                       in
+                                    
+                                    ×
+                                    exp
+                                    
+                                       
+                                          
+                                             −
+                                             
+                                                ∑
+                                                
+                                                   i
+                                                   =
+                                                   0
+                                                
+                                                
+                                                   i
+                                                   <
+                                                   objs
+                                                
+                                             
+                                             μ
+                                             (
+                                             E
+                                             ,
+                                             i
+                                             )
+                                             
+                                                L
+                                                p
+                                             
+                                             (
+                                             i
+                                             )
+                                          
+                                       
+                                    
+                                 
+                              
+                           with E the photon energy, objs the total number of objects, L
+                           
+                              p
+                           (i) the value of the L-buffer for Object i, I
+                           
+                              in
+                            the input intensity that corresponds to N
+                           
+                              in
+                           
+                           ×
+                           E, and I
+                           
+                              out
+                            the output intensity. Details about the implementation strategy to compute Eqs. (7 and 8) can be found in [7].
+
+The new X-ray attenuation pipeline treats skin as a special case. Indeed, its geometrical model is restricted to its external surface only. Therefore, the L-buffer of any internal structures must be subtracted from the skin surface L-buffer. The L-buffer of the skin is then given by:
+                              
+                                 (9)
+                                 
+                                    
+                                       L
+                                       p
+                                    
+                                    (
+                                    skin
+                                    )
+                                    =
+                                    
+                                       L
+                                       p
+                                    
+                                    (
+                                    skinSurface
+                                    )
+                                    −
+                                    
+                                       ∑
+                                       i
+                                    
+                                    
+                                       L
+                                       p
+                                    
+                                    (
+                                    i
+                                    )
+                                 
+                              
+                           with L
+                           
+                              p
+                           (skinSurface) the L-buffer of the skin surface only. In this case, an extra FBO is needed to compute ∑
+                              i
+                           
+                           L
+                           
+                              p
+                           (i). This is called FBO(∑
+                              i
+                           
+                           L
+                           
+                              p
+                           (i)). Note that the attenuation coefficient associated with the skin corresponds to fat.
+
+An additional loop is added to take into account the beam spectrum. This is required to integrate the energy deposited by each energy channel into the final image.
+
+Another loop is also added to take into account the geometrical unsharpness.
+
+When intersections occur between a ray and an object, it is assumed that there are as many incoming and outgoing intersections. However, some intersections may be duplicated or missed when the ray hits an edge or a vertex of a triangle. When the normal vector N
+                           
+                              i
+                            is perpendicular to the viewing direction viewVec, artefacts can also occur. In this case, depending on the normal of the triangles, the computed thickness will be either very high or negative. This will lead to black or white pixel artefacts in the final image (see Fig. 6
+                           (a)).
+
+These issues are addressed in [26,33] in the case of a CPU implementation, but these solutions are not easily portable in the case of GPU programming. However, it is possible to detect on the GPU for each pixel if such artefacts will occur. Indeed, Eq. (10) should always be null for every pixel:
+                              
+                                 (10)
+                                 
+                                    
+                                       ∑
+                                       
+                                          i
+                                          =
+                                          1
+                                       
+                                       n
+                                    
+                                    sgn
+                                    (
+                                    
+                                       
+                                          viewVec
+                                       
+                                    
+                                    .
+                                    
+                                       
+                                          
+                                             N
+                                          
+                                       
+                                       
+                                          
+                                             i
+                                          
+                                       
+                                    
+                                    )
+                                 
+                              
+                           with n the number of intersections between the ray and the processed triangle mesh. The fragment shader used to compute the L-buffer is then extended to store the sign of the dot product into the green channel of the L-buffer texture. The sum operation in Eq. (10) is performed taking advantage of the blending function used during the L-buffer computations.
+
+Finally, before fetching any red component of the L-buffer texels, we check the validity of their respective green component. If the green component is not null, then the red value is invalid. To avoid the artefact, it is replaced by the average value of the valid texels within its direct neighbourhood. If no valid texels are found, we increase the size of the neighbourhood. Fig. 6(b) shows the X-ray image corresponding to Fig. 6(a) when artefact correction is enabled.
+
+@&#RESULTS@&#
+
+The validation of medical simulators is typically performed by medical subject matter experts who assess the virtual environment using questionnaires and recorded metrics from the simulator. For an objective assessment, we have performed a quantitative validation of the respiration and of the X-ray simulations to actually measure errors in the simulation. This has been achieved by quantifying the difference between results of the simulation and reference data.
+
+To validate our model of respiratory motion, we apply our method to meshes extracted from specific patient data sets. We perform the experiments on five patients and we validate the displacements of diaphragms and livers. The datasets include two 4D CT scans with 10 time steps in the breathing cycle. The three others are 3D CT scans with breath hold at inhale and exhale states.
+
+From these medical images, the organs required by the simulator were segmented using ITK-SNAP [44]. Lungs were automatically extracted while the diaphragm and the liver were manually segmented by a medical expert for ten steps in the breathing cycle of the two 4D CT scans, plus the two breathing states (inhale and exhale) of the 3D CT scans. Ribs and spines are also manually segmented in order to properly separate the different ribs. The rotation centers are computed using the inertia matrix as described in [45].
+
+
+                        Table 1
+                         shows CT scan informations for each patient studied. Particularly resolutions and time step numbers are indicated.
+
+This gave a total of 52 manually segmented organs. On average, the segmentation stage takes two hours per liver and three hours per diaphragm. A marching cube algorithm is then applied to extract a mesh from the isosurface. The resulting triangulation is smoothed and decimated into a mesh of about 2000 vertices with Voronoi Parallel Linear Enumeration (Vorpaline) [46].
+
+The rib rotation parameters and the tendon force were tuned to match the patient's breathing cycle as much as possible. It was observed that the breathing was mainly diaphragmatic and not thoracic. No data with significant thoracic breathing was available. This is because the datasets were acquired during a radiotherapy treatment planning in which patients were lying on their back and asked to breath quietly. A more random behaviour could occur during abdominal IR procedures. To address this, we reproduced different kinds of breathing on a virtual patient and studied the influences on the liver of three kinds of breathing: only diaphragmatic, only thoracic and both influences combined. In Fig. 7
+                        (a), we can see that the liver had mainly an axial translation due to the diaphragm contraction. In Fig. 7(b), we can see that the ribs pulled the liver surface in contact while the ribcage expands. In Fig. 7(c), we can see the combined influence of respiration muscles applying both an axial translation and a small lateral movement.
+
+Manually tuned parameters were initially utilised in our application. Tuning the parameters of such simulators is still often performed by hand using trial and error. This is time consuming and prone to error when the number of variables increases and it can lead to large numerical errors. We showed that a much better methodology can be easily deployed using an evolutionary optimisation scheme [12].
+
+The patient data can only be used to validate our diaphragm model and its influence on the liver. The degrees of freedom of our models are 15 values included within four parameter sets defined as follows:
+                           
+                              1.
+                              The Chain Mail parameters for the liver and the diaphragm, namely the compression α
+                                 
+                                    min
+                                 , the stretching α
+                                 
+                                    max
+                                  and the shearing β. They are three mechanical parameters that are different for each patient.
+
+The plane separating the muscle part from the tendinous part of the diaphragm as explained in Section 3.1.5. We characterise it by Eq. (11) defined by four parameters a, b, c and d linked to the anatomy of the patient and related to the vertices P
+                                 
+                                    tend
+                                 (x
+                                 
+                                    tend
+                                 , y
+                                 
+                                    tend
+                                 , z
+                                 
+                                    tend
+                                 ).
+                                    
+                                       (11)
+                                       
+                                          a
+                                          .
+                                          
+                                             x
+                                             tend
+                                          
+                                          +
+                                          b
+                                          .
+                                          
+                                             y
+                                             tend
+                                          
+                                          +
+                                          c
+                                          .
+                                          
+                                             z
+                                             tend
+                                          
+                                          +
+                                          d
+                                          <
+                                          0
+                                       
+                                    
+                                 
+                              
+
+The distance defining the mechanical links as described in Section 3.1.6. We define one value for the distance between the diaphragm and the ribs, and one distance between the liver and the diaphragm. They are also parameters linked to the anatomy of the patient.
+
+The final tunable parameter is the amplitude of the tendinous part of the diaphragm. It is a 3D vector F
+                                 
+                                    tend
+                                  similarly applied to all points P
+                                 
+                                    tend
+                                  such that their new positions 
+                                    
+                                       
+                                          
+                                             
+                                                
+                                                   P
+                                                   ′
+                                                
+                                             
+                                          
+                                       
+                                       
+                                          
+                                             tend
+                                          
+                                       
+                                    
+                                  are defined by Eq. (12).
+                                    
+                                       (12)
+                                       
+                                          
+                                             
+                                                
+                                                   
+                                                      
+                                                         P
+                                                         ′
+                                                      
+                                                   
+                                                
+                                             
+                                             
+                                                
+                                                   tend
+                                                
+                                             
+                                          
+                                          =
+                                          
+                                             
+                                                
+                                                   P
+                                                
+                                             
+                                             
+                                                
+                                                   tend
+                                                
+                                             
+                                          
+                                          +
+                                          
+                                             
+                                                
+                                                   F
+                                                
+                                             
+                                             
+                                                
+                                                   tend
+                                                
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+
+It is possible to estimate the error between the simulated data and the real data segmented from CT scans. This error should be as low as possible. Our evolutionary algorithm automatically tunes the models and minimises the discrepancies between geometries S extracted from segmented CT and from simulated geometries S′ [12]. The surface difference is estimated with three indicators according to [47]: the mean distance d
+                        
+                           m
+                        (S, S′), the root mean square d
+                        
+                           rmse
+                        (S, S′) and the maximum d(S, S′) distance, which is also the non-symmetrical Hausdorff distance.
+
+To objectively quantify the experiments, we estimate the difference between S and S′ at the same time step. We also compute the respiratory motion amplitude on the real data with the same measurement technique by evaluating the difference between initial geometries (full inhalation S
+                        
+                           I
+                        ) and geometries S
+                        
+                           t
+                         at a given breathing stage t. Two type of results were then obtained: results for the two extreme steps of full inhalation and full exhalation, and results for the whole breathing cycle. For each case, we compute:
+                           
+                              1.
+                              The respiratory motion amplitude with values d
+                                 
+                                    m
+                                 (S
+                                 
+                                    I
+                                 , S
+                                 
+                                    t
+                                 ), d
+                                 
+                                    rmse
+                                 (S
+                                 
+                                    I
+                                 , S
+                                 
+                                    t
+                                 ) and d(S
+                                 
+                                    I
+                                 , S
+                                 
+                                    t
+                                 ).
+
+The error with manually tuned parameters with values d
+                                 
+                                    m
+                                 (S, S′), d
+                                 
+                                    rmse
+                                 (S, S′) and d(S, S′).
+
+The error with our optimisation method with values d
+                                 
+                                    m
+                                 (S, S′), d
+                                 
+                                    rmse
+                                 (S, S′) and d(S, S′).
+
+As a qualitative validation, Fig. 11
+                         shows the difference between the initial and final states of the simulation to evaluate the boundary conditions. It illustrates the negligible rib kinematics influence that is pulling the diaphragm laterally. The tendon action resulting in translation motion is also clearly visible. The Chain Mail elasticity ensures a smooth continuity in spite of these deformations. A junior doctor has confirmed that these types of motions are realistic notably saying: “The Chain Mail does give a sense that the diaphragm is a muscular flexible organ under tension”.
+
+The aim of this section is to demonstrate the accuracy of our GPU implementation. We will investigate: tissue properties, monochromatism, polichromatism, Radon transform, CT reconstruction, shape and position of the X-ray source. Experimental results computed on GPU are either compared with theoretical values or with ground truth images simulated using state-of-the-art Monte Carlo (MC) software. The source code of all the validation tests, as well as the produced data, MC simulation scripts, etc. are available online at http://gvirtualxray.sourceforge.net/validation/.
+
+Using Eq. (6), it is possible to compute HU values using the linear attenuation of water (μ
+                           
+                              water
+                           ) and tissues (μ) at a given energy. The NIST provides X-ray mass attenuation coefficient (μ/ρ) and density (ρ) values for some human tissues [48]. μ can be retrieved using μ/ρ and ρ values. Using μ and μ
+                           
+                              water
+                           , HU values can be estimated for any tissue as long as its linear attenuation coefficient is known. Table 2
+                            provides a summary of values for various types of human tissues at 80keV.
+
+The naive approach to estimate μ for any tissue at a given energy is to use Eq. (6) again:
+                              
+                                 (13)
+                                 
+                                    μ
+                                    =
+                                    
+                                       μ
+                                       water
+                                    
+                                    ×
+                                    
+                                       
+                                          
+                                             1
+                                             +
+                                             
+                                                H
+                                                1000
+                                             
+                                          
+                                       
+                                    
+                                 
+                              
+                           It assumes μ
+                           
+                              water
+                            at the corresponding energy and the Hounsfield unit of the tissue are provided. HU values are provided by reconstructed CT slices. Reference tabulated values of mass attenuation coefficients are provided by [48]. They are used to get the linear attenuation of water for energies between and 10−3 and 20MeV (this range of energy is sufficient for most medical simulations). Note that such values are also used for comparison purposes in Fig. 12
+                            as they provided reference data for various types of human tissues. As the mass attenuation coefficients of water are provided in a tabulated format, it is necessary to interpolate both the energy and mass attenuation data. Our implementation of Eq. (13) supports interpolation using a bilinear scale or a bilogarithmic scale. It can be observed in Fig. 12 that the bilinear scale in interpolation (blue curves) does not provide smooth results compared to the interpolation using bilogarithmic scale (magenta curves). Also, using Eq. (13) to compute attenuation coefficients of human tissues is not acceptable for realistic simulations. Estimated coefficients for bones and gas are significantly different from the reference data. This is because Eqs. (6 and 13) show linear relationships at a given energy between H, μ and μ
+                           
+                              water
+                            whereas there is not such a linear relationship between the values of μ and μ
+                           
+                              water
+                            at different energies.
+
+This problem is tackled in our implementation using the method proposed by Schneider et al. to model tissue properties from HU values [42]. Their model provides ways to estimate densities and atomic composition of human tissues from HU values. Using the atomic compositions and a database of photon cross sections, it is possible to compute mass attenuation coefficients. Fig. 12 shows that the values estimated with this method are closer to the reference data. The discrepancies can be explained by the differences in densities and atomic compositions between [48,42].
+
+Now realistic input tissue properties are modelled, it is possible to compute X-ray attenuation. GPUs support two kinds of floating point numbers: 32-bit floats often called “single-precision” floats, and 16-bit floats often called “half-precision” floats. Our implementation supports both type of floats. Using 32 bits, we expect computations to be slower but more accurate than using 16 bits.
+
+To assess the accuracy of our implementation, we consider a cube that has edge length of 3cm. Its HU is 52 (soft tissue). A cylinder is inserted in the centre of the cube. The cylinder is made of bone (HU=1330), its height is 3cm and its diameter is 2cm. We consider the energy of the incident beam is I
+                           0
+                           =80keV. From now on, we will use [42,41] to obtain linear attenuation coefficients (see Table 3
+                           ). The energy orthogonally transmitted through the centre of the test objects is:
+                              
+                                 (14)
+                                 
+                                    
+                                       I
+                                       expected
+                                    
+                                    =
+                                    
+                                       I
+                                       0
+                                    
+                                    ×
+                                    exp
+                                    
+                                       
+                                          
+                                             −
+                                             
+                                                ∑
+                                                i
+                                             
+                                             (
+                                             
+                                                μ
+                                                i
+                                             
+                                             ×
+                                             
+                                                x
+                                                i
+                                             
+                                             )
+                                          
+                                       
+                                    
+                                    =
+                                    80.000
+                                    ×
+                                    exp
+                                    (
+                                    −
+                                    (
+                                    0.3971
+                                    ×
+                                    2
+                                    +
+                                    0.1937
+                                    ×
+                                    1
+                                    )
+                                    )
+                                    =
+                                    29.789
+                                    
+                                    keV
+                                 
+                              
+                           
+                        
+
+Using half-precision floats on GPU, it is 29.831keV; using full-precision floats, it is 29.789keV. In the first case the relative error is 0.141%; in the second one it is 0.00%. These results are extremely close to the value that was expected.
+
+Our implementation also supports the Beer–Lambert law in the polychromatic case, i.e. when there are photons of different energies in the incident beam. We consider the same test case as previously, but the incident beam is made of 10 photons of 100keV, 20 photons of 200keV, and 10 photons of 300keV. Linear attenuation coefficients are shown in Table 4
+                           . The energy orthogonally transmitted through the centre of the test objects is:
+                              
+                                 (15)
+                                 
+                                    
+                                       I
+                                       expected
+                                    
+                                    =
+                                    
+                                       ∑
+                                       j
+                                    
+                                    
+                                       
+                                          
+                                             
+                                                I
+                                                0
+                                             
+                                             (
+                                             j
+                                             )
+                                             ×
+                                             exp
+                                             
+                                                
+                                                   
+                                                      −
+                                                      
+                                                         ∑
+                                                         i
+                                                      
+                                                      
+                                                         
+                                                            
+                                                               
+                                                                  μ
+                                                                  
+                                                                     i
+                                                                     ,
+                                                                     j
+                                                                  
+                                                               
+                                                               ×
+                                                               
+                                                                  x
+                                                                  i
+                                                               
+                                                            
+                                                         
+                                                      
+                                                   
+                                                
+                                             
+                                          
+                                       
+                                    
+                                    =
+                                    
+                                       (
+                                       100
+                                       ×
+                                       10
+                                       )
+                                       ×
+                                       exp
+                                       (
+                                       −
+                                       (
+                                       0.3328
+                                       ×
+                                       2
+                                       +
+                                       0.1800
+                                       ×
+                                       1
+                                       )
+                                       )
+                                    
+                                    +
+                                    
+                                       (
+                                       200
+                                       ×
+                                       20
+                                       )
+                                       ×
+                                       exp
+                                       (
+                                       −
+                                       (
+                                       0.2369
+                                       ×
+                                       2
+                                       +
+                                       0.1445
+                                       ×
+                                       1
+                                       )
+                                       )
+                                    
+                                    +
+                                    
+                                       (
+                                       300
+                                       ×
+                                       10
+                                       )
+                                       ×
+                                       exp
+                                       (
+                                       −
+                                       (
+                                       0.2018
+                                       ×
+                                       2
+                                       +
+                                       0.1251
+                                       ×
+                                       1
+                                       )
+                                       )
+                                    
+                                    +
+                                    =
+                                    4353.175
+                                    
+                                    keV
+                                 
+                              
+                           
+                        
+
+Using half-precision floats on GPU, it is 4355.469keV; using full-precision floats, it is 4353.175keV. In the first case the relative error is 0.053%; in the second one it is 0.00%. Once again, these results are extremely close to the value that was expected.
+
+Until now, a parallel beam of X-rays was used. Our implementation also support point sources, such as X-ray tubes. Using the same test object, we simulate two X-ray images:
+                              
+                                 •
+                                 Using a MC method for particle physics implemented in GATE.
+
+Using our GPU implementation.
+
+
+                           Fig. 13
+                            shows the geometry that we consider:
+                              
+                                 •
+                                 The detector is made of 301×301 pixels. The size of each pixel is 0.3×0.3mm2.
+
+The centre of the detector is located at the coordinates 10 0 0cm.
+
+The point source is located at the coordinates −10 0 0cm.
+
+The source does not have to be centred on the detector. To test this, we move the position of the point source at the coordinates −15.0 0.5 0.5cm. Fig. 15
+                            shows the corresponding simulated images using GATE (12.9 days of computations) and our GPU implementation. Once again, the result of our GPU implementation matches the outcome of GATE. The normalised cross-correlation between the images of Fig. 15 is 0.99656.
+
+Our implementation also support geometrical unsharpness, e.g. when the source corresponds to a cube. To validate this functionality, we use a source corresponding to a cube, which has edge length of 0.5cm. Its centre is located at the coordinates −10 0 0cm. 14.4 days were required to obtain Fig. 16
+                           (a) with GATE. Fig. 16 is blurred compared to Fig. 14 (when a point source was used). This is the geometrical unsharpness. The two simulations seem to be extremely closed to each other. NCC (=0.99743) demonstrates the validity of our approach.
+
+To assess the speed of computations, 500 iterations are computed with and without artefact correction on several computers. The tests are repeated 15 times. Computers bought in 2010, 2011, 2012, 2013 and 2014 have been used. The computing time is recorded. Table 5
+                         shows the average number of X-ray projections and respiration deformations computed per second is recorded when 41,710 triangles are used in total. It shows that real-time performance is achieved on every tested platform, including 5 year old laptops.
+
+
+                        Figs. 17 and 18
+                        
+                         summarise the performance achieved with our latest PC for the respiration and X-ray simulations respectively. It runs on AMD hardware. The data for the 15 runs is presented as boxplots. The horizontal axis corresponds to the total number of triangles used in the simulation. It is presented with a log-scale. The vertical axis corresponds to the number of iterations achieved in a second. Fig. 17 shows that the lower the number of triangles is, the faster the respiration simulation is. This is intuitive as the complexity of the algorithms are strongly related to the number of triangles. Both half and full floating point precisions are taken into account in Fig. 18. In [7], we saw that the performance using half precision was significantly faster than using full precision. Back then, support of full precision in programmable shaders was at an early stage. On today's generation of hardware, the difference of performance between half and full precisions is relatively small. When the number of triangles increases, the performance without artefact correction decreases. The bottleneck in this case is linked to the number of triangles. With artefact correction however, the performance does not decrease as much. This is because the bottleneck in this case is a fragments program, i.e. the number of pixels in the simulated image is the limiting factor. We have to keep in mind that there are less artecfacts to correct when the number of triangles is higher. In other words, the fragment program for artefact correction will be less solicited with a high number of triangles. As it makes use of if statements, branching occurs, which is a limiting factor of the single-instruction multiple-data (SIMD) architecture used in GPUs.
+
+Quantitative validation combining both components is extremely hard to conduct. For health and safety reasons, it is impossible to obtain both 4D CT and fluoroscopy videos of the same patient/volunteer. X-ray is a ionising radiation. Ethics forbids irradiating people without medical reasons. The radiation dose must be minimal to reduce the risk of cancer from medical imaging. X-ray imaging is a real-time modality. Typical fluoroscopy systems generate 30 frames per second. The typical respiratory rate for a healthy adult at rest is 0.20–0.33 breaths per seconds, which is about 100 times smaller than the framerate of a fluoroscopy system. The effect of movement in the X-ray image is then small enough to be ignored in real-time imaging. For these reasons, we have favoured to quantitatively validate the different components separately.
+
+It is however possible to describe the overall result qualitatively. Fig. 19
+                         shows a respiration cycle focusing on the right lung. This sequence is extracted from the results of our optimisation algorithm on Patient 2's data (see Section 4.2). It is mainly a diaphragmatic respiration pattern due to the acquisition procedure (radiotherapy) where patients are lying on their back. It is the reason why the diaphragm is having a bigger influence on the respiratory motion than the intercostal muscles. The diaphragm contraction and relaxation can indeed be noticed by comparing the white-black interface corresponding to the diaphragm with its initial position represented by the red curve on Fig. 19. There is no artefact that could be due to mesh triangle becoming to small and normal inversion. The simulation is stable with time and no mesh explosion occurs.
+
+@&#CONCLUSION@&#
+
+In this paper, we have presented a real-time simulator whose architecture has been specifically developed to allow realistic multi-organ physically-based deformations with on-line fluoroscopy. Care has been taken to optimise the trade-off between the realism of the results and the speed of the computations. We have developed an efficient technique for applying motion due to respiration to the virtual patient. The deformation module has been implemented on the CPU. After studying the physiology involved, we chose to control the respiration by the rib cage and the diaphragm. Ribs were modelled as rigid bodies with kinematic laws, while diaphragm motion was simulated by the up and down motion of the central tendon coupled with its rib attachments. Soft-tissue deformation was handled by an extended Chain Mail algorithm allowing fast multi-organ interaction. Our qualitative and quantitative validation study shows the effectiveness of the method. The X-ray simulation has been implemented on the GPU. It is a multi-pass algorithm using an OpenGL pipeline. For each X-ray pixel, the first pass computes tissue penetration (the skin is treated as a special case), the second computes an intermediary result required in the final pass to compute the cumulative attenuation using the Beer–Lambert law. To improve realism, two additional loops have been added to enable geometric unsharpness and polychromatism. This implementation is both fast and accurate.
+
+We conclude that our hypothesis that these computationally intensive processes can run simultaneously and be integrated within an interactive VE running on a standard PC platform (inc. low tech laptops such as Macbook Air) has been proved to be true. A further future application might be the tracking and interactive visualisation of the movement of tumours in radiotherapy, where unrealistic computational times rule out using Monte Carlo simulations. This could be achieved by generating synthetic lung neoplasm data in real time, using patient specific models, segmented from CT data.
+
+We also plan to improve organ deformation accuracy. We are currently investigating two avenues of research regarding this point: (i) using finite-element modelling instead of the Chain Mail method and (ii) adding more degrees of freedom on the diaphragm motion model.
+
+@&#ACKNOWLEDGEMENTS@&#
+
+This work has been partially funded by FP7-PEOPLE-2012-CIG project Fly4PET – Fly Algorithm in PET Reconstruction for Radiotherapy Treatment Planning. We thank the Marie Currie Institute and the Centre Léon Bérard for providing the medical data sets that were used in the validation study.
+
+Supplementary data associated with this article can be found, in the online version, at http://dx.doi.org/10.1016/j.compmedimag.2015.12.002.
+
+The following are the supplementary data to this article:
+                        
+                           
+                        
+                     
+                     
+                        
+                           
+                        
+                     
+                     
+                        
+                           
+                        
+                     
+                     
+                        
+                           Fig. 4
+                           
+                              This file used to create an Interactive Plot corresponding to Fig. 4.
+                           
+                           
+                        
+                     
+                     
+                        
+                           Fig. 9a
+                           
+                              This file used to create an Interactive Plot corresponding to Fig. 9a.
+                           
+                           
+                        
+                     
+                     
+                        
+                           Fig. 9b
+                           
+                              This file used to create an Interactive Plot corresponding to Fig. 9b.
+                           
+                           
+                        
+                     
+                  
+
+@&#REFERENCES@&#
+
