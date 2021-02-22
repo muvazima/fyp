@@ -13,15 +13,28 @@ from pptx import Presentation
 from pptx.util import Inches, Pt  
 import base64
 #import win32com.client
+import os
+
+def file_selector(folder_path='./Parsed_Papers'):
+    filenames = os.listdir(folder_path)
+    selected_filename = st.selectbox('Select a file', filenames)
+    return os.path.join(folder_path, selected_filename)
+
+
 
 model = Summarizer('distilbert-base-uncased')  
 
 def gen_dict(uploaded_file):
 
 	text = str(uploaded_file.read())
+	text=text.replace("\r\n",'')
+	#print(text)
+	#text="\n".join(text.splitlines())
+	temp = str.maketrans("\r\n","  ") 
+	text = text.translate(temp) 
 	text = re.sub("\n", " ", text)
 	text=re.sub("\t"," ",text)
-	text=re.sub("\r\n"," ",text)
+	#text=re.sub("\r\n"," ",text)
 	text = (text.encode('ascii', 'ignore')).decode("utf-8")
 	text= re.sub(' +', ' ', text)
 	sections = re.findall(r"@&#\w+@&#", text)
@@ -35,7 +48,25 @@ def gen_dict(uploaded_file):
 	del d['@&#REFERENCES@&#'] 
 	return d
 
+def read_file(filename):
 
+	f = open(filename, 'r', encoding="utf-8")
+	text = str(f.read())
+	f.close()
+	text = re.sub("\n", " ", text)
+	text=re.sub("\t"," ",text)
+	text = (text.encode('ascii', 'ignore')).decode("utf-8")
+	text= re.sub(' +', ' ', text)
+	sections = re.findall(r"@&#\w+@&#", text)
+	main_title = re.findall(r'@&#MAIN-TITLE@&#(.*?)@&#', text, flags = re.I)
+
+	d={}
+	d['@&#MAIN-TITLE@&#']=re.findall(r'@&#MAIN-TITLE@&#(.*?)@&#', text, flags = re.I)
+	for i in sections:
+  		d[i]=re.findall(i+'(.*?)@&#', text,  flags = re.I)
+
+	del d['@&#REFERENCES@&#'] 
+	return d
 
 def summarize(d):
 
@@ -95,15 +126,28 @@ def PPTtoPDF(inputFileName, outputFileName, formatType = 32):
 def main():
 
 	st.title("Paper to PPT converter")
-	uploaded_file = st.file_uploader("Choose a file", type=['txt'])
-	if uploaded_file is not None:
-		d=gen_dict(uploaded_file)
+	#uploaded_file = st.file_uploader("Choose a file", type=['txt'])
+	filename = file_selector()
+	st.write('You selected `%s`' % filename)
+	d=read_file(filename)
 		#print(d)
-		dclean=summarize(d)
+	dclean=summarize(d)
 		#print(dclean)
-		filename=st.text_input("Enter File Path to save PPT")
+	filename=st.text_input("Enter File Path to save PPT")
+	if(filename!=''):
 		create_ppt(dclean,filename)
 		st.header("pptx file saved.")
+
+	#if uploaded_file is not None:
+		#d=gen_dict(uploaded_file)
+		#print(d)
+		#dclean=summarize(d)
+		#print(dclean)
+		#filename=st.text_input("Enter File Path to save PPT")
+		#if(filename!=''):
+			#create_ppt(dclean,filename)
+			#st.header("pptx file saved.")
+
 		#inputFileName='/Users/Manam/fyp/PPTs/'+filename+'.pptx'
 		#outputFileName='/Users/Manam/fyp/PDFs/'+filename+'.pdf'
 		#inputFileName=filename
