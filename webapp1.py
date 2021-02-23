@@ -19,7 +19,7 @@ model = Summarizer('distilbert-base-uncased')
 
 def file_selector(folder_path='./Parsed_Papers'):
     filenames = os.listdir(folder_path)
-    selected_filename = st.selectbox('Select a file', filenames)
+    selected_filename = st.sidebar.selectbox('Select a file', filenames)
     return os.path.join(folder_path, selected_filename)
 
 def gen_dict(uploaded_file):
@@ -120,7 +120,7 @@ def main():
 
 	st.sidebar.title("Paper to PPT converter")
 	filename = file_selector()
-	st.write('You selected `%s`' % filename)
+	st.sidebar.write('You selected `%s`' % filename)
 	d=read_file(filename)
 	dclean=summarize(d)
 
@@ -145,6 +145,8 @@ def main():
 		with open(outputFileName,"rb") as f:
 			base64_pdf = base64.b64encode(f.read()).decode('utf-8')
 		pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="700" height="1000" type="application/pdf">'
+		selection = st.sidebar.radio("Select voice", ['Muvazima','Srikanth','Amitabh Bachchan'])
+
 		st.markdown(pdf_display, unsafe_allow_html=True)
 
 if __name__ == "__main__":
